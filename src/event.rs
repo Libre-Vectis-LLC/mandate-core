@@ -1,5 +1,5 @@
-use crate::ids::{EventId, KeyImage, RingHash};
-use indexmap::IndexMap;
+use crate::ids::{EventId, KeyImage, RingHash, ContentHash, MasterPublicKey};
+use crate::crypto::ciphertext::Ciphertext;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -25,15 +25,12 @@ pub enum EventType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Ciphertext(pub Vec<u8>);
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Poll {
     pub group_id: String,
     pub ring_hash: RingHash,
     pub poll_id: String,
     pub questions: Vec<PollQuestion>,
-    pub created_at: String,
+    pub created_at: u64,
     pub instructions: Option<Ciphertext>,
 }
 
@@ -45,9 +42,15 @@ pub struct PollQuestion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PollOption {
+    pub id: String,
+    pub text: Ciphertext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PollQuestionKind {
-    SingleChoice { options: IndexMap<String, Ciphertext> },
-    MultipleChoice { options: IndexMap<String, Ciphertext>, max: u32 },
+    SingleChoice { options: Vec<PollOption> },
+    MultipleChoice { options: Vec<PollOption>, max: u32 },
     FillInTheBlank,
 }
 
@@ -56,6 +59,7 @@ pub struct Vote {
     pub group_id: String,
     pub ring_hash: RingHash,
     pub poll_id: String,
+    pub poll_hash: ContentHash,
     pub selections: Vec<VoteSelection>,
 }
 
@@ -72,16 +76,20 @@ pub struct AnonymousMessage {
     pub ring_hash: RingHash,
     pub message_id: String,
     pub content: Ciphertext,
-    pub sent_at: String,
+    pub sent_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RingUpdate {
     pub group_id: String,
     pub ring_hash: RingHash,
-    // Simplified for core definition
-    pub added_public_keys: Vec<Vec<u8>>,
-    pub removed_indices: Vec<u32>,
+    pub operations: Vec<RingOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RingOperation {
+    AddMember { public_key: MasterPublicKey },
+    RemoveMember { public_key: MasterPublicKey },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -89,6 +97,14 @@ pub struct BanCreate {
     pub group_id: String,
     pub target: KeyImage,
     pub reason: String,
+    pub scope: BanScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BanScope {
+    BanPost,
+    BanVote,
+    BanAll,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,5 +117,4 @@ pub struct BanRevoke {
 pub struct ProofOfInnocence {
     pub group_id: String,
     pub historical_ring_hash: RingHash,
-    pub proof: Vec<u8>,
 }
