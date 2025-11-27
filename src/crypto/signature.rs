@@ -12,28 +12,46 @@ use nazgul::keypair::KeyPair;
 use nazgul::ring::{Ring, RingContext, RingHash};
 use nazgul::traits::Derivable;
 use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
+use serde_json;
 use sha3::Sha3_512;
 use thiserror::Error;
 
 /// Storage mode of the contextual signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StorageMode {
     Compact,
     Archival,
 }
 
 /// Semantic role of the signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureKind {
     Anonymous,
     Authoritative,
 }
 
 /// Unified signature for mandate events.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Signature {
     pub kind: SignatureKind,
     pub proof: ContextualBLSAG,
+}
+
+impl PartialEq for Signature {
+    fn eq(&self, other: &Self) -> bool {
+        if self.kind != other.kind {
+            return false;
+        }
+        serialize_proof(&self.proof) == serialize_proof(&other.proof)
+    }
+}
+
+impl Eq for Signature {}
+
+fn serialize_proof(proof: &ContextualBLSAG) -> Option<Vec<u8>> {
+    // Serde-based comparison to avoid implementing equality for third-party types.
+    serde_json::to_vec(proof).ok()
 }
 
 impl Signature {

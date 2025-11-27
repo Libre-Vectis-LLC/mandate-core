@@ -1,4 +1,5 @@
 use crate::crypto::ciphertext::Ciphertext;
+use crate::crypto::signature::Signature;
 use crate::ids::{ContentHash, EventId, KeyImage, MasterPublicKey, RingHash};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +11,7 @@ pub struct Event {
     pub processed_at: u64,
     pub serialization_version: u8,
     pub event_type: EventType,
-    pub signature: Option<Vec<u8>>, // Placeholder for Nazgul signature
+    pub signature: Option<Signature>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,4 +118,59 @@ pub struct BanRevoke {
 pub struct ProofOfInnocence {
     pub group_id: String,
     pub historical_ring_hash: RingHash,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
+    use crate::hashing::ring_hash_sha3_256;
+    use nazgul::keypair::KeyPair;
+    use nazgul::ring::Ring;
+    use rand::rngs::OsRng;
+
+    fn make_ring(size: usize) -> (KeyPair, Ring) {
+        let mut csprng = OsRng;
+        let signer = KeyPair::generate(&mut csprng);
+        let mut members: Vec<_> = (0..size - 1)
+            .map(|_| *KeyPair::generate(&mut csprng).public())
+            .collect();
+        members.push(*signer.public());
+        (signer, Ring::new(members))
+    }
+
+    #[test]
+    fn event_signature_roundtrip() {
+        let (signer, ring) = make_ring(4);
+        let msg = b"audit";
+        let sig = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign");
+
+        let event = Event {
+            id: EventId([1u8; 32]),
+            previous_id: EventId([0u8; 32]),
+            group_id: "g".into(),
+            processed_at: 123,
+            serialization_version: 1,
+            event_type: EventType::MessageCreate(AnonymousMessage {
+                group_id: "g".into(),
+                ring_hash: ring_hash_sha3_256(&ring),
+                message_id: "m1".into(),
+                content: Ciphertext(b"hello".to_vec()),
+                sent_at: 123,
+            }),
+            signature: Some(sig),
+        };
+
+        let json = serde_json::to_string(&event).expect("serialize");
+        let decoded: Event = serde_json::from_str(&json).expect("deserialize");
+        let sig = decoded.signature.expect("signature present");
+        assert!(sig.verify(Some(&ring), msg));
+    }
 }
