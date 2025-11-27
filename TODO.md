@@ -1,8 +1,18 @@
-# Mandate Core TODO (API-first, EE-ready)
+# Mandate Core TODO (API-first, SHA3-first, audit-friendly)
 
-- [ ] P1 Crypto abstraction: define signature enum (anonymous vs authoritative), Nazgul key-image helpers, and session/master key derivation API surface; keep implementations pure and panic-free.
-- [ ] P1 State/cache view models: structs for `Group`, `Member` (with status), `AnonymousAccount` quotas, `BanRecord`, and `RingBanInfo`; outline pure reducers that apply `EventType` deltas to these views for high read throughput.
-- [ ] P1 High-concurrency log API: sketch traits for append-only event log, ring snapshot, and ban index (`EventStore`, `RingView`, `BanIndex`) with optimistic append tokens, group-based sharding hints, and zero-copy read views (`Arc<[u8]>`/slices) for EE latency budgets.
-- [ ] P1 Hash policy & helpers: standardize on SHA3-256 for event/payload/ring hashes (only fall back to SHA3-512 when digest extension is strictly required); provide helpers for compressed Ristretto bytes, ciphertext digests, ring hash from ordered member list, and poll hash from canonical event strings; keep algorithms `no_std` friendly and bench-ready.
-- [ ] P2 Testing scaffold: property-based tests for deterministic serialization/hashing (aligned with SHA3-256 policy), golden vectors for genesis id/ring hash, and concurrency-safety apply tests (single-threaded runner acceptable for now).
-- [ ] P2 Documentation: expand `lib.rs` docs to spell out event-chain rules, determinism requirements, hash policy, and how storage/backends should consume the core in enterprise deployments.
+## Completed
+- [x] SHA3-first hashing helpers with `Hash256`/`Hash512`; ring consensus hash via `nazgul` (SHA3-256 default, SHA3-512 only when needed).
+- [x] Contextual BLSAG wrapper: `SignatureKind` (anonymous/authoritative), compact/archival, `MasterKeypair` ring-context derivation (SHA3-512); `KeyImage` kept uncompressed.
+- [x] WASM path: nazgul pinned to wasm-capable rev; `getrandom` wasm_js enabled.
+
+## P1 (must-have for MVP)
+- [ ] Event signing integration (audit-focused): replace `Event.signature: Option<Vec<u8>>` with strong `Signature` + Serde; verification API must accept external ring for compact mode. Event chain is for audit (not full state replay), so keep payload canonical and self-verifiable.
+- [ ] Ring history & replay helpers: define ring-delta records and helpers to reconstruct rings from `RingHash` (ordered members) to support compact signatures and ring-history queries while keeping storage compact.
+- [ ] Storage traits (memory/Postgres/append-only chain): `EventStore` append with optimistic token + shard hint; `RingView` for resolving rings by token/hash; `BanIndex` optional lookup. Zero-copy reads (`Arc<[u8]>`/slices), deterministic ordering; state replay not required except for ring reconstruction.
+- [ ] Hash/serialization policy: canonical JSON (sorted keys, no whitespace) + domain-separation prefixes. Keep SHA3-256 default, SHA3-512 when length is required; introduce pluggable digest trait so future BLAKE3 swap is non-breaking.
+- [ ] Ring/poll helpers: ordered member-list ring hash, canonical poll hash (ID-sorted), ciphertext digest helpers; avoid unnecessary Ristretto compression/expansion.
+- [ ] PoW: replace stub `verify_pow` with rspow (equix) based verifier; parameterize difficulty/nonce; pure/no I/O; aligned to SHA3-first policy.
+
+## P2 (quality & docs)
+- [ ] Tests: property-based determinism for hashing/serialization; golden vectors (genesis ID, ring hash, poll hash); signature Serde round-trip; PoW vectors; lightweight wasm32 check.
+- [ ] Docs: expand `lib.rs`/README to spell out audit chain rules, ring reconstruction contract, hash policy, storage concurrency (optimistic token), WASM notes, and digest-pluggability for future BLAKE3.

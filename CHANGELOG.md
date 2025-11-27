@@ -1,3 +1,10 @@
+d415a596fb7b779f0b12f9d00bb0fdb45bb0ed2c
+- Rewrote TODO roadmap: SHA3-first, future-digest-pluggable, clarified P1 tasks (signature integration, state reducers, storage traits, PoW) and P2 tests/docs.
+- Kept blake3 out by default while reserving abstraction point for future swap; no code changes beyond planning document.
+
+dTODO
+- Rewrote TODO after reset: audit-focused event chain (no full state replay), ring history reconstruction helpers, storage traits for memory/Postgres/append-only backends, SHA3-first with future digest plug point, PoW to use rspow equix.
+
 dcc705da9c38f85864894b7f041f68150ff4462d
 - Trimmed TODO backlog by removing completed P0 items and restating remaining work at P1/P2.
 - Standardized hash policy to prefer SHA3-256 (use SHA3-512 only when digest length is strictly needed); aligns helpers/tests/docs tasks accordingly.
