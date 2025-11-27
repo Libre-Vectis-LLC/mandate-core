@@ -6,43 +6,91 @@
 //!   using nazgul's `Ring::consensus_hash`.
 
 use crate::crypto::ciphertext::Ciphertext;
-use crate::ids::ContentHash;
+use crate::ids::{ContentHash, RingHash};
 use nazgul::ring::Ring;
 use sha3::{Digest, Sha3_256, Sha3_512};
 
-/// 256-bit hash output type.
-pub type Hash256 = [u8; 32];
-/// 512-bit hash output type.
-pub type Hash512 = [u8; 64];
+/// 256-bit hash output type (newtype for stronger typing).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Hash256(pub [u8; 32]);
+
+impl Hash256 {
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> [u8; 32] {
+        self.0
+    }
+}
+
+impl From<[u8; 32]> for Hash256 {
+    fn from(value: [u8; 32]) -> Self {
+        Self(value)
+    }
+}
+
+impl AsRef<[u8; 32]> for Hash256 {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// 512-bit hash output type (newtype for stronger typing).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Hash512(pub [u8; 64]);
+
+impl Hash512 {
+    pub fn as_bytes(&self) -> &[u8; 64] {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> [u8; 64] {
+        self.0
+    }
+}
+
+impl From<[u8; 64]> for Hash512 {
+    fn from(value: [u8; 64]) -> Self {
+        Self(value)
+    }
+}
+
+impl AsRef<[u8; 64]> for Hash512 {
+    fn as_ref(&self) -> &[u8; 64] {
+        &self.0
+    }
+}
 
 /// Hash arbitrary bytes with SHA3-256.
 pub fn sha3_256_bytes(data: impl AsRef<[u8]>) -> Hash256 {
     let mut hasher = Sha3_256::new();
     hasher.update(data);
-    hasher.finalize().into()
+    Hash256(hasher.finalize().into())
 }
 
 /// Hash arbitrary bytes with SHA3-512 (use only when digest extension is required).
 pub fn sha3_512_bytes(data: impl AsRef<[u8]>) -> Hash512 {
     let mut hasher = Sha3_512::new();
     hasher.update(data);
-    hasher.finalize().into()
+    Hash512(hasher.finalize().into())
 }
 
 /// Compute a `ContentHash` for plaintext bytes using SHA3-256.
 pub fn content_hash_bytes(data: impl AsRef<[u8]>) -> ContentHash {
-    ContentHash(sha3_256_bytes(data))
+    ContentHash(sha3_256_bytes(data).into_inner())
 }
 
 /// Compute a `ContentHash` over an encrypted payload.
 pub fn content_hash_ciphertext(ciphertext: &Ciphertext) -> ContentHash {
-    ContentHash(sha3_256_bytes(&ciphertext.0))
+    ContentHash(sha3_256_bytes(&ciphertext.0).into_inner())
 }
 
 /// Derive a deterministic ring hash using nazgul's consensus hash with SHA3-256.
 /// The underlying `Ring` already sorts members, so the result is order-invariant.
-pub fn ring_hash_sha3_256(ring: &Ring) -> Hash256 {
-    ring.consensus_hash::<Sha3_256>().into()
+pub fn ring_hash_sha3_256(ring: &Ring) -> RingHash {
+    let bytes: [u8; 32] = ring.consensus_hash::<Sha3_256>().into();
+    RingHash(bytes)
 }
 
 #[cfg(test)]
