@@ -2,6 +2,10 @@ d415a596fb7b779f0b12f9d00bb0fdb45bb0ed2c
 - Rewrote TODO roadmap: SHA3-first, future-digest-pluggable, clarified P1 tasks (signature integration, state reducers, storage traits, PoW) and P2 tests/docs.
 - Kept blake3 out by default while reserving abstraction point for future swap; no code changes beyond planning document.
 
+c5d5ba876604271c8c7938ff0cf801726c2bd92b7
+- Embedded strong `Signature` type into `Event` (serde-enabled) and added audit-focused round-trip test using contextual BLSAG (compact mode with external ring).
+- Marked event-signing TODO as complete; kept ring hash helper for compact verification and avoided key-image compression changes.
+
 51fada2009f7c95c8c37c2f10129a63f17f1c78f
 - Rewrote TODO after reset: audit-focused event chain (no full state replay), ring history reconstruction helpers, storage traits for memory/Postgres/append-only backends, SHA3-first with future digest plug point, PoW to use rspow equix.
 
