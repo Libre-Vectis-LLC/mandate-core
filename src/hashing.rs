@@ -6,8 +6,8 @@
 //!   using nazgul's `Ring::consensus_hash`.
 
 use crate::crypto::ciphertext::Ciphertext;
-use crate::ids::{ContentHash, RingHash};
-use nazgul::ring::Ring;
+use crate::ids::ContentHash;
+use nazgul::ring::{Ring, RingHash};
 use sha3::{Digest, Sha3_256, Sha3_512};
 
 /// 256-bit hash output type (newtype for stronger typing).

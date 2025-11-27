@@ -9,3 +9,7 @@ d29652cbd321042417dd786b075efb0a36921356
 - Switched hashing helpers to Newtype pattern (`Hash256`, `Hash512`) for stronger typing; ring hashing now returns `RingHash`.
 - Defaulted to nazgul main commit b41d0392… to pick up production consensus hash; SHA3-256 remains default with SHA3-512 as optional.
 - Adjusted helpers/tests accordingly; kept WASM-friendly, no I/O changes.
+e0341d6a21fae1de08e23a76cd90c2d5a58f3a6e
+- Added contextual signature abstraction: anonymous/authoritative wrapper over Nazgul `ContextualBLSAG` with compact/archival storage modes and SHA3-512 signing/verification.
+- Introduced `MasterKeypair` helper deriving session keys from ring hash (SHA3-512), exposed key images as strong `KeyImage` newtype, and provided ring-hash accessors.
+- Tests cover compact vs archival verification, deterministic derivation, and key-image extraction; fmt/clippy/tests all pass.

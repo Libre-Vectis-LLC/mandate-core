@@ -1,0 +1,195 @@
+//! Signature abstractions built on Nazgul `ContextualBLSAG`.
+//!
+//! - Uses Nazgul types directly (Ring, RingHash, ContextualBLSAG).
+//! - Derives session/current keys from master using ring hash (SHA3-256 for performance).
+//! - Exposes key images as `ids::KeyImage` (RistrettoPoint, uncompressed).
+//! - Keeps APIs pure and panic-free; validates signer membership before signing.
+
+use crate::hashing::ring_hash_sha3_256;
+use crate::ids::KeyImage;
+use nazgul::blsag::ContextualBLSAG;
+use nazgul::keypair::KeyPair;
+use nazgul::ring::{Ring, RingContext, RingHash};
+use nazgul::traits::Derivable;
+use rand::rngs::OsRng;
+use sha3::Sha3_512;
+use thiserror::Error;
+
+/// Storage mode of the contextual signature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageMode {
+    Compact,
+    Archival,
+}
+
+/// Semantic role of the signature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureKind {
+    Anonymous,
+    Authoritative,
+}
+
+/// Unified signature for mandate events.
+#[derive(Clone, Debug)]
+pub struct Signature {
+    pub kind: SignatureKind,
+    pub proof: ContextualBLSAG,
+}
+
+impl Signature {
+    /// Extract the key image (uncompressed Ristretto point).
+    pub fn key_image(&self) -> KeyImage {
+        self.proof.signature.key_image()
+    }
+
+    /// Verify with SHA3-512; external ring required for compact mode.
+    pub fn verify(&self, external_ring: Option<&Ring>, message: &[u8]) -> bool {
+        self.proof.verify::<Sha3_512>(external_ring, None, message)
+    }
+
+    pub fn ring_context(&self) -> &RingContext {
+        &self.proof.context
+    }
+
+    /// Ring hash associated with this signature (32-byte).
+    pub fn ring_hash(&self) -> RingHash {
+        match &self.proof.context {
+            RingContext::Compact(h) => h.to_owned(),
+            RingContext::Archival(ring) => ring_hash_sha3_256(ring),
+        }
+    }
+}
+
+/// Wrapper for the master keypair to derive session/current keys.
+#[derive(Clone, Debug)]
+pub struct MasterKeypair(pub KeyPair);
+
+impl MasterKeypair {
+    pub fn new(inner: KeyPair) -> Self {
+        Self(inner)
+    }
+
+    pub fn as_keypair(&self) -> &KeyPair {
+        &self.0
+    }
+
+    pub fn public(&self) -> &curve25519_dalek::ristretto::RistrettoPoint {
+        self.0.public()
+    }
+
+    /// Derive a session keypair using ring context (SHA3-512 per nazgul bound).
+    pub fn derive_for_ring_context(&self, ctx: &RingContext) -> KeyPair {
+        let rh = match ctx {
+            RingContext::Compact(h) => h.to_owned(),
+            RingContext::Archival(ring) => ring_hash_sha3_256(ring),
+        };
+        self.derive_for_context(&rh.0)
+    }
+
+    /// Derive using arbitrary context (SHA3-512).
+    pub fn derive_for_context(&self, derivation: &[u8]) -> KeyPair {
+        self.0.derive_child::<Sha3_512>(derivation)
+    }
+}
+
+/// Errors from signing helpers.
+#[derive(Debug, Error)]
+pub enum CryptoHelperError {
+    #[error("signer's public key not found in ring")]
+    SignerNotInRing,
+    #[error("nazgul error: {0}")]
+    Nazgul(#[from] anyhow::Error),
+}
+
+/// Sign a message using ContextualBLSAG in the requested storage mode.
+pub fn sign_contextual(
+    kind: SignatureKind,
+    storage: StorageMode,
+    signer: &KeyPair,
+    ring: &Ring,
+    message: &[u8],
+) -> Result<Signature, CryptoHelperError> {
+    if !ring.members().contains(signer.public()) {
+        return Err(CryptoHelperError::SignerNotInRing);
+    }
+
+    let proof = match storage {
+        StorageMode::Compact => {
+            ContextualBLSAG::sign_compact::<Sha3_512, OsRng>(*signer.secret(), ring, None, message)
+                .map_err(|e| CryptoHelperError::Nazgul(e.into()))?
+        }
+        StorageMode::Archival => {
+            ContextualBLSAG::sign_archival::<Sha3_512, OsRng>(*signer.secret(), ring, None, message)
+                .map_err(|e| CryptoHelperError::Nazgul(e.into()))?
+        }
+    };
+
+    Ok(Signature { kind, proof })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ring(size: usize) -> (KeyPair, Ring) {
+        let mut csprng = OsRng;
+        let signer = KeyPair::generate(&mut csprng);
+        let mut members: Vec<_> = (0..size - 1)
+            .map(|_| *KeyPair::generate(&mut csprng).public())
+            .collect();
+        members.push(*signer.public());
+        let ring = Ring::new(members);
+        (signer, ring)
+    }
+
+    #[test]
+    fn key_image_extracted() {
+        let (signer, ring) = make_ring(3);
+        let msg = b"hello";
+        let sig = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Archival,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign");
+        let ki = sig.key_image();
+        assert_eq!(ki.compress().to_bytes().len(), 32);
+        assert!(sig.verify(Some(&ring), msg));
+    }
+
+    #[test]
+    fn compact_signature_needs_ring() {
+        let (signer, ring) = make_ring(4);
+        let msg = b"compact";
+        let sig = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign");
+        assert!(!sig.verify(None, msg));
+        assert!(sig.verify(Some(&ring), msg));
+    }
+
+    #[test]
+    fn derive_for_ring_context_deterministic() {
+        let mut csprng = OsRng;
+        let master = MasterKeypair::new(KeyPair::generate(&mut csprng));
+        let ring_hash = RingHash([42u8; 32]);
+        let ctx = RingContext::Compact(ring_hash.to_owned());
+        let k1 = master.derive_for_ring_context(&ctx);
+        let k2 = master.derive_for_ring_context(&ctx);
+        assert_eq!(k1.public(), k2.public());
+
+        // Ensure derivation uses ring hash bytes (indirect check via Derivable trait)
+        let pub_from_master = master
+            .as_keypair()
+            .public()
+            .derive_child::<Sha3_512>(&ring_hash.0);
+        assert_eq!(k1.public(), &pub_from_master);
+    }
+}
