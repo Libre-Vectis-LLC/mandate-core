@@ -5,3 +5,7 @@ b72575f6618cab6df9f74b41d6c6b5e2a82d0dcc
 - Introduced `hashing` module with SHA3-256 as default and optional SHA3-512, covering byte, ciphertext, and nazgul ring consensus hashes.
 - Removed blake3 dependency; pinned nazgul to master (0808e847) to leverage production ring hashing and ordering invariants.
 - Added deterministic tests for SHA3 helpers and order-invariant ring hashing; no API surface changes elsewhere.
+d29652cbd321042417dd786b075efb0a36921356
+- Switched hashing helpers to Newtype pattern (`Hash256`, `Hash512`) for stronger typing; ring hashing now returns `RingHash`.
+- Defaulted to nazgul main commit b41d0392… to pick up production consensus hash; SHA3-256 remains default with SHA3-512 as optional.
+- Adjusted helpers/tests accordingly; kept WASM-friendly, no I/O changes.
