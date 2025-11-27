@@ -1,5 +1,5 @@
-use crate::ids::{EventId, KeyImage, RingHash, ContentHash, MasterPublicKey};
 use crate::crypto::ciphertext::Ciphertext;
+use crate::ids::{ContentHash, EventId, KeyImage, MasterPublicKey, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
