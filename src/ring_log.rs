@@ -99,21 +99,30 @@ impl RingDeltaLog {
             best.expect("non-empty anchor/target positions guaranteed by index lookups");
 
         if a_idx == t_idx {
+            // Anchor None means we started from empty ring; need to apply deltas up to target.
+            if anchor.is_none() {
+                for (_, delta) in self.entries.iter().take(t_idx + 1) {
+                    apply_delta(&mut ring, delta)?;
+                }
+            }
             return Ok(ring);
         }
 
+        let anchored = anchor.is_some();
+
         if a_idx < t_idx {
-            for (_, delta) in self.entries.iter().skip(a_idx + 1).take(t_idx - a_idx) {
+            // If no anchor was provided, the current ring may not correspond to any entry;
+            // include the delta at a_idx. When anchor exists, start after the anchor.
+            let start = if anchored { a_idx + 1 } else { a_idx };
+            let count = t_idx.saturating_sub(start) + 1;
+            for (_, delta) in self.entries.iter().skip(start).take(count) {
                 apply_delta(&mut ring, delta)?;
             }
         } else {
-            for (_, delta) in self
-                .entries
-                .iter()
-                .skip(t_idx + 1)
-                .take(a_idx - t_idx)
-                .rev()
-            {
+            // Backward replay uses inverse deltas; include a_idx when anchor is absent.
+            let start = if anchored { t_idx + 1 } else { t_idx };
+            let count = a_idx.saturating_sub(start) + 1;
+            for (_, delta) in self.entries.iter().skip(start).take(count).rev() {
                 apply_inverse_delta(&mut ring, delta)?;
             }
         }
@@ -218,5 +227,124 @@ mod tests {
         assert_eq!(restored.members().len(), 1);
 
         assert!(log.index.get(&ring_hash_sha3_256(&ring_at_h1)).is_some());
+    }
+
+    #[test]
+    fn founder_only_reconstruction() {
+        let founder = mpk(b"founder");
+        let log = RingDeltaLog::new(founder.clone()).expect("new log");
+
+        let ring = Ring::new(vec![point_from(&founder).unwrap()]);
+        let target_hash = ring_hash_sha3_256(&ring);
+
+        let reconstructed = log.reconstruct(&target_hash, None).expect("reconstruct");
+        assert_eq!(ring_hash_sha3_256(&reconstructed), target_hash);
+        assert_eq!(reconstructed.members().len(), 1);
+    }
+
+    #[test]
+    fn add_remove_add_replay() {
+        let founder = mpk(b"founder");
+        let member = mpk(b"member");
+        let mut log = RingDeltaLog::new(founder.clone()).unwrap();
+        let mut ring = Ring::new(vec![point_from(&founder).unwrap()]);
+
+        // 1. Add
+        log.append(&mut ring, RingDelta::Add(member.clone()))
+            .unwrap();
+        let hash_with_member = ring_hash_sha3_256(&ring);
+
+        // 2. Remove
+        log.append(&mut ring, RingDelta::Remove(member.clone()))
+            .unwrap();
+        assert_ne!(ring_hash_sha3_256(&ring), hash_with_member);
+
+        // 3. Add again
+        log.append(&mut ring, RingDelta::Add(member.clone()))
+            .unwrap();
+        let final_hash = ring_hash_sha3_256(&ring);
+
+        // Verify state consistency
+        assert_eq!(final_hash, hash_with_member);
+
+        // Reconstruct from scratch
+        let reconstructed = log.reconstruct(&final_hash, None).unwrap();
+        assert_eq!(ring_hash_sha3_256(&reconstructed), final_hash);
+        assert_eq!(reconstructed.members().len(), 2);
+    }
+
+    #[test]
+    fn error_paths() {
+        let founder = mpk(b"founder");
+        let log = RingDeltaLog::new(founder).unwrap();
+
+        // TargetNotFound
+        let fake_hash = RingHash([0xff; 32]);
+        let err = log.reconstruct(&fake_hash, None);
+        assert!(matches!(err, Err(RingLogError::TargetNotFound)));
+
+        // AnchorNotFound: use valid target but anchor not in index
+        let valid_target_hash = log.entries[0].0;
+        let alien_ring = Ring::new(vec![]);
+        let err = log.reconstruct(&valid_target_hash, Some(&alien_ring));
+        assert!(matches!(err, Err(RingLogError::AnchorNotFound)));
+    }
+
+    #[test]
+    fn empty_log_behavior() {
+        // Default log has empty entries/index
+        let log = RingDeltaLog::default();
+        let random_hash = RingHash([1u8; 32]);
+
+        // Should fail finding target
+        let err = log.reconstruct(&random_hash, None);
+        assert!(matches!(err, Err(RingLogError::TargetNotFound)));
+    }
+
+    #[test]
+    fn shortest_path_via_duplicates() {
+        let a = mpk(b"A");
+        let b = mpk(b"B");
+
+        // States: {A}(idx0) -> {A,B}(idx1) -> {A}(idx2) -> {A,B}(idx3)
+        let mut log = RingDeltaLog::new(a.clone()).unwrap();
+        let mut ring = Ring::new(vec![point_from(&a).unwrap()]);
+
+        log.append(&mut ring, RingDelta::Add(b.clone())).unwrap();
+        let hash_ab = ring_hash_sha3_256(&ring);
+
+        log.append(&mut ring, RingDelta::Remove(b.clone())).unwrap();
+        let _hash_a = ring_hash_sha3_256(&ring);
+
+        log.append(&mut ring, RingDelta::Add(b.clone())).unwrap();
+
+        // anchor = {A} hash_a, target = hash_ab (appears twice)
+        let anchor_ring = Ring::new(vec![point_from(&a).unwrap()]);
+        let reconstructed = log.reconstruct(&hash_ab, Some(&anchor_ring)).unwrap();
+
+        assert_eq!(ring_hash_sha3_256(&reconstructed), hash_ab);
+        assert_eq!(reconstructed.members().len(), 2);
+        assert!(reconstructed.members().contains(&point_from(&a).unwrap()));
+        assert!(reconstructed.members().contains(&point_from(&b).unwrap()));
+    }
+
+    #[test]
+    fn member_order_independence() {
+        let a = mpk(b"A");
+        let b = mpk(b"B");
+
+        // Log 1: {A} -> +B
+        let mut log1 = RingDeltaLog::new(a.clone()).unwrap();
+        let mut ring1 = Ring::new(vec![point_from(&a).unwrap()]);
+        log1.append(&mut ring1, RingDelta::Add(b.clone())).unwrap();
+        let hash1 = ring_hash_sha3_256(&ring1);
+
+        // Log 2: {B} -> +A
+        let mut log2 = RingDeltaLog::new(b.clone()).unwrap();
+        let mut ring2 = Ring::new(vec![point_from(&b).unwrap()]);
+        log2.append(&mut ring2, RingDelta::Add(a.clone())).unwrap();
+        let hash2 = ring_hash_sha3_256(&ring2);
+
+        assert_eq!(hash1, hash2, "member ordering must be canonical");
     }
 }
