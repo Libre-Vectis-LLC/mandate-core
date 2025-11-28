@@ -7,7 +7,7 @@
 //! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, ring_hash)`, `(master_pubkey, created_at)`, keyset pagination.
 
 use crate::ids::{EventId, RingHash, TenantId};
-use crate::ring_log::{apply_delta, RingDelta};
+use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
 use std::sync::Arc;
 
@@ -31,11 +31,11 @@ pub struct RingDeltaPath {
 impl RingDeltaPath {
     /// Replay the delta path onto an anchor ring, returning the final ring.
     /// Caller supplies the anchor ring whose hash must equal `from`.
-    pub fn apply(self, mut ring: Ring) -> Ring {
+    pub fn apply(self, mut ring: Ring) -> Result<Ring, RingLogError> {
         for delta in &self.deltas {
-            apply_delta(&mut ring, delta).expect("storage must only emit valid deltas");
+            apply_delta(&mut ring, delta)?;
         }
-        ring
+        Ok(ring)
     }
 }
 

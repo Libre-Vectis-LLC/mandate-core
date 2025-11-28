@@ -1,3 +1,6 @@
+c5ff6b42e16db7f06e691b8a245a0b7da2d69260
+- Make `RingDeltaPath::apply` fallible (`Result<Ring, RingLogError>`) to avoid panics if storage emits invalid deltas; reuse shared delta applier.
+
 02df4b7581953469ef5aea5aee2ea9a2c8ed4ebf
 - Refined storage traits: `EventStore` now returns `NotFound` instead of `Option`; `RingView` drops hash tuple & cache hook, adds shortest-path `ring_delta_path`. Introduced `RingDeltaPath` slice for incremental replay; removed `BanIndex` abstraction. `TenantId` newtype and `EventBytes`/`EventRecord` kept; Ulid serde enabled.
 
