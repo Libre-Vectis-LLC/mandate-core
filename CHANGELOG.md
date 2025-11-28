@@ -1,4 +1,4 @@
-c5ff6b42e16db7f06e691b8a245a0b7da2d69260
+fe7737c9f3089c31f381c6f1428dff07f3c04249
 - Make `RingDeltaPath::apply` fallible (`Result<Ring, RingLogError>`) to avoid panics if storage emits invalid deltas; reuse shared delta applier.
 
 02df4b7581953469ef5aea5aee2ea9a2c8ed4ebf
