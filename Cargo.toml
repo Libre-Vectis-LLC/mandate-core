@@ -14,7 +14,7 @@ hex = "0.4"
 base64 = "0.22"
 age = "0.10"
 curve25519-dalek = { version = "4.1", features = ["serde"] }
-nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "cbc6dffc947db2c5d5e0f36a38adced25ffd9fe9" }
+nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "dac22ff2da2c62efc34b872601b00e39e4d117f1" }
 sha3 = "0.10"
 rand = "0.8"
 

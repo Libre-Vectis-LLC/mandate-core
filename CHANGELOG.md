@@ -1,3 +1,11 @@
+03359b9c1f2af12b8b89be3f7f63d3523d3d3a7e
+- Refactored ring delta log to use nazgul `Ring.members` (public) with sorted members for deterministic hashes; switched point (de)serialization to `LocalByteConvertible` helpers and fixed shortest-path replay logic.
+- Bumped nazgul to b9aeb09 for the public members field; TODO reflects single-node append-only storage focus.
+
+df63059adf6d2b5f07d4d6d9e0cce4efcf1f0c1d
+- Added single-node ring delta log (`RingDeltaLog`) with shortest-path forward/backward replay to reconstruct rings by `RingHash`; deltas are add/remove master pubkey. Included tests for forward/backward replay; kept SHA3-256 ring hashing.
+- Updated TODO: ring history item completed; storage TODO now single-node append-only (no optimistic token).
+
 d415a596fb7b779f0b12f9d00bb0fdb45bb0ed2c
 - Rewrote TODO roadmap: SHA3-first, future-digest-pluggable, clarified P1 tasks (signature integration, state reducers, storage traits, PoW) and P2 tests/docs.
 - Kept blake3 out by default while reserving abstraction point for future swap; no code changes beyond planning document.
