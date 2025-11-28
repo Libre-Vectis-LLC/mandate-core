@@ -1,3 +1,6 @@
+pending
+- Refined storage traits: `EventStore` now returns `NotFound` instead of `Option`; `RingView` drops hash tuple & cache hook, adds shortest-path `ring_delta_path`. Introduced `RingDeltaPath` slice for incremental replay; removed `BanIndex` abstraction. `TenantId` newtype and `EventBytes`/`EventRecord` kept; Ulid serde enabled.
+
 ee08a12a94d0c7e9cbe1fe645b0b6b3e65c172e4
 - TODO updated with PostgreSQL-friendly storage guidance: multi-tenant single table, ring hash indexes, keyset pagination, stream replay from cached ring + delta window, and caching RingDeltaLog derived from events to balance cost/latency.
 

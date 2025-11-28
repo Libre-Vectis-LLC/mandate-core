@@ -131,7 +131,7 @@ impl RingDeltaLog {
     }
 }
 
-fn apply_delta(ring: &mut Ring, delta: &RingDelta) -> Result<(), RingLogError> {
+pub(crate) fn apply_delta(ring: &mut Ring, delta: &RingDelta) -> Result<(), RingLogError> {
     match delta {
         RingDelta::Add(pk) => {
             let point = point_from(pk)?;

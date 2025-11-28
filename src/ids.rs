@@ -16,3 +16,7 @@ pub type KeyImage = RistrettoPoint;
 pub struct MasterPublicKey(pub [u8; 32]);
 
 pub use ulid::Ulid;
+
+/// Multi-tenant identifier (one ring per paying tenant). Newtype to avoid stringly-typed usage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TenantId(pub Ulid);
