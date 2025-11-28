@@ -1,3 +1,6 @@
+ee08a12a94d0c7e9cbe1fe645b0b6b3e65c172e4
+- TODO updated with PostgreSQL-friendly storage guidance: multi-tenant single table, ring hash indexes, keyset pagination, stream replay from cached ring + delta window, and caching RingDeltaLog derived from events to balance cost/latency.
+
 e2788880482d84970a2ea663bd4c9961cc80bb63
 - Split P1 ring/poll helpers: ring history/replay stays done; poll hashing/digest helpers remain as TODO.
 - Clarified storage concurrency note: single-writer append, no optimistic tokens; SHA3-first stance unchanged.
