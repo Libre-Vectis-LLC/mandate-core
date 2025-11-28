@@ -10,9 +10,9 @@
 - [x] Ring history & replay helpers: define ring-delta records and helpers to reconstruct rings from `RingHash` (ordered members) to support compact signatures and ring-history queries while keeping storage compact.
 - [ ] Storage traits (memory/Postgres/append-only chain): `EventStore` append (single-node append-only), `RingView` for resolving rings by token/hash, `BanIndex` optional lookup. Zero-copy reads (`Arc<[u8]>`/slices), deterministic ordering; state replay not required except for ring reconstruction.
 - [ ] Hash/serialization policy: canonical JSON (sorted keys, no whitespace) + domain-separation prefixes. Keep SHA3-256 default, SHA3-512 when length is required; introduce pluggable digest trait so future BLAKE3 swap is non-breaking.
-- [ ] Ring/poll helpers: ordered member-list ring hash, canonical poll hash (ID-sorted), ciphertext digest helpers; avoid unnecessary Ristretto compression/expansion.
+- [ ] Poll helpers: canonical poll hash (ID-sorted), ciphertext digest helpers; avoid unnecessary Ristretto compression/expansion.
 - [ ] PoW: replace stub `verify_pow` with rspow (equix) based verifier; parameterize difficulty/nonce; pure/no I/O; aligned to SHA3-first policy.
 
 ## P2 (quality & docs)
 - [ ] Tests: property-based determinism for hashing/serialization; golden vectors (genesis ID, ring hash, poll hash); signature Serde round-trip; PoW vectors; lightweight wasm32 check.
-- [ ] Docs: expand `lib.rs`/README to spell out audit chain rules, ring reconstruction contract, hash policy, storage concurrency (optimistic token), WASM notes, and digest-pluggability for future BLAKE3.
+- [ ] Docs: expand `lib.rs`/README to spell out audit chain rules, ring reconstruction contract, hash policy, storage concurrency model (single-writer append, no optimistic tokens), WASM notes, and digest-pluggability for future BLAKE3.
