@@ -93,7 +93,10 @@ impl RingDeltaLog {
                 }
             }
         }
-        let (a_idx, t_idx, _) = best.unwrap();
+        // `best` is always set because both `target_positions` and `anchor_positions`
+        // are non-empty: we validated the hashes via the index lookups above.
+        let (a_idx, t_idx, _) =
+            best.expect("non-empty anchor/target positions guaranteed by index lookups");
 
         if a_idx == t_idx {
             return Ok(ring);
@@ -165,16 +168,27 @@ mod tests {
     #[test]
     fn reconstruct_chooses_shortest_path_forward() {
         let founder = nazgul::scalar::RistrettoPoint::hash_from_bytes::<Sha3_512>(b"a");
-        let mut log = RingDeltaLog::new(MasterPublicKey(founder.to_bytes())).unwrap();
+        let mut log = RingDeltaLog::new(MasterPublicKey(founder.to_bytes()))
+            .expect("founder add cannot fail");
         let mut ring = Ring::new(vec![founder]);
 
         // Add b, c, remove b (b added again later)
-        let (_h1, _) = log.append(&mut ring, RingDelta::Add(mpk(b"b"))).unwrap();
-        let (h2, _) = log.append(&mut ring, RingDelta::Add(mpk(b"c"))).unwrap();
-        let (_h3, _) = log.append(&mut ring, RingDelta::Remove(mpk(b"b"))).unwrap();
-        let (_h4, _) = log.append(&mut ring, RingDelta::Add(mpk(b"b"))).unwrap();
+        let (_h1, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"b")))
+            .expect("append must succeed in test fixture");
+        let (h2, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"c")))
+            .expect("append must succeed in test fixture");
+        let (_h3, _) = log
+            .append(&mut ring, RingDelta::Remove(mpk(b"b")))
+            .expect("append must succeed in test fixture");
+        let (_h4, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"b")))
+            .expect("append must succeed in test fixture");
 
-        let restored = log.reconstruct(&h2, Some(&ring)).unwrap();
+        let restored = log
+            .reconstruct(&h2, Some(&ring))
+            .expect("reconstruct should succeed in test fixture");
         let ring_hash = ring_hash_sha3_256(&restored);
         assert_eq!(ring_hash, h2);
         assert_eq!(restored.members().len(), 3);
@@ -184,16 +198,21 @@ mod tests {
     fn reconstruct_backward_path() {
         let genesis_point = nazgul::scalar::RistrettoPoint::hash_from_bytes::<Sha3_512>(b"a");
         let genesis = Ring::new(vec![genesis_point]);
-        let mut log = RingDeltaLog::new(MasterPublicKey(genesis_point.to_bytes())).unwrap();
+        let mut log = RingDeltaLog::new(MasterPublicKey(genesis_point.to_bytes()))
+            .expect("founder add cannot fail");
         let mut ring = genesis.clone();
 
-        let (_h_anchor, _) = log.append(&mut ring, RingDelta::Add(mpk(b"b"))).unwrap();
+        let (_h_anchor, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"b")))
+            .expect("append must succeed in test fixture");
         let ring_at_h1 = ring.clone();
-        let (_h2, _) = log.append(&mut ring, RingDelta::Add(mpk(b"c"))).unwrap();
+        let (_h2, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"c")))
+            .expect("append must succeed in test fixture");
 
         let restored = log
             .reconstruct(&ring_hash_sha3_256(&genesis), Some(&ring_at_h1))
-            .unwrap();
+            .expect("reconstruct should succeed in test fixture");
         let ring_hash = ring_hash_sha3_256(&restored);
         assert_eq!(ring_hash, ring_hash_sha3_256(&genesis));
         assert_eq!(restored.members().len(), 1);
