@@ -1,3 +1,7 @@
+e2788880482d84970a2ea663bd4c9961cc80bb63
+- Split P1 ring/poll helpers: ring history/replay stays done; poll hashing/digest helpers remain as TODO.
+- Clarified storage concurrency note: single-writer append, no optimistic tokens; SHA3-first stance unchanged.
+
 03359b9c1f2af12b8b89be3f7f63d3523d3d3a7e
 - Refactored ring delta log to use nazgul `Ring.members` (public) with sorted members for deterministic hashes; switched point (de)serialization to `LocalByteConvertible` helpers and fixed shortest-path replay logic.
 - Bumped nazgul to b9aeb09 for the public members field; TODO reflects single-node append-only storage focus.
