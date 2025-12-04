@@ -10,7 +10,7 @@
 - [x] Ring history & replay helpers: define ring-delta records and helpers to reconstruct rings from `RingHash` (ordered members) to support compact signatures and ring-history queries while keeping storage compact.
 - [x] Storage traits (memory/Postgres/append-only chain): `EventStore` append (single-node append-only, multi-tenant single table). `RingView` resolves rings by hash with cache hooks; `BanIndex` optional lookup. Postgres-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_token, ring_hash)`, `(master_pubkey, created_at)`; keyset pagination; avoid loading full 10^5-member rings—stream replay from nearest cached ring + delta window. RingDeltaLog derivable from Events; consider materialized cache for hot rings to balance cost vs. latency. Zero-copy reads (`Arc<[u8]>`/slices), deterministic ordering; no full-state replay beyond ring reconstruction.
 - [x] Hash/serialization policy: canonical JSON (sorted keys, no whitespace) + domain-separation prefixes. Keep SHA3-256 default, SHA3-512 when length is required; introduce pluggable digest trait so future BLAKE3 swap is non-breaking.
-- [ ] Poll helpers: canonical poll hash (ID-sorted), ciphertext digest helpers; avoid unnecessary Ristretto compression/expansion.
+- [x] Poll helpers: canonical poll hash (ID-sorted), ciphertext digest helpers; avoid unnecessary Ristretto compression/expansion.
 
 ## P2 (quality & docs)
 - [ ] Tests: property-based determinism for hashing/serialization; golden vectors (genesis ID, ring hash, poll hash); signature Serde round-trip; lightweight wasm32 check.
