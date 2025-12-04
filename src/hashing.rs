@@ -8,7 +8,10 @@
 use crate::crypto::ciphertext::Ciphertext;
 use crate::ids::ContentHash;
 use nazgul::ring::{Ring, RingHash};
+use serde::Serialize;
+use serde_json::Value;
 use sha3::{Digest, Sha3_256, Sha3_512};
+use thiserror::Error;
 
 /// 256-bit hash output type (newtype for stronger typing).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -93,10 +96,108 @@ pub fn ring_hash_sha3_256(ring: &Ring) -> RingHash {
     RingHash(bytes)
 }
 
+/// Domain prefixes for hashing distinct mandate payloads.
+pub mod domain {
+    /// Domain prefix for events.
+    pub const EVENT: &[u8] = b"mandate:event";
+    /// Domain prefix for polls.
+    pub const POLL: &[u8] = b"mandate:poll";
+    /// Domain prefix for votes.
+    pub const VOTE: &[u8] = b"mandate:vote";
+    /// Domain prefix for messages.
+    pub const MESSAGE: &[u8] = b"mandate:message";
+    /// Domain prefix for ring snapshots or deltas.
+    pub const RING: &[u8] = b"mandate:ring";
+}
+
+/// Errors from canonical serialization and hashing.
+#[derive(Debug, Error)]
+pub enum CanonicalHashError {
+    #[error("serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+/// Digest trait to allow future hash algorithm swaps (e.g., BLAKE3) without API breakage.
+pub trait DigestAlgorithm {
+    type Output;
+
+    /// Hash `domain || message`, returning the algorithm-specific output type.
+    fn hash_with_domain(domain: &[u8], message: &[u8]) -> Self::Output;
+}
+
+/// SHA3-256 digest algorithm (default).
+pub struct Sha3_256Digest;
+
+impl DigestAlgorithm for Sha3_256Digest {
+    type Output = Hash256;
+
+    fn hash_with_domain(domain: &[u8], message: &[u8]) -> Self::Output {
+        let mut hasher = Sha3_256::new();
+        hasher.update(domain);
+        hasher.update(message);
+        Hash256(hasher.finalize().into())
+    }
+}
+
+/// SHA3-512 digest algorithm for extended outputs.
+pub struct Sha3_512Digest;
+
+impl DigestAlgorithm for Sha3_512Digest {
+    type Output = Hash512;
+
+    fn hash_with_domain(domain: &[u8], message: &[u8]) -> Self::Output {
+        let mut hasher = Sha3_512::new();
+        hasher.update(domain);
+        hasher.update(message);
+        Hash512(hasher.finalize().into())
+    }
+}
+
+/// Serialize to canonical JSON (sorted keys, no whitespace) for stable hashing.
+pub fn canonical_json_bytes(value: &impl Serialize) -> Result<Vec<u8>, CanonicalHashError> {
+    let mut v = serde_json::to_value(value)?;
+    normalize_value(&mut v);
+    let mut buf = Vec::new();
+    serde_json::to_writer(&mut buf, &v)?;
+    Ok(buf)
+}
+
+fn normalize_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> =
+                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            map.clear();
+            for (k, mut v) in entries {
+                normalize_value(&mut v);
+                map.insert(k, v);
+            }
+        }
+        Value::Array(items) => {
+            for v in items.iter_mut() {
+                normalize_value(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Compute a canonical content hash using SHA3-256 with domain separation.
+pub fn canonical_content_hash_sha3_256(
+    domain: &[u8],
+    value: &impl Serialize,
+) -> Result<ContentHash, CanonicalHashError> {
+    let json = canonical_json_bytes(value)?;
+    let hash = Sha3_256Digest::hash_with_domain(domain, &json);
+    Ok(ContentHash(hash.into_inner()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use curve25519_dalek::ristretto::RistrettoPoint;
+    use serde::Serialize;
     use sha3::Sha3_512;
 
     fn point(label: &[u8]) -> RistrettoPoint {
@@ -133,5 +234,53 @@ mod tests {
             content_hash_ciphertext(&ct).0,
             content_hash_bytes(&payload).0
         );
+    }
+
+    #[derive(Serialize)]
+    struct DemoObj {
+        b: u8,
+        a: u8,
+    }
+
+    #[test]
+    fn canonical_json_sorts_keys_and_hashes() {
+        let obj1 = DemoObj { a: 1, b: 2 };
+        let obj2 = DemoObj { b: 2, a: 1 };
+
+        let j1 = canonical_json_bytes(&obj1).expect("json");
+        let j2 = canonical_json_bytes(&obj2).expect("json");
+        assert_eq!(j1, j2, "canonical JSON must be order independent");
+
+        let h1 = canonical_content_hash_sha3_256(domain::EVENT, &obj1).expect("hash");
+        let h2 = canonical_content_hash_sha3_256(domain::EVENT, &obj2).expect("hash");
+        assert_eq!(h1, h2, "hash should ignore map insertion order");
+    }
+
+    #[test]
+    fn domain_separation_alters_hash() {
+        let obj = DemoObj { a: 7, b: 9 };
+        let h_event =
+            canonical_content_hash_sha3_256(domain::EVENT, &obj).expect("hash event domain");
+        let h_poll = canonical_content_hash_sha3_256(domain::POLL, &obj).expect("hash poll domain");
+        assert_ne!(h_event, h_poll, "domain separator must change digest");
+    }
+
+    #[derive(Serialize)]
+    struct WithArray {
+        items: Vec<u8>,
+    }
+
+    #[test]
+    fn arrays_preserve_order() {
+        let ascending = WithArray {
+            items: vec![1, 2, 3],
+        };
+        let descending = WithArray {
+            items: vec![3, 2, 1],
+        };
+
+        let h1 = canonical_content_hash_sha3_256(domain::EVENT, &ascending).expect("hash");
+        let h2 = canonical_content_hash_sha3_256(domain::EVENT, &descending).expect("hash");
+        assert_ne!(h1, h2, "array order must remain significant");
     }
 }
