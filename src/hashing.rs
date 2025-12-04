@@ -6,7 +6,11 @@
 //!   using nazgul's `Ring::consensus_hash`.
 
 use crate::crypto::ciphertext::Ciphertext;
-use crate::ids::ContentHash;
+use crate::event::{
+    AnonymousMessage, BanCreate, BanRevoke, Event, EventType, Poll, PollOption, PollQuestion,
+    PollQuestionKind, RingUpdate, Vote, VoteSelection,
+};
+use crate::ids::{ContentHash, EventId};
 use nazgul::ring::{Ring, RingHash};
 use serde::Serialize;
 use serde_json::Value;
@@ -191,6 +195,212 @@ pub fn canonical_content_hash_sha3_256(
     let json = canonical_json_bytes(value)?;
     let hash = Sha3_256Digest::hash_with_domain(domain, &json);
     Ok(ContentHash(hash.into_inner()))
+}
+
+/// Hash an event (excluding its signature) using canonical JSON and the EVENT domain.
+pub fn event_hash_sha3_256(event: &Event) -> Result<ContentHash, CanonicalHashError> {
+    let canonical = CanonicalEvent::from(event);
+    canonical_content_hash_sha3_256(domain::EVENT, &canonical)
+}
+
+/// Hash a poll with ID-sorted questions/options using the POLL domain.
+pub fn poll_hash_sha3_256(poll: &Poll) -> Result<ContentHash, CanonicalHashError> {
+    let canonical = CanonicalPoll::from(poll);
+    canonical_content_hash_sha3_256(domain::POLL, &canonical)
+}
+
+/// Hash a vote with ID-sorted selections/option IDs using the VOTE domain.
+pub fn vote_hash_sha3_256(vote: &Vote) -> Result<ContentHash, CanonicalHashError> {
+    let canonical = CanonicalVote::from(vote);
+    canonical_content_hash_sha3_256(domain::VOTE, &canonical)
+}
+
+#[derive(Serialize)]
+struct CanonicalEvent<'a> {
+    id: EventId,
+    previous_id: EventId,
+    group_id: &'a str,
+    processed_at: u64,
+    serialization_version: u8,
+    event_type: CanonicalEventType<'a>,
+}
+
+impl<'a> From<&'a Event> for CanonicalEvent<'a> {
+    fn from(event: &'a Event) -> Self {
+        Self {
+            id: event.id,
+            previous_id: event.previous_id,
+            group_id: &event.group_id,
+            processed_at: event.processed_at,
+            serialization_version: event.serialization_version,
+            event_type: CanonicalEventType::from(&event.event_type),
+        }
+    }
+}
+
+#[derive(Serialize)]
+enum CanonicalEventType<'a> {
+    PollCreate(CanonicalPoll<'a>),
+    VoteCast(CanonicalVote<'a>),
+    MessageCreate(&'a AnonymousMessage),
+    RingUpdate(&'a RingUpdate),
+    BanCreate(&'a BanCreate),
+    BanRevoke(&'a BanRevoke),
+    ProofOfInnocence(&'a crate::event::ProofOfInnocence),
+}
+
+impl<'a> From<&'a EventType> for CanonicalEventType<'a> {
+    fn from(value: &'a EventType) -> Self {
+        match value {
+            EventType::PollCreate(p) => CanonicalEventType::PollCreate(CanonicalPoll::from(p)),
+            EventType::VoteCast(v) => CanonicalEventType::VoteCast(CanonicalVote::from(v)),
+            EventType::MessageCreate(m) => CanonicalEventType::MessageCreate(m),
+            EventType::RingUpdate(r) => CanonicalEventType::RingUpdate(r),
+            EventType::BanCreate(b) => CanonicalEventType::BanCreate(b),
+            EventType::BanRevoke(b) => CanonicalEventType::BanRevoke(b),
+            EventType::ProofOfInnocence(p) => CanonicalEventType::ProofOfInnocence(p),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CanonicalPoll<'a> {
+    group_id: &'a str,
+    ring_hash: RingHash,
+    poll_id: &'a str,
+    questions: Vec<CanonicalPollQuestion<'a>>,
+    created_at: u64,
+    instructions: Option<&'a Ciphertext>,
+}
+
+impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
+    fn from(poll: &'a Poll) -> Self {
+        let mut questions: Vec<&'a PollQuestion> = poll.questions.iter().collect();
+        questions.sort_by(|a, b| a.question_id.cmp(&b.question_id));
+
+        let questions = questions
+            .into_iter()
+            .map(CanonicalPollQuestion::from)
+            .collect();
+
+        Self {
+            group_id: &poll.group_id,
+            ring_hash: poll.ring_hash,
+            poll_id: &poll.poll_id,
+            questions,
+            created_at: poll.created_at,
+            instructions: poll.instructions.as_ref(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CanonicalPollQuestion<'a> {
+    question_id: &'a str,
+    title: &'a Ciphertext,
+    kind: CanonicalPollQuestionKind<'a>,
+}
+
+impl<'a> From<&'a PollQuestion> for CanonicalPollQuestion<'a> {
+    fn from(q: &'a PollQuestion) -> Self {
+        Self {
+            question_id: &q.question_id,
+            title: &q.title,
+            kind: CanonicalPollQuestionKind::from(&q.kind),
+        }
+    }
+}
+
+#[derive(Serialize)]
+enum CanonicalPollQuestionKind<'a> {
+    SingleChoice {
+        options: Vec<CanonicalPollOption<'a>>,
+    },
+    MultipleChoice {
+        options: Vec<CanonicalPollOption<'a>>,
+        max: u32,
+    },
+    FillInTheBlank,
+}
+
+impl<'a> From<&'a PollQuestionKind> for CanonicalPollQuestionKind<'a> {
+    fn from(kind: &'a PollQuestionKind) -> Self {
+        match kind {
+            PollQuestionKind::SingleChoice { options } => Self::SingleChoice {
+                options: canonical_options(options),
+            },
+            PollQuestionKind::MultipleChoice { options, max } => Self::MultipleChoice {
+                options: canonical_options(options),
+                max: *max,
+            },
+            PollQuestionKind::FillInTheBlank => Self::FillInTheBlank,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CanonicalPollOption<'a> {
+    id: &'a str,
+    text: &'a Ciphertext,
+}
+
+fn canonical_options<'a>(options: &'a [PollOption]) -> Vec<CanonicalPollOption<'a>> {
+    let mut opts: Vec<&'a PollOption> = options.iter().collect();
+    opts.sort_by(|a, b| a.id.cmp(&b.id));
+    opts.into_iter()
+        .map(|o| CanonicalPollOption {
+            id: &o.id,
+            text: &o.text,
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct CanonicalVote<'a> {
+    group_id: &'a str,
+    ring_hash: RingHash,
+    poll_id: &'a str,
+    poll_hash: crate::ids::ContentHash,
+    selections: Vec<CanonicalVoteSelection<'a>>,
+}
+
+impl<'a> From<&'a Vote> for CanonicalVote<'a> {
+    fn from(v: &'a Vote) -> Self {
+        let mut selections: Vec<&'a VoteSelection> = v.selections.iter().collect();
+        selections.sort_by(|a, b| a.question_id.cmp(&b.question_id));
+
+        let selections = selections
+            .into_iter()
+            .map(CanonicalVoteSelection::from)
+            .collect();
+
+        Self {
+            group_id: &v.group_id,
+            ring_hash: v.ring_hash,
+            poll_id: &v.poll_id,
+            poll_hash: v.poll_hash,
+            selections,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CanonicalVoteSelection<'a> {
+    question_id: &'a str,
+    option_ids: Vec<&'a str>,
+    write_in: Option<&'a Ciphertext>,
+}
+
+impl<'a> From<&'a VoteSelection> for CanonicalVoteSelection<'a> {
+    fn from(sel: &'a VoteSelection) -> Self {
+        let mut option_ids: Vec<&'a str> = sel.option_ids.iter().map(String::as_str).collect();
+        option_ids.sort_unstable();
+        Self {
+            question_id: &sel.question_id,
+            option_ids,
+            write_in: sel.write_in.as_ref(),
+        }
+    }
 }
 
 #[cfg(test)]
