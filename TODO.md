@@ -13,5 +13,5 @@
 - [x] Poll helpers: canonical poll hash (ID-sorted), ciphertext digest helpers; avoid unnecessary Ristretto compression/expansion.
 
 ## P2 (quality & docs)
-- [ ] Tests: property-based determinism for hashing/serialization; golden vectors (genesis ID, ring hash, poll hash); signature Serde round-trip; lightweight wasm32 check.
-- [ ] Docs: expand `lib.rs`/README to spell out audit chain rules, ring reconstruction contract, hash policy, storage concurrency model (single-writer append, no optimistic tokens), WASM notes, and digest-pluggability for future BLAKE3.
+- [x] Tests: property-based determinism for hashing/serialization; golden vectors (genesis ID, ring hash, poll hash); signature Serde round-trip; lightweight wasm32 check.
+- [x] Docs: expand `lib.rs`/README to spell out audit chain rules, ring reconstruction contract, hash policy, storage concurrency model (single-writer append, no optimistic tokens), WASM notes, and digest-pluggability for future BLAKE3.

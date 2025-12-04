@@ -18,5 +18,8 @@ nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "dac22ff2
 sha3 = "0.10"
 rand = "0.8"
 
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }

@@ -210,4 +210,24 @@ mod tests {
             .derive_child::<Sha3_512>(&ring_hash.0);
         assert_eq!(k1.public(), &pub_from_master);
     }
+
+    #[test]
+    fn signature_serde_roundtrip_preserves_verification() {
+        let (signer, ring) = make_ring(4);
+        let msg = b"serde";
+        let sig = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign");
+
+        let json = serde_json::to_string(&sig).expect("serialize");
+        let de: Signature = serde_json::from_str(&json).expect("deserialize");
+        assert!(de.verify(Some(&ring), msg));
+        assert_eq!(sig.kind, de.kind);
+        assert_eq!(sig.ring_hash(), de.ring_hash());
+    }
 }

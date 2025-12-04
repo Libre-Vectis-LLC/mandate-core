@@ -407,6 +407,8 @@ impl<'a> From<&'a VoteSelection> for CanonicalVoteSelection<'a> {
 mod tests {
     use super::*;
     use curve25519_dalek::ristretto::RistrettoPoint;
+    use hex::encode;
+    use proptest::prelude::*;
     use serde::Serialize;
     use sha3::Sha3_512;
 
@@ -492,5 +494,97 @@ mod tests {
         let h1 = canonical_content_hash_sha3_256(domain::EVENT, &ascending).expect("hash");
         let h2 = canonical_content_hash_sha3_256(domain::EVENT, &descending).expect("hash");
         assert_ne!(h1, h2, "array order must remain significant");
+    }
+
+    proptest! {
+        #[test]
+        fn canonical_json_order_invariant_prop(kvs in prop::collection::hash_map("[a-z]{1,6}", 0u8..16u8, 1..8)) {
+            // Build two maps with different insertion orders but same entries.
+            let mut map_a = serde_json::Map::new();
+            for (k, v) in kvs.iter() {
+                map_a.insert(k.clone(), Value::from(*v as u64));
+            }
+            let mut keys: Vec<_> = kvs.keys().cloned().collect();
+            keys.reverse();
+            let mut map_b = serde_json::Map::new();
+            for k in keys {
+                let v = kvs.get(&k).unwrap();
+                map_b.insert(k.clone(), Value::from(*v as u64));
+            }
+
+            let a = canonical_json_bytes(&Value::Object(map_a)).expect("canon a");
+            let b = canonical_json_bytes(&Value::Object(map_b)).expect("canon b");
+            prop_assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn golden_content_hash() {
+        let h = content_hash_bytes(b"mandate");
+        assert_eq!(
+            encode(h.0),
+            "5baed7d21dfe60b2a6bc50770f83d4c6e3ded56bb474784a1b7847c8c83c0dc2"
+        );
+    }
+
+    #[test]
+    fn golden_ring_hash() {
+        let p1 = point(b"member-a");
+        let p2 = point(b"member-b");
+        let ring = Ring::new(vec![p1, p2]);
+        let h = ring_hash_sha3_256(&ring);
+        assert_eq!(
+            encode(h.0),
+            "5fa7ac38764b3f2222db3881b8272804fefaed7dca731d49f0e70d9f5ed792b5"
+        );
+    }
+
+    #[test]
+    fn golden_poll_hash() {
+        let poll = PollFixture::poll();
+        let h = poll_hash_sha3_256(&poll).expect("hash poll");
+        assert_eq!(
+            encode(h.0),
+            "ed0d986896a3e66e951c4d36167b7a120617a2dfb34cea130784410a6c687140"
+        );
+    }
+
+    #[derive(Clone)]
+    struct PollFixture;
+
+    impl PollFixture {
+        fn poll() -> crate::event::Poll {
+            crate::event::Poll {
+                group_id: "g".into(),
+                ring_hash: RingHash([0x11; 32]),
+                poll_id: "poll-1".into(),
+                created_at: 42,
+                instructions: Some(Ciphertext(b"how-to".to_vec())),
+                questions: vec![
+                    crate::event::PollQuestion {
+                        question_id: "q1".into(),
+                        title: Ciphertext(b"title".to_vec()),
+                        kind: crate::event::PollQuestionKind::MultipleChoice {
+                            options: vec![
+                                crate::event::PollOption {
+                                    id: "b".into(),
+                                    text: Ciphertext(b"opt-b".to_vec()),
+                                },
+                                crate::event::PollOption {
+                                    id: "a".into(),
+                                    text: Ciphertext(b"opt-a".to_vec()),
+                                },
+                            ],
+                            max: 2,
+                        },
+                    },
+                    crate::event::PollQuestion {
+                        question_id: "q2".into(),
+                        title: Ciphertext(b"second".to_vec()),
+                        kind: crate::event::PollQuestionKind::FillInTheBlank,
+                    },
+                ],
+            }
+        }
     }
 }
