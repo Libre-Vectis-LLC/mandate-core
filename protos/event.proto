@@ -1,0 +1,33 @@
+syntax = "proto3";
+package mandate.v1;
+
+service EventService {
+  // Push a signed event to the server
+  rpc PushEvent (PushEventRequest) returns (PushEventResponse);
+  
+  // Stream events for a group, starting from a sequence or cursor
+  rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
+}
+
+message PushEventRequest {
+  // Canonical serialized event (including signature)
+  // We use bytes to ensure exact preservation of the signed content.
+  // Server will deserialize to validate.
+  bytes event_bytes = 1; 
+}
+
+message PushEventResponse {
+  string event_id = 1; // ULID
+  int64 sequence_no = 2; // Assigned sequence number
+}
+
+message StreamEventsRequest {
+  string group_id = 1;
+  int64 start_sequence_no = 2; // Exclusive (start > this)
+  uint32 limit = 3;
+}
+
+message StreamEventsResponse {
+  bytes event_bytes = 1;
+  int64 sequence_no = 2;
+}
