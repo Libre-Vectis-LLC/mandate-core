@@ -1,4 +1,4 @@
 pub mod manager;
 
 pub use manager::KeyManager;
-pub use manager::{derive_event_identity, decrypt_event_content, encrypt_event_content};
+pub use manager::{decrypt_event_content, derive_event_identity, encrypt_event_content};

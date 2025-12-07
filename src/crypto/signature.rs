@@ -82,6 +82,10 @@ impl Signature {
 #[derive(Clone, Debug)]
 pub struct MasterKeypair(pub KeyPair);
 
+/// Wrapper for derived/session keypairs (to differentiate from master).
+#[derive(Clone, Debug)]
+pub struct NazgulKeypair(pub KeyPair);
+
 impl MasterKeypair {
     pub fn new(inner: KeyPair) -> Self {
         Self(inner)
@@ -115,6 +119,8 @@ impl MasterKeypair {
 pub enum CryptoHelperError {
     #[error("signer's public key not found in ring")]
     SignerNotInRing,
+    #[error("signing key is not available (public-only keypair)")]
+    MissingSecret,
     #[error("nazgul error: {0}")]
     Nazgul(#[from] anyhow::Error),
 }
@@ -131,13 +137,15 @@ pub fn sign_contextual(
         return Err(CryptoHelperError::SignerNotInRing);
     }
 
+    let secret = signer.secret().ok_or(CryptoHelperError::MissingSecret)?;
+
     let proof = match storage {
         StorageMode::Compact => {
-            ContextualBLSAG::sign_compact::<Sha3_512, OsRng>(*signer.secret(), ring, None, message)
+            ContextualBLSAG::sign_compact::<Sha3_512, OsRng>(*secret, ring, None, message)
                 .map_err(|e| CryptoHelperError::Nazgul(e.into()))?
         }
         StorageMode::Archival => {
-            ContextualBLSAG::sign_archival::<Sha3_512, OsRng>(*signer.secret(), ring, None, message)
+            ContextualBLSAG::sign_archival::<Sha3_512, OsRng>(*secret, ring, None, message)
                 .map_err(|e| CryptoHelperError::Nazgul(e.into()))?
         }
     };

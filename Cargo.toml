@@ -14,7 +14,7 @@ hex = "0.4"
 base64 = "0.22"
 age = { git = "https://github.com/RyderFreeman4Logos/rage", branch = "feat/identity-from-bytes" }
 curve25519-dalek = { version = "4.1", features = ["serde"] }
-nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "dac22ff2da2c62efc34b872601b00e39e4d117f1" }
+nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "f86e0fe58b9bd9f3789c6076ffe43001ed385975" }
 sha3 = "0.10"
 rand = "0.8"
 bip39 = { version = "2.0", features = ["rand"] }
