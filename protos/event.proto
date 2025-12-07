@@ -9,6 +9,11 @@ service EventService {
   rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
 }
 
+service RingService {
+  // Get the current head of the ring log (latest hash + member list)
+  rpc GetRingHead (GetRingHeadRequest) returns (GetRingHeadResponse);
+}
+
 message PushEventRequest {
   // Canonical serialized event (including signature)
   // We use bytes to ensure exact preservation of the signed content.
@@ -30,4 +35,14 @@ message StreamEventsRequest {
 message StreamEventsResponse {
   bytes event_bytes = 1;
   int64 sequence_no = 2;
+}
+
+message GetRingHeadRequest {
+  string group_id = 1;
+}
+
+message GetRingHeadResponse {
+  bytes ring_hash = 1; // 32 bytes
+  uint32 member_count = 2;
+  repeated bytes members = 3; // List of 32-byte MasterPublicKeys
 }
