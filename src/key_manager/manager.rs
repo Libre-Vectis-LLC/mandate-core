@@ -5,8 +5,9 @@ use bip39::{Language, Mnemonic};
 use hkdf::Hkdf;
 use nazgul::keypair::KeyPair as NazgulKeyPair;
 use nazgul::scalar::Scalar;
+use nazgul::traits::Derivable;
 use rand::{CryptoRng, RngCore};
-use sha3::Sha3_256;
+use sha3::{Sha3_256, Sha3_512};
 use std::io::{Read, Write};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -38,11 +39,11 @@ impl KeyManager {
     }
 
     /// Derive the user's long-term Nazgul identity (for signing).
-    /// Path: HKDF(MasterSeed, "mandate-nazgul-master")
+    /// Path: HKDF(MasterSeed, "mandate-identity-v1")
     pub fn derive_nazgul_identity(&self) -> MasterKeypair {
         let hkdf = Hkdf::<Sha3_256>::new(None, &self.master_seed);
         let mut okm = [0u8; 32];
-        hkdf.expand(b"mandate-nazgul-master", &mut okm)
+        hkdf.expand(b"mandate-identity-v1", &mut okm)
             .expect("HKDF expand failed");
         
         let scalar = Scalar::from_bytes_mod_order(okm);
@@ -67,14 +68,42 @@ impl KeyManager {
 
     /// (Owner Only) Deterministically derive the Group Shared Secret ($K_{shared}$).
     /// This key is distributed to members via "One Bucket Per Person".
-    /// Path: HKDF(MasterSeed, "mandate-group-shared-secret" || RingHash)
-    pub fn derive_group_shared_secret(&self, ring_hash: &[u8; 32]) -> [u8; 32] {
+    /// Path: HKDF(MasterSeed, "mandate-group-shared-v1" || GroupId)
+    pub fn derive_group_shared_secret(&self, group_id: &[u8]) -> [u8; 32] {
         let hkdf = Hkdf::<Sha3_256>::new(None, &self.master_seed);
         let mut okm = [0u8; 32];
-        let info = [b"mandate-group-shared-secret", ring_hash.as_slice()].concat();
+        let info = [b"mandate-group-shared-v1", group_id].concat();
         hkdf.expand(&info, &mut okm)
             .expect("HKDF expand failed");
         okm
+    }
+
+    /// Derive member's contextual Nazgul identity for a specific group.
+    /// Path: HKDF(MasterSeed, "mandate-member-identity-v1" || GroupId)
+    pub fn derive_member_key(&self, group_id: &[u8]) -> MasterKeypair {
+        let hkdf = Hkdf::<Sha3_256>::new(None, &self.master_seed);
+        let mut okm = [0u8; 32];
+        let info = [b"mandate-member-identity-v1", group_id].concat();
+        hkdf.expand(&info, &mut okm)
+            .expect("HKDF expand failed");
+        
+        let scalar = Scalar::from_bytes_mod_order(okm);
+        okm.zeroize();
+        
+        let keypair = NazgulKeyPair::new(scalar);
+        MasterKeypair::new(keypair)
+    }
+
+    /// (Owner Only) Derive the Delegate Signing Key using non-hardened derivation.
+    /// This allows the server to verify delegation without seeing the private key.
+    /// Child = Parent + Hash("mandate-delegate-signer-v1" || GroupId)
+    pub fn derive_delegate_signing_key(&self, group_id: &[u8]) -> MasterKeypair {
+        let parent = self.derive_nazgul_identity();
+        let context = [b"mandate-delegate-signer-v1", group_id].concat();
+        
+        // Use Nazgul's derive_child (which is non-hardened for Ristretto)
+        let child_kp = parent.as_keypair().derive_child::<Sha3_512>(&context);
+        MasterKeypair::new(child_kp)
     }
 }
 
@@ -129,6 +158,7 @@ pub fn decrypt_event_content(identity: &RageIdentity, payload: &[u8]) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nazgul::traits::Derivable;
 
     #[test]
     fn test_mnemonic_roundtrip() {
@@ -154,6 +184,48 @@ mod tests {
     }
 
     #[test]
+    fn test_group_isolation() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let g1 = b"group1";
+        let g2 = b"group2";
+
+        // Shared Secret Isolation
+        let s1 = km.derive_group_shared_secret(g1);
+        let s2 = km.derive_group_shared_secret(g2);
+        assert_ne!(s1, s2);
+
+        // Member Key Isolation
+        let m1 = km.derive_member_key(g1);
+        let m2 = km.derive_member_key(g2);
+        assert_ne!(m1.public(), m2.public());
+
+        // Delegate Key Isolation
+        let d1 = km.derive_delegate_signing_key(g1);
+        let d2 = km.derive_delegate_signing_key(g2);
+        assert_ne!(d1.public(), d2.public());
+    }
+
+    #[test]
+    fn test_non_hardened_delegation_verification() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let group_id = b"test-group";
+
+        // Owner derives delegate private key
+        let delegate_sk = km.derive_delegate_signing_key(group_id);
+
+        // Verifier derives delegate public key from Owner Public Key + Context
+        let owner_pk = km.derive_nazgul_identity();
+        let context = [b"mandate-delegate-signer-v1", group_id.as_slice()].concat();
+        
+        // Manually derive public child to verify it matches
+        let derived_pk = owner_pk.as_keypair().public().derive_child::<Sha3_512>(&context);
+
+        assert_eq!(delegate_sk.public(), &derived_pk, "Public key derivation must match private key derivation");
+    }
+
+    #[test]
     fn test_event_encryption_roundtrip_age() {
         let shared_secret = [42u8; 32];
         let ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -162,11 +234,6 @@ mod tests {
         let plaintext = b"Hello Age World";
         
         let encrypted = encrypt_event_content(&event_id, plaintext).unwrap();
-        
-        // Ensure it's really an age file (starts with header)
-        // Note: age binary format header is NOT strictly text "age-encryption.org/v1",
-        // but the first line usually contains it.
-        // For X25519, it might be binary. Let's trust the roundtrip.
         
         let decrypted = decrypt_event_content(&event_id, &encrypted).unwrap();
         assert_eq!(plaintext.to_vec(), decrypted);
@@ -177,7 +244,6 @@ mod tests {
         let shared_secret = [42u8; 32];
         let k1 = derive_event_identity(&shared_secret, "ulid1");
         let k2 = derive_event_identity(&shared_secret, "ulid2");
-        // Compare public keys
         assert_ne!(k1.to_public().to_string(), k2.to_public().to_string());
     }
 }
