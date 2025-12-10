@@ -14,8 +14,10 @@ use std::sync::Arc;
 /// Canonical, signed event bytes (audit-preserving).
 pub type EventBytes = Arc<[u8]>;
 
-/// Event identifier paired with its canonical bytes.
-pub type EventRecord = (EventId, EventBytes);
+pub type SequenceNo = i64;
+
+/// Event identifier, canonical bytes, and sequence number.
+pub type EventRecord = (EventId, EventBytes, SequenceNo);
 
 /// Path-limited slice of a ring delta log, usable for incremental replay.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,21 +68,24 @@ pub enum NotFound {
 
 /// Append-only event storage. Intended for a single-writer per tenant; multi-tenant shares one table.
 pub trait EventStore {
-    /// Append a canonical, signed event (already serialized, e.g., canonical JSON) for the tenant.
-    /// Must preserve write order as the audit chain source of truth.
-    fn append(&self, tenant: TenantId, event_bytes: EventBytes) -> Result<EventId, StorageError>;
+    /// Append a canonical, signed event (already serialized). Returns (event_id, sequence_no).
+    fn append(
+        &self,
+        tenant: TenantId,
+        event_bytes: EventBytes,
+    ) -> Result<(EventId, SequenceNo), StorageError>;
 
     /// Fetch canonical bytes by ID for audit/verification; `NotFound` if absent.
-    fn get(&self, tenant: TenantId, id: &EventId) -> Result<EventBytes, StorageError>;
+    fn get(&self, tenant: TenantId, id: &EventId) -> Result<EventRecord, StorageError>;
 
     /// Latest (tail) event for the tenant; `NotFound` if empty.
     fn tail(&self, tenant: TenantId) -> Result<EventRecord, StorageError>;
 
-    /// Deterministic forward slice after an optional anchor (exclusive), bounded by `limit`.
+    /// Deterministic forward slice after an optional anchor sequence (exclusive), bounded by `limit`.
     fn stream_from(
         &self,
         tenant: TenantId,
-        after: Option<EventId>,
+        after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError>;
 }

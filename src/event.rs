@@ -10,6 +10,8 @@ pub struct Event {
     pub id: EventId,
     pub previous_id: EventId,
     pub group_id: GroupId,
+    /// Monotonic sequence assigned by storage; not part of content hash.
+    pub sequence_no: i64,
     pub processed_at: u64,
     pub serialization_version: u8,
     pub event_type: EventType,
@@ -185,6 +187,7 @@ mod tests {
             id: EventId([1u8; 32]),
             previous_id: EventId([0u8; 32]),
             group_id: gid(),
+            sequence_no: 0,
             processed_at: 123,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
@@ -291,6 +294,7 @@ mod tests {
             id: EventId([9u8; 32]),
             previous_id: EventId([8u8; 32]),
             group_id: gid(),
+            sequence_no: 1,
             processed_at: 10,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
