@@ -1,66 +1,31 @@
 syntax = "proto3";
 package mandate.v1;
 
+import "common.proto";
+
 service EventService {
-  // Push a signed event to the server
+  // Push a signed event to the server (bytes are canonical, include signature).
   rpc PushEvent (PushEventRequest) returns (PushEventResponse);
-  
-  // Stream events for a group, starting from a sequence or cursor
+
+  // Stream events for a group, starting after an exclusive sequence.
   rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
 }
 
-service RingService {
-  // Get the current head of the ring log (latest hash + member list)
-  rpc GetRingHead (GetRingHeadRequest) returns (GetRingHeadResponse);
-
-  // Stream ring deltas after an optional anchor hash (inclusive/exclusive decided by after_hash semantics)
-  rpc StreamRing (StreamRingRequest) returns (stream StreamRingResponse);
-}
-
 message PushEventRequest {
-  // Canonical serialized event (including signature)
-  // We use bytes to ensure exact preservation of the signed content.
-  // Server will deserialize to validate.
-  bytes event_bytes = 1; 
+  bytes event_bytes = 1;
 }
 
 message PushEventResponse {
-  string event_id = 1; // ULID
-  int64 sequence_no = 2; // Assigned sequence number
+  string event_id = 1; // ULID string
+  int64 sequence_no = 2;
 }
 
 message StreamEventsRequest {
-  string group_id = 1;
-  int64 start_sequence_no = 2; // Exclusive (start > this)
-  uint32 limit = 3;          // max events per message (server may chunk)
+  string group_id = 1;       // ULID
+  int64 start_sequence_no = 2; // exclusive (start > this)
+  uint32 limit = 3;            // server may chunk smaller
 }
 
 message StreamEventsResponse {
   repeated bytes event_bytes = 1; // batch to reduce per-message overhead
-}
-
-message GetRingHeadRequest {
-  string group_id = 1;
-}
-
-message GetRingHeadResponse {
-  bytes ring_hash = 1; // 32 bytes
-  uint32 member_count = 2;
-  repeated bytes members = 3; // List of 32-byte MasterPublicKeys
-}
-
-message StreamRingRequest {
-  string group_id = 1;
-  bytes after_ring_hash = 2; // optional; if empty, stream from genesis
-  uint32 limit = 3;          // server-chosen cap per response
-}
-
-message RingDeltaEntry {
-  bytes ring_hash = 1;    // resulting ring hash after applying deltas
-  repeated bytes deltas = 2; // opaque encoded RingDelta list (server-defined format)
-}
-
-message StreamRingResponse {
-  repeated RingDeltaEntry entries = 1;
-  bytes next_ring_hash = 2; // optional cursor
 }

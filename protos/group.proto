@@ -1,0 +1,37 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+
+service GroupService {
+  rpc CreateGroup (CreateGroupRequest) returns (CreateGroupResponse);
+  rpc SetOwnerPublicKey (SetOwnerPublicKeyRequest) returns (SetOwnerPublicKeyResponse);
+  rpc GetGroup (GetGroupRequest) returns (GetGroupResponse);
+}
+
+message CreateGroupRequest {
+  string tenant_id = 1;   // ULID of tenant
+  string tg_group_id = 2; // Telegram group id (string)
+}
+
+message CreateGroupResponse {
+  string group_id = 1; // ULID
+  string api_token = 2; // token for edge/server auth
+}
+
+message SetOwnerPublicKeyRequest {
+  string group_id = 1; // ULID
+  NazgulMasterPublicKey owner_pubkey = 2;
+}
+
+message SetOwnerPublicKeyResponse {}
+
+message GetGroupRequest {
+  string group_id = 1;
+}
+
+message GetGroupResponse {
+  string group_id = 1;
+  string tenant_id = 2;
+  NazgulMasterPublicKey owner_pubkey = 3;
+}

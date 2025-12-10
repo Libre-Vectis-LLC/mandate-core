@@ -1,0 +1,38 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+
+service RingService {
+  // Get the current head of the ring log (latest hash + member count).
+  rpc GetRingHead (GetRingHeadRequest) returns (GetRingHeadResponse);
+
+  // Stream ring deltas after an optional anchor hash (inclusive/exclusive decided by after_hash semantics).
+  rpc StreamRing (StreamRingRequest) returns (stream StreamRingResponse);
+}
+
+message GetRingHeadRequest {
+  string group_id = 1; // ULID
+}
+
+message GetRingHeadResponse {
+  bytes ring_hash = 1; // 32 bytes
+  uint32 member_count = 2;
+  repeated bytes members = 3; // List of 32-byte NazgulMasterPublicKey
+}
+
+message StreamRingRequest {
+  string group_id = 1;
+  bytes after_ring_hash = 2; // optional; if empty, stream from genesis
+  uint32 limit = 3;          // server-chosen cap per response
+}
+
+message RingDeltaEntry {
+  bytes ring_hash = 1;     // resulting ring hash after applying deltas
+  repeated bytes deltas = 2; // opaque encoded RingDelta list (server-defined format)
+}
+
+message StreamRingResponse {
+  repeated RingDeltaEntry entries = 1;
+  bytes next_ring_hash = 2; // optional cursor
+}

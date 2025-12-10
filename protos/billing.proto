@@ -1,0 +1,41 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+
+service BillingService {
+  rpc IssueGiftCard (IssueGiftCardRequest) returns (IssueGiftCardResponse);
+  rpc RedeemGiftCard (RedeemGiftCardRequest) returns (RedeemGiftCardResponse);
+  rpc TransferToGroup (TransferToGroupRequest) returns (TransferToGroupResponse);
+}
+
+message IssueGiftCardRequest {
+  uint64 amount_nanos = 1; // e.g., in smallest unit
+  string reason = 2;
+}
+
+message IssueGiftCardResponse {
+  string code = 1;
+}
+
+message RedeemGiftCardRequest {
+  string tg_user_id = 1;
+  string code = 2;
+}
+
+message RedeemGiftCardResponse {
+  string tenant_id = 1; // ULID
+  string group_id = 2;  // ULID (may be created on redeem)
+  int64 new_balance_nanos = 3;
+  string api_token = 4; // token for edge/server auth
+}
+
+message TransferToGroupRequest {
+  string tenant_id = 1;
+  string group_id = 2;
+  int64 amount_nanos = 3;
+}
+
+message TransferToGroupResponse {
+  int64 balance_after_nanos = 1;
+}

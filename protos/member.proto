@@ -1,0 +1,68 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+
+service MemberService {
+  // Bot submits a pending member's public keys.
+  rpc SubmitPendingMember (SubmitPendingMemberRequest) returns (SubmitPendingMemberResponse);
+
+  // Owner/Audit bot lists pending members for approval.
+  rpc ListPendingMembers (ListPendingMembersRequest) returns (ListPendingMembersResponse);
+
+  // Owner/Audit bot uploads key blobs for approved members (one bucket per person).
+  rpc UploadKeyBlobs (UploadKeyBlobsRequest) returns (UploadKeyBlobsResponse);
+
+  // Member fetches own key blob.
+  rpc DownloadMyKeyBlob (DownloadMyKeyBlobRequest) returns (DownloadMyKeyBlobResponse);
+}
+
+message SubmitPendingMemberRequest {
+  string group_id = 1; // ULID
+  string tg_user_id = 2;
+  NazgulMasterPublicKey nazgul_pub = 3;
+  RagePublicKey rage_pub = 4;
+}
+
+message SubmitPendingMemberResponse {
+  string pending_id = 1;
+}
+
+message ListPendingMembersRequest {
+  string group_id = 1; // ULID
+  uint32 limit = 2;
+  PageToken page_token = 3;
+}
+
+message PendingMember {
+  string pending_id = 1;
+  string tg_user_id = 2;
+  NazgulMasterPublicKey nazgul_pub = 3;
+  RagePublicKey rage_pub = 4;
+  int64 submitted_at_ms = 5;
+}
+
+message ListPendingMembersResponse {
+  repeated PendingMember members = 1;
+  PageToken next_page_token = 2;
+}
+
+message KeyBlobEntry {
+  string member_id = 1; // could be pending_id or member id after approval
+  bytes blob = 2;       // age-encrypted K_shared bucket
+}
+
+message UploadKeyBlobsRequest {
+  string group_id = 1;
+  repeated KeyBlobEntry blobs = 2;
+}
+
+message UploadKeyBlobsResponse {}
+
+message DownloadMyKeyBlobRequest {
+  string group_id = 1;
+}
+
+message DownloadMyKeyBlobResponse {
+  bytes blob = 1;
+}

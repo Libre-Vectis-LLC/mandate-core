@@ -1,0 +1,17 @@
+syntax = "proto3";
+package mandate.v1;
+
+// Lightweight auth helpers (API token validation).
+service AuthService {
+  rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message ValidateTokenRequest {
+  string api_token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  string tenant_id = 2;
+  string group_id = 3;
+}

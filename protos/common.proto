@@ -1,0 +1,29 @@
+syntax = "proto3";
+package mandate.v1;
+
+// Common identifiers and hashes used across services.
+
+// ULID in canonical string form (26 chars Crockford base32).
+message Ulid {
+  string value = 1;
+}
+
+// 32-byte hash (SHA3-256).
+message Hash32 {
+  bytes value = 1;
+}
+
+// Nazgul master public key (ristretto, 32 bytes).
+message NazgulMasterPublicKey {
+  bytes value = 1;
+}
+
+// Age/Rage X25519 public key (32 bytes).
+message RagePublicKey {
+  bytes value = 1;
+}
+
+// Generic pagination cursor.
+message PageToken {
+  string value = 1;
+}
