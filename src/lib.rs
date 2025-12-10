@@ -20,5 +20,6 @@ pub mod event;
 pub mod hashing;
 pub mod ids;
 pub mod key_manager;
+pub mod proto;
 pub mod ring_log;
 pub mod storage;

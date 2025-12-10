@@ -21,6 +21,7 @@ bip39 = { version = "2.0", features = ["rand"] }
 hkdf = "0.12"
 hmac = "0.12"
 zeroize = "1"
+mandate-proto = { path = "mandate-proto" }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }
