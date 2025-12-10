@@ -2,14 +2,14 @@ use crate::crypto::ciphertext::Ciphertext;
 use crate::crypto::signature::Signature;
 use crate::hashing::CanonicalHashError;
 use crate::hashing::{event_hash_sha3_256, poll_hash_sha3_256, vote_hash_sha3_256};
-use crate::ids::{ContentHash, EventId, KeyImage, MasterPublicKey, RingHash};
+use crate::ids::{ContentHash, EventId, GroupId, KeyImage, MasterPublicKey, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
     pub id: EventId,
     pub previous_id: EventId,
-    pub group_id: String,
+    pub group_id: GroupId,
     pub processed_at: u64,
     pub serialization_version: u8,
     pub event_type: EventType,
@@ -36,7 +36,7 @@ pub enum EventType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Poll {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub ring_hash: RingHash,
     pub poll_id: String,
     pub questions: Vec<PollQuestion>,
@@ -66,7 +66,7 @@ pub enum PollQuestionKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Vote {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub ring_hash: RingHash,
     pub poll_id: String,
     pub poll_hash: ContentHash,
@@ -96,7 +96,7 @@ pub struct VoteSelection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnonymousMessage {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub ring_hash: RingHash,
     pub message_id: String,
     pub content: Ciphertext,
@@ -105,7 +105,7 @@ pub struct AnonymousMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RingUpdate {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub ring_hash: RingHash,
     pub operations: Vec<RingOperation>,
 }
@@ -118,7 +118,7 @@ pub enum RingOperation {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BanCreate {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub target: KeyImage,
     pub reason: String,
     pub scope: BanScope,
@@ -133,13 +133,13 @@ pub enum BanScope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BanRevoke {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub ban_event_id: EventId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofOfInnocence {
-    pub group_id: String,
+    pub group_id: GroupId,
     pub historical_ring_hash: RingHash,
 }
 
@@ -148,9 +148,11 @@ mod tests {
     use super::*;
     use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
     use crate::hashing::ring_hash_sha3_256;
+    use crate::ids::GroupId;
     use nazgul::keypair::KeyPair;
     use nazgul::ring::Ring;
     use rand::rngs::OsRng;
+    use ulid::Ulid;
 
     fn make_ring(size: usize) -> (KeyPair, Ring) {
         let mut csprng = OsRng;
@@ -160,6 +162,10 @@ mod tests {
             .collect();
         members.push(*signer.public());
         (signer, Ring::new(members))
+    }
+
+    fn gid() -> GroupId {
+        GroupId(Ulid::from_string("01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("static ulid"))
     }
 
     #[test]
@@ -178,11 +184,11 @@ mod tests {
         let event = Event {
             id: EventId([1u8; 32]),
             previous_id: EventId([0u8; 32]),
-            group_id: "g".into(),
+            group_id: gid(),
             processed_at: 123,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: "g".into(),
+                group_id: gid(),
                 ring_hash: ring_hash_sha3_256(&ring),
                 message_id: "m1".into(),
                 content: Ciphertext(b"hello".to_vec()),
@@ -200,7 +206,7 @@ mod tests {
     #[test]
     fn poll_hash_sorts_questions_and_options() {
         let poll_unsorted = Poll {
-            group_id: "g".into(),
+            group_id: gid(),
             ring_hash: RingHash([1u8; 32]),
             poll_id: "poll".into(),
             created_at: 1,
@@ -246,7 +252,7 @@ mod tests {
     #[test]
     fn vote_hash_sorts_selections_and_option_ids() {
         let vote_unsorted = Vote {
-            group_id: "g".into(),
+            group_id: gid(),
             ring_hash: RingHash([2u8; 32]),
             poll_id: "p".into(),
             poll_hash: ContentHash([3u8; 32]),
@@ -284,11 +290,11 @@ mod tests {
         let base_event = Event {
             id: EventId([9u8; 32]),
             previous_id: EventId([8u8; 32]),
-            group_id: "g".into(),
+            group_id: gid(),
             processed_at: 10,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: "g".into(),
+                group_id: gid(),
                 ring_hash: RingHash([7u8; 32]),
                 message_id: "m".into(),
                 content: Ciphertext(b"hi".to_vec()),

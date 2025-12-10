@@ -1,5 +1,5 @@
 use crate::crypto::signature::MasterKeypair;
-use crate::ids::RingHash;
+use crate::ids::{EventUlid, GroupId, RingHash};
 use age::x25519::Identity as RageIdentity;
 use anyhow::Result;
 use bip39::{Language, Mnemonic};
@@ -11,6 +11,55 @@ use rand::{CryptoRng, RngCore};
 use sha3::{Sha3_256, Sha3_512};
 use std::io::{Read, Write};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+const LABEL_IDENTITY: &[u8] = b"mandate-identity-v1";
+const LABEL_RAGE_MASTER: &[u8] = b"mandate-rage-master";
+const LABEL_GROUP_SHARED: &[u8] = b"mandate-group-shared-v1";
+const LABEL_DELEGATE: &[u8] = b"mandate-delegate-signer-v1";
+const LABEL_MEMBER_SESSION: &[u8] = b"mandate-member-session-v1";
+const LABEL_EVENT_KEY: &[u8] = b"mandate-event-key-v1";
+const LABEL_POLL_KEY: &[u8] = b"mandate-poll-key-v1";
+
+#[derive(Clone, Copy)]
+pub enum KdfAlgorithm {
+    Sha3_256,
+    Sha3_512,
+}
+
+impl KdfAlgorithm {
+    pub fn expand<const N: usize>(self, ikm: &[u8], info: &[u8]) -> [u8; N] {
+        match self {
+            KdfAlgorithm::Sha3_256 => hkdf_sha3_256::<N>(ikm, info),
+            KdfAlgorithm::Sha3_512 => hkdf_sha3_512::<N>(ikm, info),
+        }
+    }
+}
+
+fn hkdf_sha3_256<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
+    let hkdf = Hkdf::<Sha3_256>::new(None, ikm);
+    let mut okm = [0u8; N];
+    hkdf.expand(info, &mut okm).expect("HKDF expand failed");
+    okm
+}
+
+fn hkdf_sha3_512<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
+    let hkdf = Hkdf::<Sha3_512>::new(None, ikm);
+    let mut okm = [0u8; N];
+    hkdf.expand(info, &mut okm).expect("HKDF expand failed");
+    okm
+}
+
+fn info(label: &[u8], parts: &[&[u8]]) -> Vec<u8> {
+    let total_len: usize = label.len() + parts.iter().map(|p| p.len()).sum::<usize>();
+    let mut buf = Vec::with_capacity(total_len);
+    buf.extend_from_slice(label);
+    for p in parts {
+        buf.extend_from_slice(p);
+    }
+    buf
+}
+
+const KEY_BLOB_PREFIX: &[u8] = b"mandate:kshared:v1|";
 
 /// Manages the root master seed and derives application-specific keys.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -42,11 +91,7 @@ impl KeyManager {
     /// Derive the user's long-term Nazgul identity (for signing).
     /// Path: HKDF(MasterSeed, "mandate-identity-v1")
     pub fn derive_nazgul_identity(&self) -> MasterKeypair {
-        let hkdf = Hkdf::<Sha3_256>::new(None, &self.master_seed);
-        let mut okm = [0u8; 32];
-        hkdf.expand(b"mandate-identity-v1", &mut okm)
-            .expect("HKDF expand failed");
-
+        let mut okm = KdfAlgorithm::Sha3_256.expand::<32>(&self.master_seed, LABEL_IDENTITY);
         let scalar = Scalar::from_bytes_mod_order(okm);
         okm.zeroize();
         let keypair = NazgulKeyPair::new(scalar);
@@ -56,33 +101,26 @@ impl KeyManager {
     /// Derive the user's long-term Rage identity (for decrypting key blobs).
     /// Path: HKDF(MasterSeed, "mandate-rage-master")
     pub fn derive_rage_identity(&self) -> RageIdentity {
-        let hkdf = Hkdf::<Sha3_256>::new(None, &self.master_seed);
-        let mut okm = [0u8; 32];
-        hkdf.expand(b"mandate-rage-master", &mut okm)
-            .expect("HKDF expand failed");
-
-        let identity = RageIdentity::from_secret_bytes(okm);
+        let mut okm = KdfAlgorithm::Sha3_256.expand::<32>(&self.master_seed, LABEL_RAGE_MASTER);
+        let id = RageIdentity::from_secret_bytes(okm);
         okm.zeroize();
-        identity
+        id
     }
 
     /// (Owner Only) Deterministically derive the Group Shared Secret ($K_{shared}$).
     /// This key is distributed to members via "One Bucket Per Person".
     /// Path: HKDF(MasterSeed, "mandate-group-shared-v1" || GroupId)
-    pub fn derive_group_shared_secret(&self, group_id: &[u8]) -> [u8; 32] {
-        let hkdf = Hkdf::<Sha3_256>::new(None, &self.master_seed);
-        let mut okm = [0u8; 32];
-        let info = [b"mandate-group-shared-v1", group_id].concat();
-        hkdf.expand(&info, &mut okm).expect("HKDF expand failed");
-        okm
+    pub fn derive_group_shared_secret(&self, group_id: &GroupId) -> [u8; 32] {
+        let info = info(LABEL_GROUP_SHARED, &[&group_id.to_bytes()]);
+        KdfAlgorithm::Sha3_256.expand::<32>(&self.master_seed, &info)
     }
 
     /// (Owner Only) Derive the Delegate Signing Key using non-hardened derivation.
     /// This allows the server to verify delegation without seeing the private key.
     /// Child = Parent + Hash("mandate-delegate-signer-v1" || GroupId)
-    pub fn derive_delegate_signing_key(&self, group_id: &[u8]) -> MasterKeypair {
+    pub fn derive_delegate_signing_key(&self, group_id: &GroupId) -> MasterKeypair {
         let parent = self.derive_nazgul_identity();
-        let context = [b"mandate-delegate-signer-v1", group_id].concat();
+        let context = info(LABEL_DELEGATE, &[&group_id.to_bytes()]);
 
         // Use Nazgul's derive_child on the keypair (non-hardened)
         let child_kp = parent.as_keypair().derive_child::<Sha3_512>(&context);
@@ -94,14 +132,11 @@ impl KeyManager {
     /// and servers can mirror the public derivation.
     pub fn derive_member_session_key(
         &self,
-        group_id: &[u8],
+        group_id: &GroupId,
         ring_hash: &RingHash,
     ) -> MasterKeypair {
         let parent = self.derive_nazgul_identity();
-        let mut ctx = Vec::with_capacity(group_id.len() + ring_hash.0.len() + 32);
-        ctx.extend_from_slice(b"mandate-member-session-v1");
-        ctx.extend_from_slice(group_id);
-        ctx.extend_from_slice(&ring_hash.0);
+        let ctx = info(LABEL_MEMBER_SESSION, &[&group_id.to_bytes(), &ring_hash.0]);
         let child_kp = parent.derive_for_context(&ctx);
         MasterKeypair::new(child_kp)
     }
@@ -110,15 +145,82 @@ impl KeyManager {
 /// Helper to derive an Event Ephemeral Identity ($K_{event}$) from the Group Shared Secret.
 /// Path: HKDF(SharedSecret, ULID)
 /// Returns a full RageIdentity, which can act as both Sender (encrypt) and Receiver (decrypt).
-pub fn derive_event_identity(shared_secret: &[u8; 32], event_ulid: &str) -> RageIdentity {
-    let hkdf = Hkdf::<Sha3_256>::new(None, shared_secret);
-    let mut okm = [0u8; 32];
-    hkdf.expand(event_ulid.as_bytes(), &mut okm)
-        .expect("HKDF expand failed");
-
-    let identity = RageIdentity::from_secret_bytes(okm);
+pub fn derive_event_identity(shared_secret: &[u8; 32], event_ulid: &EventUlid) -> RageIdentity {
+    let info = info(LABEL_EVENT_KEY, &[&event_ulid.to_bytes()]);
+    let mut okm = KdfAlgorithm::Sha3_256.expand::<32>(shared_secret, &info);
+    let id = RageIdentity::from_secret_bytes(okm);
     okm.zeroize();
-    identity
+    id
+}
+
+/// Derive a poll-level symmetric identity reused by VoteCast events, keyed by the
+/// PollCreate event ULID to avoid per-vote key inflation.
+pub fn derive_poll_identity(shared_secret: &[u8; 32], poll_event_ulid: &EventUlid) -> RageIdentity {
+    let info = info(LABEL_POLL_KEY, &[&poll_event_ulid.to_bytes()]);
+    let mut okm = KdfAlgorithm::Sha3_256.expand::<32>(shared_secret, &info);
+    let id = RageIdentity::from_secret_bytes(okm);
+    okm.zeroize();
+    id
+}
+
+/// Derive a delegate signing keypair (non-hardened) from any Nazgul `KeyPair`
+/// (public-only or full). Server can pass `KeyPair::from_public_key_only`.
+pub fn derive_delegate_keypair(base: &NazgulKeyPair, group_id: &GroupId) -> NazgulKeyPair {
+    let ctx = info(LABEL_DELEGATE, &[&group_id.to_bytes()]);
+    base.derive_child::<Sha3_512>(&ctx)
+}
+
+/// Derive a member session keypair (non-hardened) from any Nazgul `KeyPair`
+/// (public-only or full). Context binds group + ring.
+pub fn derive_member_session_keypair(
+    base: &NazgulKeyPair,
+    group_id: &GroupId,
+    ring_hash: &RingHash,
+) -> NazgulKeyPair {
+    let ctx = info(LABEL_MEMBER_SESSION, &[&group_id.to_bytes(), &ring_hash.0]);
+    base.derive_child::<Sha3_512>(&ctx)
+}
+
+/// Encrypt the group-shared secret for a specific recipient (one bucket per person).
+pub fn encrypt_shared_secret_for_recipient(
+    shared_secret: &[u8; 32],
+    recipient: &age::x25519::Recipient,
+) -> Result<Vec<u8>> {
+    let mut plaintext = Vec::with_capacity(KEY_BLOB_PREFIX.len() + shared_secret.len());
+    plaintext.extend_from_slice(KEY_BLOB_PREFIX);
+    plaintext.extend_from_slice(shared_secret);
+
+    let recipients = [Box::new(recipient.clone()) as Box<dyn age::Recipient>];
+    let encryptor = age::Encryptor::with_recipients(recipients.iter().map(|r| r.as_ref()))
+        .expect("valid recipient");
+
+    let mut ciphertext = Vec::new();
+    {
+        let mut writer = encryptor.wrap_output(&mut ciphertext)?;
+        writer.write_all(&plaintext)?;
+        writer.finish()?;
+    }
+
+    Ok(ciphertext)
+}
+
+/// Decrypt a shared-secret bucket; validates the prefix to prevent misuse.
+pub fn decrypt_shared_secret(identity: &RageIdentity, blob: &[u8]) -> Result<[u8; 32]> {
+    let decryptor = age::Decryptor::new(blob)?;
+    let mut reader = decryptor
+        .decrypt(std::iter::once(identity as &dyn age::Identity))
+        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
+
+    let mut plaintext = Vec::new();
+    reader.read_to_end(&mut plaintext)?;
+
+    if plaintext.len() != KEY_BLOB_PREFIX.len() + 32 || !plaintext.starts_with(KEY_BLOB_PREFIX) {
+        return Err(anyhow::anyhow!("invalid key blob payload"));
+    }
+
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&plaintext[KEY_BLOB_PREFIX.len()..]);
+    Ok(key)
 }
 
 /// Encrypt event content using standard age encryption (X25519).
@@ -159,7 +261,15 @@ pub fn decrypt_event_content(identity: &RageIdentity, payload: &[u8]) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nazgul::traits::Derivable;
+    use ulid::Ulid;
+
+    fn gid(label: &str) -> GroupId {
+        GroupId(Ulid::from_string(label).expect("static ulid"))
+    }
+
+    fn eid(label: &str) -> EventUlid {
+        EventUlid(Ulid::from_string(label).expect("static ulid"))
+    }
 
     #[test]
     fn test_mnemonic_roundtrip() {
@@ -188,26 +298,26 @@ mod tests {
     fn test_group_isolation() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let g1 = b"group1";
-        let g2 = b"group2";
+        let g1 = gid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let g2 = gid("01ARZ3NDEKTSV4RRFFQ69G5FAY");
         let r1 = RingHash([1u8; 32]);
         let r2 = RingHash([2u8; 32]);
 
         // Shared Secret Isolation
-        let s1 = km.derive_group_shared_secret(g1);
-        let s2 = km.derive_group_shared_secret(g2);
+        let s1 = km.derive_group_shared_secret(&g1);
+        let s2 = km.derive_group_shared_secret(&g2);
         assert_ne!(s1, s2);
 
         // Member Session Key Isolation (group + ring)
-        let m1 = km.derive_member_session_key(g1, &r1);
-        let m2 = km.derive_member_session_key(g2, &r1);
-        let m3 = km.derive_member_session_key(g1, &r2);
+        let m1 = km.derive_member_session_key(&g1, &r1);
+        let m2 = km.derive_member_session_key(&g2, &r1);
+        let m3 = km.derive_member_session_key(&g1, &r2);
         assert_ne!(m1.public(), m2.public());
         assert_ne!(m1.public(), m3.public());
 
         // Delegate Key Isolation
-        let d1 = km.derive_delegate_signing_key(g1);
-        let d2 = km.derive_delegate_signing_key(g2);
+        let d1 = km.derive_delegate_signing_key(&g1);
+        let d2 = km.derive_delegate_signing_key(&g2);
         assert_ne!(d1.public(), d2.public());
     }
 
@@ -215,18 +325,16 @@ mod tests {
     fn test_non_hardened_delegation_verification() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let group_id = b"test-group";
+        let group_id = gid("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
 
         // Owner derives delegate private key
-        let delegate_sk = km.derive_delegate_signing_key(group_id);
+        let delegate_sk = km.derive_delegate_signing_key(&group_id);
 
         // Verifier derives delegate public key from Owner Public Key + Context
         let owner_pk = km.derive_nazgul_identity();
-        let context = [b"mandate-delegate-signer-v1", group_id.as_slice()].concat();
-
         // Public-only derivation using KeyPair::from_public_key_only
         let verifier_kp = NazgulKeyPair::from_public_key_only(*owner_pk.public());
-        let derived_pk = verifier_kp.derive_child::<Sha3_512>(&context);
+        let derived_pk = derive_delegate_keypair(&verifier_kp, &group_id);
 
         assert_eq!(
             delegate_sk.public(),
@@ -238,9 +346,9 @@ mod tests {
     #[test]
     fn test_event_encryption_roundtrip_age() {
         let shared_secret = [42u8; 32];
-        let ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let ulid = eid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
-        let event_id = derive_event_identity(&shared_secret, ulid);
+        let event_id = derive_event_identity(&shared_secret, &ulid);
         let plaintext = b"Hello Age World";
 
         let encrypted = encrypt_event_content(&event_id, plaintext).unwrap();
@@ -252,8 +360,80 @@ mod tests {
     #[test]
     fn test_event_key_uniqueness() {
         let shared_secret = [42u8; 32];
-        let k1 = derive_event_identity(&shared_secret, "ulid1");
-        let k2 = derive_event_identity(&shared_secret, "ulid2");
+        let k1 = derive_event_identity(&shared_secret, &eid("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+        let k2 = derive_event_identity(&shared_secret, &eid("01ARZ3NDEKTSV4RRFFQ69G5FAY"));
         assert_ne!(k1.to_public().to_string(), k2.to_public().to_string());
+    }
+
+    #[test]
+    fn poll_identity_reused_for_votes() {
+        let shared_secret = [9u8; 32];
+        let poll_ulid = eid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let k_poll = derive_poll_identity(&shared_secret, &poll_ulid);
+        let vote_cast = derive_poll_identity(&shared_secret, &poll_ulid);
+        assert_eq!(
+            k_poll.to_public().to_string(),
+            vote_cast.to_public().to_string(),
+            "PollCreate and VoteCast must reuse the same poll-scoped key"
+        );
+    }
+
+    #[test]
+    fn public_derivation_matches_private_for_member_session() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let group = gid("01ARZ3NDEKTSV4RRFFQ69G5FB0");
+        let ring = RingHash([7u8; 32]);
+
+        let private = km.derive_member_session_key(&group, &ring);
+        let public = derive_member_session_keypair(
+            &NazgulKeyPair::from_public_key_only(*km.derive_nazgul_identity().public()),
+            &group,
+            &ring,
+        );
+
+        assert_eq!(
+            private.public(),
+            public.public(),
+            "public-only derivation must equal private derivation"
+        );
+    }
+
+    #[test]
+    fn key_blob_roundtrip() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let shared = km.derive_group_shared_secret(&gid("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+
+        let recipient = km.derive_rage_identity().to_public();
+        let blob = encrypt_shared_secret_for_recipient(&shared, &recipient).expect("encrypt");
+
+        let recovered =
+            decrypt_shared_secret(&km.derive_rage_identity(), &blob).expect("decrypt roundtrip");
+        assert_eq!(shared, recovered, "shared secret must roundtrip");
+    }
+
+    #[test]
+    fn key_blob_rejects_bad_prefix() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let identity = km.derive_rage_identity();
+        // craft blob with wrong plaintext
+        let bad_plain = b"wrong".to_vec();
+        let recipients = [Box::new(identity.to_public()) as Box<dyn age::Recipient>];
+        let encryptor = age::Encryptor::with_recipients(recipients.iter().map(|r| r.as_ref()))
+            .expect("encryptor");
+        let mut blob = Vec::new();
+        {
+            let mut writer = encryptor.wrap_output(&mut blob).expect("writer");
+            writer.write_all(&bad_plain).expect("write");
+            writer.finish().expect("finish");
+        }
+
+        let err = decrypt_shared_secret(&identity, &blob).expect_err("should fail prefix check");
+        assert!(
+            err.to_string().contains("invalid key blob"),
+            "must surface invalid payload"
+        );
     }
 }

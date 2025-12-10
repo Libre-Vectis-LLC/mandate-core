@@ -18,9 +18,9 @@
 - [x] Docs: expand `lib.rs`/README to spell out audit chain rules, ring reconstruction contract, hash policy, storage concurrency model (single-writer append, no optimistic tokens), WASM notes, and digest-pluggability for future BLAKE3.
 
 ## Next (design alignment with latest dev drafts)
-- [ ] KDF/Derivation unification: add HKDF-SHA3 helpers (default 256, optional 512; keep pluggable interface for future BLAKE3). Provide domain/context builders for group/event/poll keys.
-- [ ] Group/key types: introduce `GroupId` (UUID/ULID newtype) and `EventUlid` to replace raw strings in derivations/hashes; bind derivation helpers to these types.
-- [ ] Poll key reuse rule: encode that VoteCast derives its symmetric key from the PollCreate event_id (ULID) to avoid per-vote key inflation; document and test.
-- [ ] E2EE access after ban: clarify docs that kicked members retain K_shared but cannot fetch new ciphertext, so cannot read new events.
-- [ ] Public/private derivation parity: in key manager expose helpers so clients (KeyPair) and servers (RistrettoPoint only) share non-hardened derivation paths via `nazgul::traits::Derivable`, incorporating group_id/ring_hash/poll contexts.
-- [ ] Key blob helpers: pure-logic interfaces for “one bucket per person” K_shared distribution (age/rage-based), no I/O; align with group_encryption_design.md.
+- [x] KDF/Derivation unification: add HKDF-SHA3 helpers (default 256, optional 512; keep pluggable interface for future BLAKE3). Provide domain/context builders for group/event/poll keys.
+- [x] Group/key types: introduce `GroupId` (UUID/ULID newtype) and `EventUlid` to replace raw strings in derivations/hashes; bind derivation helpers to these types.
+- [x] Poll key reuse rule: encode that VoteCast derives its symmetric key from the PollCreate event_id (ULID) to avoid per-vote key inflation; document and test.
+- [x] E2EE access after ban: clarify docs that kicked members retain K_shared but cannot fetch new ciphertext, so cannot read new events.
+- [x] Public/private derivation parity: in key manager expose helpers so clients (KeyPair) and servers (RistrettoPoint only) share non-hardened derivation paths via `nazgul::traits::Derivable`, incorporating group_id/ring_hash/poll contexts.
+- [x] Key blob helpers: pure-logic interfaces for “one bucket per person” K_shared distribution (age/rage-based), no I/O; align with group_encryption_design.md.

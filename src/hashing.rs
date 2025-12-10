@@ -10,7 +10,7 @@ use crate::event::{
     AnonymousMessage, BanCreate, BanRevoke, Event, EventType, Poll, PollOption, PollQuestion,
     PollQuestionKind, RingUpdate, Vote, VoteSelection,
 };
-use crate::ids::{ContentHash, EventId};
+use crate::ids::{ContentHash, EventId, GroupId};
 use nazgul::ring::{Ring, RingHash};
 use serde::Serialize;
 use serde_json::Value;
@@ -219,7 +219,7 @@ pub fn vote_hash_sha3_256(vote: &Vote) -> Result<ContentHash, CanonicalHashError
 struct CanonicalEvent<'a> {
     id: EventId,
     previous_id: EventId,
-    group_id: &'a str,
+    group_id: GroupId,
     processed_at: u64,
     serialization_version: u8,
     event_type: CanonicalEventType<'a>,
@@ -230,7 +230,7 @@ impl<'a> From<&'a Event> for CanonicalEvent<'a> {
         Self {
             id: event.id,
             previous_id: event.previous_id,
-            group_id: &event.group_id,
+            group_id: event.group_id,
             processed_at: event.processed_at,
             serialization_version: event.serialization_version,
             event_type: CanonicalEventType::from(&event.event_type),
@@ -265,7 +265,7 @@ impl<'a> From<&'a EventType> for CanonicalEventType<'a> {
 
 #[derive(Serialize)]
 struct CanonicalPoll<'a> {
-    group_id: &'a str,
+    group_id: GroupId,
     ring_hash: RingHash,
     poll_id: &'a str,
     questions: Vec<CanonicalPollQuestion<'a>>,
@@ -284,7 +284,7 @@ impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
             .collect();
 
         Self {
-            group_id: &poll.group_id,
+            group_id: poll.group_id,
             ring_hash: poll.ring_hash,
             poll_id: &poll.poll_id,
             questions,
@@ -357,7 +357,7 @@ fn canonical_options<'a>(options: &'a [PollOption]) -> Vec<CanonicalPollOption<'
 
 #[derive(Serialize)]
 struct CanonicalVote<'a> {
-    group_id: &'a str,
+    group_id: GroupId,
     ring_hash: RingHash,
     poll_id: &'a str,
     poll_hash: crate::ids::ContentHash,
@@ -375,7 +375,7 @@ impl<'a> From<&'a Vote> for CanonicalVote<'a> {
             .collect();
 
         Self {
-            group_id: &v.group_id,
+            group_id: v.group_id,
             ring_hash: v.ring_hash,
             poll_id: &v.poll_id,
             poll_hash: v.poll_hash,
@@ -411,6 +411,7 @@ mod tests {
     use proptest::prelude::*;
     use serde::Serialize;
     use sha3::Sha3_512;
+    use ulid::Ulid;
 
     fn point(label: &[u8]) -> RistrettoPoint {
         RistrettoPoint::hash_from_bytes::<Sha3_512>(label)
@@ -545,7 +546,7 @@ mod tests {
         let h = poll_hash_sha3_256(&poll).expect("hash poll");
         assert_eq!(
             encode(h.0),
-            "ed0d986896a3e66e951c4d36167b7a120617a2dfb34cea130784410a6c687140"
+            "3a78765011ce19aa8064e5f33af17b9253f4b90f104d0900709423e2e043f234"
         );
     }
 
@@ -555,7 +556,7 @@ mod tests {
     impl PollFixture {
         fn poll() -> crate::event::Poll {
             crate::event::Poll {
-                group_id: "g".into(),
+                group_id: gid(),
                 ring_hash: RingHash([0x11; 32]),
                 poll_id: "poll-1".into(),
                 created_at: 42,
@@ -586,5 +587,9 @@ mod tests {
                 ],
             }
         }
+    }
+
+    fn gid() -> GroupId {
+        GroupId(Ulid::from_string("01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("static ulid"))
     }
 }
