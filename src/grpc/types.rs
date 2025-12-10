@@ -22,25 +22,30 @@ impl InMemoryEvents {
 }
 
 impl EventStore for InMemoryEvents {
-    fn append(&self, tenant: TenantId, event_bytes: EventBytes) -> Result<EventId, StorageError> {
+    fn append(
+        &self,
+        tenant: TenantId,
+        event_bytes: EventBytes,
+    ) -> Result<(EventId, i64), StorageError> {
         let mut inner = self.inner();
         let entry = inner.entry(tenant).or_default();
         let mut hasher = Sha3_256::new();
         hasher.update(&*event_bytes);
         let id = EventId(hasher.finalize().into());
-        entry.push((id, event_bytes));
-        Ok(id)
+        let seq = entry.len() as i64;
+        entry.push((id, event_bytes, seq));
+        Ok((id, seq))
     }
 
-    fn get(&self, tenant: TenantId, id: &EventId) -> Result<EventBytes, StorageError> {
+    fn get(&self, tenant: TenantId, id: &EventId) -> Result<EventRecord, StorageError> {
         let inner = self.inner();
         let events = inner
             .get(&tenant)
             .ok_or(StorageError::NotFound(NotFound::Event { id: *id, tenant }))?;
         events
             .iter()
-            .find(|(ev_id, _)| ev_id == id)
-            .map(|(_, b)| b.clone())
+            .find(|(ev_id, _, _)| ev_id == id)
+            .cloned()
             .ok_or(StorageError::NotFound(NotFound::Event { id: *id, tenant }))
     }
 
@@ -58,7 +63,7 @@ impl EventStore for InMemoryEvents {
     fn stream_from(
         &self,
         tenant: TenantId,
-        after: Option<EventId>,
+        after: Option<i64>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
         let inner = self.inner();
@@ -66,7 +71,7 @@ impl EventStore for InMemoryEvents {
             .get(&tenant)
             .ok_or(StorageError::NotFound(NotFound::Tail { tenant }))?;
         let start = after
-            .and_then(|id| events.iter().position(|(eid, _)| *eid == id))
+            .and_then(|seq| events.iter().position(|(_, _, s)| *s == seq))
             .map(|idx| idx + 1)
             .unwrap_or(0);
         Ok(events.iter().skip(start).take(limit).cloned().collect())

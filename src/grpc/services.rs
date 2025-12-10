@@ -34,10 +34,10 @@ impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S>
             .store
             .append(tenant, event_bytes.clone())
             .map_err(to_status)?;
-        let event_id = format_event_id(&id)?;
+        let event_id = format_event_id(&id.0)?;
         Ok(Response::new(PushEventResponse {
             event_id,
-            sequence_no: 0, // placeholder; real store returns sequence
+            sequence_no: id.1,
         }))
     }
 

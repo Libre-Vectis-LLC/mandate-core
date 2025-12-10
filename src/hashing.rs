@@ -220,6 +220,7 @@ struct CanonicalEvent<'a> {
     id: EventId,
     previous_id: EventId,
     group_id: GroupId,
+    // sequence_no intentionally excluded from canonical hash (storage ordering only)
     processed_at: u64,
     serialization_version: u8,
     event_type: CanonicalEventType<'a>,
