@@ -112,16 +112,36 @@ impl<T: EventStore> EventReader for T {
         after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
-        let records = self.stream_from(tenant, after_sequence, limit)?;
-        let filtered = records
-            .into_iter()
-            .filter_map(|(id, bytes, seq)| {
-                serde_json::from_slice::<EventGroupView>(&bytes)
+        let mut cursor = after_sequence;
+        let mut filtered = Vec::new();
+
+        loop {
+            let batch = self.stream_from(tenant, cursor, limit)?;
+            if batch.is_empty() {
+                break;
+            }
+
+            cursor = batch.last().map(|(_, _, seq)| *seq);
+            for (id, bytes, seq) in &batch {
+                if serde_json::from_slice::<EventGroupView>(bytes)
                     .ok()
                     .filter(|ev| ev.group_id == group_id)
-                    .map(|_| (id, bytes, seq))
-            })
-            .collect::<Vec<_>>();
+                    .is_some()
+                {
+                    filtered.push((*id, Arc::clone(bytes), *seq));
+                }
+            }
+
+            if filtered.len() >= limit {
+                break;
+            }
+
+            if batch.len() < limit {
+                // Storage is exhausted.
+                break;
+            }
+        }
+
         Ok(filtered)
     }
 }
