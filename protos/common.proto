@@ -2,6 +2,7 @@ syntax = "proto3";
 package mandate.v1;
 
 // Common identifiers and hashes used across services.
+// Authentication: all RPCs expect API token in gRPC metadata key `x-api-token`.
 
 // ULID in canonical string form (26 chars Crockford base32).
 message Ulid {

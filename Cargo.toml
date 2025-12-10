@@ -22,6 +22,7 @@ hkdf = "0.12"
 hmac = "0.12"
 zeroize = "1"
 mandate-proto = { path = "mandate-proto" }
+tonic = { version = "0.12", default-features = false, features = ["prost"] }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }

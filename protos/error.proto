@@ -1,0 +1,30 @@
+syntax = "proto3";
+package mandate.v1;
+
+// Shared error model (google.rpc style, simplified).
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  INVALID_ARGUMENT = 1;
+  NOT_FOUND = 2;
+  ALREADY_EXISTS = 3;
+  PERMISSION_DENIED = 4;
+  UNAUTHENTICATED = 5;
+  RESOURCE_EXHAUSTED = 6;
+  FAILED_PRECONDITION = 7;
+  CONFLICT = 8;
+  ABORTED = 9;
+  INTERNAL = 10;
+  UNAVAILABLE = 11;
+}
+
+message FieldViolation {
+  string field = 1;
+  string description = 2;
+}
+
+message ErrorDetail {
+  ErrorCode code = 1;
+  string message = 2;
+  repeated FieldViolation field_violations = 3;
+}

@@ -2,6 +2,7 @@ syntax = "proto3";
 package mandate.v1;
 
 import "common.proto";
+import "error.proto";
 
 service RingService {
   // Get the current head of the ring log (latest hash + member count).

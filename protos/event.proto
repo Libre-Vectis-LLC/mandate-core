@@ -2,6 +2,7 @@ syntax = "proto3";
 package mandate.v1;
 
 import "common.proto";
+import "error.proto";
 
 service EventService {
   // Push a signed event to the server (bytes are canonical, include signature).

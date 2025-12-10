@@ -1,6 +1,8 @@
 syntax = "proto3";
 package mandate.v1;
 
+import "error.proto";
+
 // Lightweight auth helpers (API token validation).
 service AuthService {
   rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);

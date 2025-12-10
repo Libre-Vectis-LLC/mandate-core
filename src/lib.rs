@@ -22,4 +22,5 @@ pub mod ids;
 pub mod key_manager;
 pub mod proto;
 pub mod ring_log;
+pub mod rpc;
 pub mod storage;

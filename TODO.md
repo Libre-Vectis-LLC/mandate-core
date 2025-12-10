@@ -24,3 +24,12 @@
 - [x] E2EE access after ban: clarify docs that kicked members retain K_shared but cannot fetch new ciphertext, so cannot read new events.
 - [x] Public/private derivation parity: in key manager expose helpers so clients (KeyPair) and servers (RistrettoPoint only) share non-hardened derivation paths via `nazgul::traits::Derivable`, incorporating group_id/ring_hash/poll contexts.
 - [x] Key blob helpers: pure-logic interfaces for “one bucket per person” K_shared distribution (age/rage-based), no I/O; align with group_encryption_design.md.
+
+## gRPC implementation (shared server/edge APIs)
+- [x] Error model & status mapping: gRPC status → domain errors; document token metadata key.
+- [ ] Service stubs wired to core types: AuthService, BillingService, GroupService, MemberService, EventService, RingService.
+- [ ] Conversion completeness: proto ↔ core coverage for ring deltas, key blobs, hashes; add tests.
+- [ ] Pagination & limits: finalize `PageToken` semantics and default/max `limit` per service.
+- [ ] Authn interceptor: enforce `x-api-token` metadata; tonic unit tests.
+- [ ] Storage wiring: map EventStore/RingView/BanIndex traits to service handlers (with in-memory mock for tests).
+- [ ] Streaming smoke tests: StreamEvents/StreamRing with pagination and batching.
