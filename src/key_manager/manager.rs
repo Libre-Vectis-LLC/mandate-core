@@ -61,6 +61,53 @@ fn info(label: &[u8], parts: &[&[u8]]) -> Vec<u8> {
 
 const KEY_BLOB_PREFIX: &[u8] = b"mandate:kshared:v1|";
 
+/// Delegate signing keypair derived per group.
+#[derive(Clone, Debug)]
+pub struct DelegateNazgulKeyPair(pub NazgulKeyPair);
+
+/// Session keypair derived per (group, ring) for member signatures.
+#[derive(Clone, Debug)]
+pub struct SessionNazgulKeyPair(pub NazgulKeyPair);
+
+impl DelegateNazgulKeyPair {
+    pub fn as_keypair(&self) -> &NazgulKeyPair {
+        &self.0
+    }
+
+    pub fn public(&self) -> &curve25519_dalek::ristretto::RistrettoPoint {
+        self.0.public()
+    }
+}
+
+impl SessionNazgulKeyPair {
+    pub fn as_keypair(&self) -> &NazgulKeyPair {
+        &self.0
+    }
+
+    pub fn public(&self) -> &curve25519_dalek::ristretto::RistrettoPoint {
+        self.0.public()
+    }
+}
+
+/// Derivation helpers implemented directly on `NazgulKeyPair` so both
+/// full and public-only keypairs can reuse the same API.
+pub trait MandateDerivable {
+    fn derive_delegate(&self, group_id: &GroupId) -> DelegateNazgulKeyPair;
+    fn derive_session(&self, group_id: &GroupId, ring_hash: &RingHash) -> SessionNazgulKeyPair;
+}
+
+impl MandateDerivable for NazgulKeyPair {
+    fn derive_delegate(&self, group_id: &GroupId) -> DelegateNazgulKeyPair {
+        let ctx = info(LABEL_DELEGATE, &[&group_id.to_bytes()]);
+        DelegateNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
+    }
+
+    fn derive_session(&self, group_id: &GroupId, ring_hash: &RingHash) -> SessionNazgulKeyPair {
+        let ctx = info(LABEL_MEMBER_SESSION, &[&group_id.to_bytes(), &ring_hash.0]);
+        SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
+    }
+}
+
 /// Manages the root master seed and derives application-specific keys.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct KeyManager {
@@ -118,13 +165,9 @@ impl KeyManager {
     /// (Owner Only) Derive the Delegate Signing Key using non-hardened derivation.
     /// This allows the server to verify delegation without seeing the private key.
     /// Child = Parent + Hash("mandate-delegate-signer-v1" || GroupId)
-    pub fn derive_delegate_signing_key(&self, group_id: &GroupId) -> MasterKeypair {
+    pub fn derive_delegate_signing_key(&self, group_id: &GroupId) -> DelegateNazgulKeyPair {
         let parent = self.derive_nazgul_identity();
-        let context = info(LABEL_DELEGATE, &[&group_id.to_bytes()]);
-
-        // Use Nazgul's derive_child on the keypair (non-hardened)
-        let child_kp = parent.as_keypair().derive_child::<Sha3_512>(&context);
-        MasterKeypair::new(child_kp)
+        parent.as_keypair().derive_delegate(group_id)
     }
 
     /// Derive a member session key (non-hardened) using group_id || ring_hash as context.
@@ -134,11 +177,9 @@ impl KeyManager {
         &self,
         group_id: &GroupId,
         ring_hash: &RingHash,
-    ) -> MasterKeypair {
+    ) -> SessionNazgulKeyPair {
         let parent = self.derive_nazgul_identity();
-        let ctx = info(LABEL_MEMBER_SESSION, &[&group_id.to_bytes(), &ring_hash.0]);
-        let child_kp = parent.derive_for_context(&ctx);
-        MasterKeypair::new(child_kp)
+        parent.as_keypair().derive_session(group_id, ring_hash)
     }
 }
 
@@ -161,24 +202,6 @@ pub fn derive_poll_identity(shared_secret: &[u8; 32], poll_event_ulid: &EventUli
     let id = RageIdentity::from_secret_bytes(okm);
     okm.zeroize();
     id
-}
-
-/// Derive a delegate signing keypair (non-hardened) from any Nazgul `KeyPair`
-/// (public-only or full). Server can pass `KeyPair::from_public_key_only`.
-pub fn derive_delegate_keypair(base: &NazgulKeyPair, group_id: &GroupId) -> NazgulKeyPair {
-    let ctx = info(LABEL_DELEGATE, &[&group_id.to_bytes()]);
-    base.derive_child::<Sha3_512>(&ctx)
-}
-
-/// Derive a member session keypair (non-hardened) from any Nazgul `KeyPair`
-/// (public-only or full). Context binds group + ring.
-pub fn derive_member_session_keypair(
-    base: &NazgulKeyPair,
-    group_id: &GroupId,
-    ring_hash: &RingHash,
-) -> NazgulKeyPair {
-    let ctx = info(LABEL_MEMBER_SESSION, &[&group_id.to_bytes(), &ring_hash.0]);
-    base.derive_child::<Sha3_512>(&ctx)
 }
 
 /// Encrypt the group-shared secret for a specific recipient (one bucket per person).
@@ -334,7 +357,7 @@ mod tests {
         let owner_pk = km.derive_nazgul_identity();
         // Public-only derivation using KeyPair::from_public_key_only
         let verifier_kp = NazgulKeyPair::from_public_key_only(*owner_pk.public());
-        let derived_pk = derive_delegate_keypair(&verifier_kp, &group_id);
+        let derived_pk = verifier_kp.derive_delegate(&group_id);
 
         assert_eq!(
             delegate_sk.public(),
@@ -386,11 +409,8 @@ mod tests {
         let ring = RingHash([7u8; 32]);
 
         let private = km.derive_member_session_key(&group, &ring);
-        let public = derive_member_session_keypair(
-            &NazgulKeyPair::from_public_key_only(*km.derive_nazgul_identity().public()),
-            &group,
-            &ring,
-        );
+        let public = NazgulKeyPair::from_public_key_only(*km.derive_nazgul_identity().public())
+            .derive_session(&group, &ring);
 
         assert_eq!(
             private.public(),
