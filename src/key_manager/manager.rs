@@ -1,4 +1,3 @@
-use crate::crypto::signature::MasterKeypair;
 use crate::ids::{EventUlid, GroupId, RingHash};
 use age::x25519::Identity as RageIdentity;
 use anyhow::Result;
@@ -60,6 +59,10 @@ fn info(label: &[u8], parts: &[&[u8]]) -> Vec<u8> {
 }
 
 const KEY_BLOB_PREFIX: &[u8] = b"mandate:kshared:v1|";
+
+/// Long-term master Nazgul keypair (identity), distinct from derived keys.
+#[derive(Clone, Debug)]
+pub struct MasterNazgulKeyPair(pub NazgulKeyPair);
 
 /// Delegate signing keypair derived per group.
 #[derive(Clone, Debug)]
@@ -135,14 +138,14 @@ impl KeyManager {
         Ok((Self { master_seed: seed }, phrase))
     }
 
-    /// Derive the user's long-term Nazgul identity (for signing).
+    /// Derive the user's long-term Nazgul master keypair (for signing).
     /// Path: HKDF(MasterSeed, "mandate-identity-v1")
-    pub fn derive_nazgul_identity(&self) -> MasterKeypair {
+    pub fn derive_nazgul_master_keypair(&self) -> MasterNazgulKeyPair {
         let mut okm = KdfAlgorithm::Sha3_256.expand::<32>(&self.master_seed, LABEL_IDENTITY);
         let scalar = Scalar::from_bytes_mod_order(okm);
         okm.zeroize();
         let keypair = NazgulKeyPair::new(scalar);
-        MasterKeypair::new(keypair)
+        MasterNazgulKeyPair(keypair)
     }
 
     /// Derive the user's long-term Rage identity (for decrypting key blobs).
@@ -166,8 +169,8 @@ impl KeyManager {
     /// This allows the server to verify delegation without seeing the private key.
     /// Child = Parent + Hash("mandate-delegate-signer-v1" || GroupId)
     pub fn derive_delegate_signing_key(&self, group_id: &GroupId) -> DelegateNazgulKeyPair {
-        let parent = self.derive_nazgul_identity();
-        parent.as_keypair().derive_delegate(group_id)
+        let parent = self.derive_nazgul_master_keypair();
+        parent.0.derive_delegate(group_id)
     }
 
     /// Derive a member session key (non-hardened) using group_id || ring_hash as context.
@@ -178,8 +181,8 @@ impl KeyManager {
         group_id: &GroupId,
         ring_hash: &RingHash,
     ) -> SessionNazgulKeyPair {
-        let parent = self.derive_nazgul_identity();
-        parent.as_keypair().derive_session(group_id, ring_hash)
+        let parent = self.derive_nazgul_master_keypair();
+        parent.0.derive_session(group_id, ring_hash)
     }
 }
 
@@ -308,9 +311,9 @@ mod tests {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
 
-        let nazgul1 = km.derive_nazgul_identity();
-        let nazgul2 = km.derive_nazgul_identity();
-        assert_eq!(nazgul1.public(), nazgul2.public());
+        let nazgul1 = km.derive_nazgul_master_keypair();
+        let nazgul2 = km.derive_nazgul_master_keypair();
+        assert_eq!(nazgul1.0.public(), nazgul2.0.public());
 
         let rage1 = km.derive_rage_identity();
         let rage2 = km.derive_rage_identity();
@@ -354,9 +357,9 @@ mod tests {
         let delegate_sk = km.derive_delegate_signing_key(&group_id);
 
         // Verifier derives delegate public key from Owner Public Key + Context
-        let owner_pk = km.derive_nazgul_identity();
+        let owner_pk = km.derive_nazgul_master_keypair();
         // Public-only derivation using KeyPair::from_public_key_only
-        let verifier_kp = NazgulKeyPair::from_public_key_only(*owner_pk.public());
+        let verifier_kp = NazgulKeyPair::from_public_key_only(*owner_pk.0.public());
         let derived_pk = verifier_kp.derive_delegate(&group_id);
 
         assert_eq!(
@@ -409,8 +412,9 @@ mod tests {
         let ring = RingHash([7u8; 32]);
 
         let private = km.derive_member_session_key(&group, &ring);
-        let public = NazgulKeyPair::from_public_key_only(*km.derive_nazgul_identity().public())
-            .derive_session(&group, &ring);
+        let public =
+            NazgulKeyPair::from_public_key_only(*km.derive_nazgul_master_keypair().0.public())
+                .derive_session(&group, &ring);
 
         assert_eq!(
             private.public(),
