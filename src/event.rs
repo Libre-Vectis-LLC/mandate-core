@@ -11,7 +11,7 @@ pub struct Event {
     pub previous_id: EventId,
     pub group_id: GroupId,
     /// Monotonic sequence assigned by storage; not part of content hash.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence_no: Option<i64>,
     pub processed_at: u64,
     pub serialization_version: u8,
