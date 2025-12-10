@@ -17,6 +17,7 @@
 //!
 pub mod crypto;
 pub mod event;
+pub mod grpc;
 pub mod hashing;
 pub mod ids;
 pub mod key_manager;
