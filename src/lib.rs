@@ -12,16 +12,20 @@
 //! - Concurrency: single-writer model avoids optimistic tokens; readers stream deterministically
 //!   with keyset pagination.
 //! - WASM: no std I/O; `getrandom` wasm_js enabled; target `wasm32-unknown-unknown` should compile
-//!   via `cargo check --target wasm32-unknown-unknown`.
+//!   via `cargo check --target wasm32-unknown-unknown`. gRPC surface is host-only.
 //! - Pluggability: digest trait leaves room for future BLAKE3 swap without API breakage.
 //!
 pub mod crypto;
 pub mod event;
-pub mod grpc;
 pub mod hashing;
 pub mod ids;
 pub mod key_manager;
 pub mod proto;
 pub mod ring_log;
-pub mod rpc;
 pub mod storage;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod grpc;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rpc;

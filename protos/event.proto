@@ -29,4 +29,7 @@ message StreamEventsRequest {
 
 message StreamEventsResponse {
   repeated bytes event_bytes = 1; // batch to reduce per-message overhead
+  // Storage-assigned sequence numbers aligned with event_bytes to allow clients
+  // to resume with start_sequence_no.
+  repeated int64 sequence_nos = 2;
 }
