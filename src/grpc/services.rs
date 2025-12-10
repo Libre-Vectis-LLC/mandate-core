@@ -1,6 +1,6 @@
 use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::rpc::RpcError;
-use crate::storage::{EventStore, RingView};
+use crate::storage::{EventReader, EventStore, RingView};
 use crate::{
     ids::{GroupId, RingHash},
     ring_log::RingDelta,
@@ -12,24 +12,23 @@ use mandate_proto::mandate::v1::{
     StreamEventsResponse, StreamRingRequest, StreamRingResponse,
 };
 use nazgul::traits::LocalByteConvertible;
-use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 /// Basic EventService stub wired to EventStore.
-pub struct EventServiceImpl<S: EventStore> {
+pub struct EventServiceImpl<S: EventStore + EventReader> {
     store: S,
 }
 
-impl<S: EventStore> EventServiceImpl<S> {
+impl<S: EventStore + EventReader> EventServiceImpl<S> {
     pub fn new(store: S) -> Self {
         Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S> {
+impl<S: EventStore + EventReader + Send + Sync + 'static> EventService for EventServiceImpl<S> {
     async fn push_event(
         &self,
         request: Request<PushEventRequest>,
@@ -66,31 +65,21 @@ impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S>
         } else {
             Some(body.start_sequence_no)
         };
-        let limit = body.limit as usize;
+        let limit = clamp_limit(body.limit);
 
         let mut filtered = Vec::new();
         loop {
             let records = self
                 .store
-                .stream_from(tenant, cursor, limit.max(1))
+                .stream_group(tenant, group_id, cursor, limit)
                 .map_err(to_status)?;
 
             if records.is_empty() {
                 break;
             }
 
-            let last_seq = records.last().map(|(_, _, seq)| *seq);
-
-            for (id, bytes, seq) in records {
-                let view: EventGroupView = serde_json::from_slice(&bytes).map_err(|_| {
-                    RpcError::Internal("stored event missing or invalid group_id".into())
-                })?;
-                if view.group_id == group_id {
-                    filtered.push((id, bytes, seq));
-                }
-            }
-
-            cursor = last_seq;
+            cursor = records.last().map(|(_, _, seq)| *seq);
+            filtered.extend(records);
 
             if !filtered.is_empty() {
                 break;
@@ -109,9 +98,17 @@ impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S>
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct EventGroupView {
-    group_id: GroupId,
+fn clamp_limit(client_limit: u32) -> usize {
+    let max_limit = std::env::var("MANDATE_GRPC_EVENTS_MAX_LIMIT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100);
+    let requested = if client_limit == 0 {
+        max_limit
+    } else {
+        client_limit as usize
+    };
+    requested.clamp(1, max_limit)
 }
 
 fn to_status(err: crate::storage::StorageError) -> Status {
