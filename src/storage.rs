@@ -91,6 +91,26 @@ pub trait EventStore {
     ) -> Result<Vec<EventRecord>, StorageError>;
 }
 
+/// Write-only surface for events; separated to allow distinct read/write backends.
+pub trait EventWriter {
+    /// Append a canonical, signed event (already serialized). Returns (event_id, sequence_no).
+    fn append(
+        &self,
+        tenant: TenantId,
+        event_bytes: EventBytes,
+    ) -> Result<(EventId, SequenceNo), StorageError>;
+}
+
+impl<T: EventStore> EventWriter for T {
+    fn append(
+        &self,
+        tenant: TenantId,
+        event_bytes: EventBytes,
+    ) -> Result<(EventId, SequenceNo), StorageError> {
+        EventStore::append(self, tenant, event_bytes)
+    }
+}
+
 /// Read-only grouping helper to support backend-specific implementations (e.g., Postgres).
 pub trait EventReader {
     /// Deterministic forward slice for a specific group, after an optional anchor.

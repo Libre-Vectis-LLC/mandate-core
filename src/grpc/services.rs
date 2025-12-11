@@ -1,7 +1,7 @@
 use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
-use crate::storage::{EventReader, EventStore, RingView};
+use crate::storage::{EventReader, EventWriter, RingView};
 use crate::{
     ids::{GroupId, RingHash},
     ring_log::RingDelta,
@@ -18,18 +18,18 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 /// Basic EventService stub wired to EventStore.
-pub struct EventServiceImpl<S: EventStore + EventReader> {
+pub struct EventServiceImpl<S: EventWriter + EventReader> {
     store: S,
 }
 
-impl<S: EventStore + EventReader> EventServiceImpl<S> {
+impl<S: EventWriter + EventReader> EventServiceImpl<S> {
     pub fn new(store: S) -> Self {
         Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl<S: EventStore + EventReader + Send + Sync + 'static> EventService for EventServiceImpl<S> {
+impl<S: EventWriter + EventReader + Send + Sync + 'static> EventService for EventServiceImpl<S> {
     async fn push_event(
         &self,
         request: Request<PushEventRequest>,
