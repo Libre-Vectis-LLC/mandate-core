@@ -6,9 +6,10 @@
 //! - Ring reconstruction is the only replay scenario; implementations find a shortest-path delta slice.
 //! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, ring_hash)`, `(master_pubkey, created_at)`, keyset pagination.
 
-use crate::ids::{EventId, RingHash, TenantId};
+use crate::ids::{EventId, GroupId, RingHash, TenantId};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
+use serde::Deserialize;
 use std::sync::Arc;
 
 /// Canonical, signed event bytes (audit-preserving).
@@ -88,6 +89,67 @@ pub trait EventStore {
         after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError>;
+}
+
+/// Read-only grouping helper to support backend-specific implementations (e.g., Postgres).
+pub trait EventReader {
+    /// Deterministic forward slice for a specific group, after an optional anchor.
+    fn stream_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        after_sequence: Option<SequenceNo>,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StorageError>;
+}
+
+/// Default filtering implementation on top of `EventStore`.
+impl<T: EventStore> EventReader for T {
+    fn stream_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        after_sequence: Option<SequenceNo>,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StorageError> {
+        let mut cursor = after_sequence;
+        let mut filtered = Vec::new();
+
+        loop {
+            let batch = self.stream_from(tenant, cursor, limit)?;
+            if batch.is_empty() {
+                break;
+            }
+
+            cursor = batch.last().map(|(_, _, seq)| *seq);
+            for (id, bytes, seq) in &batch {
+                if serde_json::from_slice::<EventGroupView>(bytes)
+                    .ok()
+                    .filter(|ev| ev.group_id == group_id)
+                    .is_some()
+                {
+                    filtered.push((*id, Arc::clone(bytes), *seq));
+                }
+            }
+
+            if filtered.len() >= limit {
+                break;
+            }
+
+            if batch.len() < limit {
+                // Storage is exhausted.
+                break;
+            }
+        }
+
+        Ok(filtered)
+    }
+}
+
+/// Minimal projection used for group filtering without requiring storage metadata.
+#[derive(Debug, Deserialize)]
+pub struct EventGroupView {
+    pub group_id: GroupId,
 }
 
 /// Access to ring snapshots and delta paths; caching strategy is implementation-defined.

@@ -1,6 +1,7 @@
 use crate::proto::API_TOKEN_METADATA_KEY;
+use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
-use crate::storage::{EventStore, RingView};
+use crate::storage::{EventReader, EventStore, RingView};
 use crate::{
     ids::{GroupId, RingHash},
     ring_log::RingDelta,
@@ -12,24 +13,23 @@ use mandate_proto::mandate::v1::{
     StreamEventsResponse, StreamRingRequest, StreamRingResponse,
 };
 use nazgul::traits::LocalByteConvertible;
-use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 /// Basic EventService stub wired to EventStore.
-pub struct EventServiceImpl<S: EventStore> {
+pub struct EventServiceImpl<S: EventStore + EventReader> {
     store: S,
 }
 
-impl<S: EventStore> EventServiceImpl<S> {
+impl<S: EventStore + EventReader> EventServiceImpl<S> {
     pub fn new(store: S) -> Self {
         Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S> {
+impl<S: EventStore + EventReader + Send + Sync + 'static> EventService for EventServiceImpl<S> {
     async fn push_event(
         &self,
         request: Request<PushEventRequest>,
@@ -61,47 +61,22 @@ impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S>
             crate::proto::parse_ulid(&body.group_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
-        let mut cursor = if body.start_sequence_no < 0 {
+        let cursor = if body.start_sequence_no < 0 {
             None
         } else {
             Some(body.start_sequence_no)
         };
-        let limit = body.limit as usize;
-
-        let mut filtered = Vec::new();
-        loop {
-            let records = self
-                .store
-                .stream_from(tenant, cursor, limit.max(1))
-                .map_err(to_status)?;
-
-            if records.is_empty() {
-                break;
-            }
-
-            let last_seq = records.last().map(|(_, _, seq)| *seq);
-
-            for (id, bytes, seq) in records {
-                let view: EventGroupView = serde_json::from_slice(&bytes).map_err(|_| {
-                    RpcError::Internal("stored event missing or invalid group_id".into())
-                })?;
-                if view.group_id == group_id {
-                    filtered.push((id, bytes, seq));
-                }
-            }
-
-            cursor = last_seq;
-
-            if !filtered.is_empty() {
-                break;
-            }
-        }
+        let limit = clamp_events_limit(body.limit);
+        let records = self
+            .store
+            .stream_group(tenant, group_id, cursor, limit)
+            .map_err(to_status)?;
 
         let (tx, rx) = mpsc::channel(1);
-        let sequence_nos: Vec<i64> = filtered.iter().map(|(_, _, seq)| *seq).collect();
+        let sequence_nos: Vec<i64> = records.iter().map(|(_, _, seq)| *seq).collect();
         let _ = tx
             .send(Ok(StreamEventsResponse {
-                event_bytes: filtered.into_iter().map(|(_, b, _)| b.to_vec()).collect(),
+                event_bytes: records.into_iter().map(|(_, b, _)| b.to_vec()).collect(),
                 sequence_nos,
             }))
             .await;
@@ -109,9 +84,34 @@ impl<S: EventStore + Send + Sync + 'static> EventService for EventServiceImpl<S>
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct EventGroupView {
-    group_id: GroupId,
+fn clamp_limit(client_limit: u32) -> usize {
+    let max_limit = std::env::var("MANDATE_GRPC_EVENTS_MAX_LIMIT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100);
+    let requested = if client_limit == 0 {
+        max_limit
+    } else {
+        client_limit as usize
+    };
+    requested.clamp(1, max_limit)
+}
+
+fn clamp_events_limit(client_limit: u32) -> usize {
+    clamp_limit(client_limit)
+}
+
+fn clamp_ring_limit(client_limit: u32) -> usize {
+    let max_limit = std::env::var("MANDATE_GRPC_RING_MAX_LIMIT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100);
+    let requested = if client_limit == 0 {
+        max_limit
+    } else {
+        client_limit as usize
+    };
+    requested.clamp(1, max_limit)
 }
 
 fn to_status(err: crate::storage::StorageError) -> Status {
@@ -206,12 +206,17 @@ impl<R: RingView + Send + Sync + 'static> RingService for RingServiceImpl<R> {
             .ring_delta_path(tenant, after_hash, current_hash)
             .map_err(to_status)?;
 
-        let entries = encode_ring_delta_path(&path)?;
+        let entries =
+            encode_ring_delta_path(&self.rings, tenant, &path, clamp_ring_limit(req.limit))?;
+        let next_hash = entries
+            .last()
+            .map(|e| e.ring_hash.clone())
+            .unwrap_or_default();
         let (tx, rx) = mpsc::channel(1);
         let _ = tx
             .send(Ok(StreamRingResponse {
                 entries,
-                next_ring_hash: path.to.0.to_vec(),
+                next_ring_hash: next_hash,
             }))
             .await;
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -220,14 +225,28 @@ impl<R: RingView + Send + Sync + 'static> RingService for RingServiceImpl<R> {
 
 #[allow(clippy::result_large_err)]
 fn encode_ring_delta_path(
+    rings: &impl RingView,
+    tenant: crate::ids::TenantId,
     path: &crate::storage::RingDeltaPath,
+    limit: usize,
 ) -> Result<Vec<mandate_proto::mandate::v1::RingDeltaEntry>, Status> {
-    let mut deltas_bytes = Vec::new();
-    for delta in &path.deltas {
-        deltas_bytes.push(encode_ring_delta(delta)?);
-    }
+    let anchor = rings.ring_by_hash(tenant, &path.from).map_err(to_status)?;
+    let mut ring = (*anchor).clone();
+
+    let deltas_bytes = path
+        .deltas
+        .iter()
+        .take(limit)
+        .map(|d| {
+            apply_delta(&mut ring, d).map_err(|e| RpcError::Internal(e.to_string()))?;
+            encode_ring_delta(d)
+        })
+        .collect::<Result<Vec<_>, Status>>()?;
+
+    let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
+
     Ok(vec![mandate_proto::mandate::v1::RingDeltaEntry {
-        ring_hash: path.to.0.to_vec(),
+        ring_hash: ring_hash.0.to_vec(),
         deltas: deltas_bytes,
     }])
 }
