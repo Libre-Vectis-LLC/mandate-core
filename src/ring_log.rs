@@ -65,6 +65,92 @@ impl RingDeltaLog {
         Ok((hash, idx))
     }
 
+    /// Latest ring hash if any entries exist.
+    pub fn head_hash(&self) -> Option<&RingHash> {
+        self.entries.last().map(|(h, _)| h)
+    }
+
+    /// First ring hash (after initial delta), if any entries exist.
+    pub fn genesis_hash(&self) -> Option<&RingHash> {
+        self.entries.first().map(|(h, _)| h)
+    }
+
+    /// Produce a delta path from an optional anchor to a target hash.
+    pub fn delta_path(
+        &self,
+        anchor: Option<&RingHash>,
+        target: &RingHash,
+    ) -> Result<Vec<RingDelta>, RingLogError> {
+        let target_positions = self.index.get(target).ok_or(RingLogError::TargetNotFound)?;
+
+        let anchor_hash = anchor.unwrap_or_else(|| {
+            self.entries
+                .first()
+                .map(|(h, _)| h)
+                .expect("entries non-empty for delta_path")
+        });
+
+        let anchor_positions = self
+            .index
+            .get(anchor_hash)
+            .ok_or(RingLogError::AnchorNotFound)?;
+
+        let mut best: Option<(usize, usize, isize)> = None;
+        for &a in anchor_positions {
+            for &t in target_positions {
+                let dist = (t as isize - a as isize).abs();
+                if best.map(|b| dist < b.2).unwrap_or(true) {
+                    best = Some((a, t, dist));
+                }
+            }
+        }
+
+        let (a_idx, t_idx, _) =
+            best.expect("non-empty anchor/target positions guaranteed by index lookups");
+
+        let anchored = anchor.is_some();
+
+        if a_idx == t_idx {
+            // Same position: if unanchored, replay from the beginning to build the ring.
+            if anchored {
+                return Ok(Vec::new());
+            }
+            return Ok(self
+                .entries
+                .iter()
+                .take(a_idx + 1)
+                .map(|(_, d)| d.clone())
+                .collect());
+        }
+
+        if a_idx < t_idx {
+            // Forward path (anchor -> target).
+            let start = if anchored { a_idx + 1 } else { 0 };
+            let count = t_idx.saturating_sub(start) + 1;
+            let deltas = self
+                .entries
+                .iter()
+                .skip(start)
+                .take(count)
+                .map(|(_, d)| d.clone())
+                .collect();
+            Ok(deltas)
+        } else {
+            // Backward path: invert deltas in reverse order.
+            let start = t_idx;
+            let count = a_idx.saturating_sub(start) + 1;
+            let deltas = self
+                .entries
+                .iter()
+                .skip(start)
+                .take(count)
+                .rev()
+                .map(|(_, d)| invert_delta(d))
+                .collect();
+            Ok(deltas)
+        }
+    }
+
     /// Reconstruct target ring via shortest forward/backward replay.
     /// If `anchor` is None, start from an empty ring.
     pub fn reconstruct(
@@ -157,6 +243,13 @@ fn apply_inverse_delta(ring: &mut Ring, delta: &RingDelta) -> Result<(), RingLog
         }
     }
     Ok(())
+}
+
+fn invert_delta(delta: &RingDelta) -> RingDelta {
+    match delta {
+        RingDelta::Add(pk) => RingDelta::Remove(*pk),
+        RingDelta::Remove(pk) => RingDelta::Add(*pk),
+    }
 }
 
 fn point_from(pk: &MasterPublicKey) -> Result<nazgul::scalar::RistrettoPoint, RingLogError> {
