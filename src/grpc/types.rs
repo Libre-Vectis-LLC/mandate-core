@@ -209,12 +209,18 @@ mod tests {
     use super::*;
     use crate::hashing::ring_hash_sha3_256;
     use crate::ids::MasterPublicKey;
-    use nazgul::{scalar::RistrettoPoint, traits::LocalByteConvertible};
+    use crate::key_manager::KeyManager;
+    use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
 
+    const TEST_MNEMONIC: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
     fn mpk(label: &[u8]) -> MasterPublicKey {
-        let point = RistrettoPoint::hash_from_bytes::<Sha3_512>(label);
-        MasterPublicKey(point.to_bytes())
+        let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
+        let master = km.derive_nazgul_master_keypair();
+        let child = master.0.derive_child::<Sha3_512>(label);
+        MasterPublicKey(child.public().to_bytes())
     }
 
     #[test]

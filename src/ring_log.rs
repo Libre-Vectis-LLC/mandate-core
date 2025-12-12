@@ -279,20 +279,26 @@ fn point_from(pk: &MasterPublicKey) -> Result<nazgul::scalar::RistrettoPoint, Ri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nazgul::traits::LocalByteConvertible;
+    use crate::key_manager::KeyManager;
+    use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
 
+    const TEST_MNEMONIC: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
     fn mpk(label: &[u8]) -> MasterPublicKey {
-        let point = nazgul::scalar::RistrettoPoint::hash_from_bytes::<Sha3_512>(label);
-        MasterPublicKey(point.to_bytes())
+        let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
+        let master = km.derive_nazgul_master_keypair();
+        let child = master.0.derive_child::<Sha3_512>(label);
+        MasterPublicKey(child.public().to_bytes())
     }
 
     #[test]
     fn reconstruct_chooses_shortest_path_forward() {
-        let founder = nazgul::scalar::RistrettoPoint::hash_from_bytes::<Sha3_512>(b"a");
-        let mut log = RingDeltaLog::new(MasterPublicKey(founder.to_bytes()))
-            .expect("founder add cannot fail");
-        let mut ring = Ring::new(vec![founder]);
+        let founder_pk = mpk(b"founder");
+        let founder_point = point_from(&founder_pk).expect("valid founder pk");
+        let mut log = RingDeltaLog::new(founder_pk).expect("founder add cannot fail");
+        let mut ring = Ring::new(vec![founder_point]);
 
         // Add b, c, remove b (b added again later)
         let (_h1, _) = log
@@ -318,10 +324,10 @@ mod tests {
 
     #[test]
     fn reconstruct_backward_path() {
-        let genesis_point = nazgul::scalar::RistrettoPoint::hash_from_bytes::<Sha3_512>(b"a");
+        let genesis_pk = mpk(b"genesis");
+        let genesis_point = point_from(&genesis_pk).expect("valid genesis pk");
         let genesis = Ring::new(vec![genesis_point]);
-        let mut log = RingDeltaLog::new(MasterPublicKey(genesis_point.to_bytes()))
-            .expect("founder add cannot fail");
+        let mut log = RingDeltaLog::new(genesis_pk).expect("founder add cannot fail");
         let mut ring = genesis.clone();
 
         let (_h_anchor, _) = log

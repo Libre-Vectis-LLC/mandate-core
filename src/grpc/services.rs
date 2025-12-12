@@ -329,15 +329,21 @@ mod tests {
     use crate::event::{Event, EventType, ProofOfInnocence};
     use crate::grpc::types::{InMemoryEvents, InMemoryRings};
     use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
+    use crate::key_manager::KeyManager;
     use crate::storage::RingWriter;
-    use nazgul::{scalar::RistrettoPoint, traits::LocalByteConvertible};
+    use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
     use std::sync::Arc;
     use tokio_stream::StreamExt;
 
+    const TEST_MNEMONIC: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
     fn mpk(label: &[u8]) -> MasterPublicKey {
-        let point = RistrettoPoint::hash_from_bytes::<Sha3_512>(label);
-        MasterPublicKey(point.to_bytes())
+        let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
+        let master = km.derive_nazgul_master_keypair();
+        let child = master.0.derive_child::<Sha3_512>(label);
+        MasterPublicKey(child.public().to_bytes())
     }
 
     fn make_event_bytes(group_id: GroupId, marker: u8) -> Vec<u8> {
