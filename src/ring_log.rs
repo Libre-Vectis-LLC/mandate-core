@@ -81,34 +81,17 @@ impl RingDeltaLog {
         anchor: Option<&RingHash>,
         target: &RingHash,
     ) -> Result<Vec<RingDelta>, RingLogError> {
-        let target_positions = self.index.get(target).ok_or(RingLogError::TargetNotFound)?;
-
-        let anchor_hash = anchor.unwrap_or_else(|| {
-            self.entries
-                .first()
-                .map(|(h, _)| h)
-                .expect("entries non-empty for delta_path")
-        });
+        let anchored = anchor.is_some();
+        let anchor_hash = anchor.copied().or_else(|| self.genesis_hash().copied());
+        let anchor_hash = anchor_hash.ok_or(RingLogError::AnchorNotFound)?;
 
         let anchor_positions = self
             .index
-            .get(anchor_hash)
+            .get(&anchor_hash)
             .ok_or(RingLogError::AnchorNotFound)?;
+        let target_positions = self.index.get(target).ok_or(RingLogError::TargetNotFound)?;
 
-        let mut best: Option<(usize, usize, isize)> = None;
-        for &a in anchor_positions {
-            for &t in target_positions {
-                let dist = (t as isize - a as isize).abs();
-                if best.map(|b| dist < b.2).unwrap_or(true) {
-                    best = Some((a, t, dist));
-                }
-            }
-        }
-
-        let (a_idx, t_idx, _) =
-            best.expect("non-empty anchor/target positions guaranteed by index lookups");
-
-        let anchored = anchor.is_some();
+        let (a_idx, t_idx) = Self::shortest_indices(anchor_positions, target_positions)?;
 
         if a_idx == t_idx {
             // Same position: if unanchored, replay from the beginning to build the ring.
@@ -158,31 +141,8 @@ impl RingDeltaLog {
         target: &RingHash,
         anchor: Option<&Ring>,
     ) -> Result<Ring, RingLogError> {
-        let target_positions = self.index.get(target).ok_or(RingLogError::TargetNotFound)?;
-
-        let (mut ring, anchor_positions) = match anchor {
-            Some(r) => {
-                let h = ring_hash_sha3_256(r);
-                let pos = self.index.get(&h).ok_or(RingLogError::AnchorNotFound)?;
-                (r.clone(), pos.clone())
-            }
-            None => (Ring::new(vec![]), vec![0]),
-        };
-
-        // choose minimal distance pair
-        let mut best: Option<(usize, usize, isize)> = None;
-        for &a in &anchor_positions {
-            for &t in target_positions {
-                let dist = (t as isize - a as isize).abs();
-                if best.map(|b| dist < b.2).unwrap_or(true) {
-                    best = Some((a, t, dist));
-                }
-            }
-        }
-        // `best` is always set because both `target_positions` and `anchor_positions`
-        // are non-empty: we validated the hashes via the index lookups above.
-        let (a_idx, t_idx, _) =
-            best.expect("non-empty anchor/target positions guaranteed by index lookups");
+        let (mut ring, span) = self.shortest_span(target, anchor)?;
+        let (a_idx, t_idx, anchored) = span;
 
         if a_idx == t_idx {
             // Anchor None means we started from empty ring; need to apply deltas up to target.
@@ -193,8 +153,6 @@ impl RingDeltaLog {
             }
             return Ok(ring);
         }
-
-        let anchored = anchor.is_some();
 
         if a_idx < t_idx {
             // If no anchor was provided, the current ring may not correspond to any entry;
@@ -214,6 +172,68 @@ impl RingDeltaLog {
         }
 
         Ok(ring)
+    }
+
+    /// Return (anchor_idx, target_idx, anchored_flag) for the minimal-distance pair.
+    fn shortest_span(
+        &self,
+        target: &RingHash,
+        anchor: Option<&Ring>,
+    ) -> Result<(Ring, (usize, usize, bool)), RingLogError> {
+        let target_positions = self.index.get(target).ok_or(RingLogError::TargetNotFound)?;
+
+        let (ring, anchor_positions, anchored) = match anchor {
+            Some(r) => {
+                let h = ring_hash_sha3_256(r);
+                let pos = self.index.get(&h).ok_or(RingLogError::AnchorNotFound)?;
+                (r.clone(), pos.clone(), true)
+            }
+            None => {
+                let empty = Ring::new(vec![]);
+                let pos = if self.entries.is_empty() {
+                    vec![]
+                } else {
+                    vec![0]
+                };
+                (empty, pos, false)
+            }
+        };
+
+        if anchor_positions.is_empty() {
+            return Err(RingLogError::AnchorNotFound);
+        }
+
+        let mut best: Option<(usize, usize, isize)> = None;
+        for &a in &anchor_positions {
+            for &t in target_positions {
+                let dist = (t as isize - a as isize).abs();
+                if best.map(|b| dist < b.2).unwrap_or(true) {
+                    best = Some((a, t, dist));
+                }
+            }
+        }
+
+        let (a_idx, t_idx, _) =
+            best.expect("non-empty anchor/target positions guaranteed by index lookups");
+
+        Ok((ring, (a_idx, t_idx, anchored)))
+    }
+
+    fn shortest_indices(
+        anchor_positions: &[usize],
+        target_positions: &[usize],
+    ) -> Result<(usize, usize), RingLogError> {
+        let mut best: Option<(usize, usize, isize)> = None;
+        for &a in anchor_positions {
+            for &t in target_positions {
+                let dist = (t as isize - a as isize).abs();
+                if best.map(|b| dist < b.2).unwrap_or(true) {
+                    best = Some((a, t, dist));
+                }
+            }
+        }
+        let (a, t, _) = best.ok_or(RingLogError::AnchorNotFound)?;
+        Ok((a, t))
     }
 }
 
