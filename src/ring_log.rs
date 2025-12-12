@@ -120,7 +120,7 @@ impl RingDeltaLog {
             Ok(deltas)
         } else {
             // Backward path: invert deltas in reverse order.
-            let start = t_idx;
+            let start = if anchored { t_idx + 1 } else { t_idx };
             let count = a_idx.saturating_sub(start) + 1;
             let deltas = self
                 .entries
@@ -353,6 +353,35 @@ mod tests {
         let reconstructed = log.reconstruct(&target_hash, None).expect("reconstruct");
         assert_eq!(ring_hash_sha3_256(&reconstructed), target_hash);
         assert_eq!(reconstructed.members().len(), 1);
+    }
+
+    #[test]
+    fn delta_path_backward_respects_target() {
+        // Build a log: founder a, add b, add c. Anchor at h2 (after c), target at h1 (after b).
+        let founder = mpk(b"a");
+        let mut log = RingDeltaLog::new(founder.clone()).expect("founder add cannot fail");
+        let mut ring = Ring::new(vec![point_from(&founder).unwrap()]);
+
+        let (h1, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"b")))
+            .expect("append b");
+        let (h2, _) = log
+            .append(&mut ring, RingDelta::Add(mpk(b"c")))
+            .expect("append c");
+
+        let path = log
+            .delta_path(Some(&h2), &h1)
+            .expect("delta path should exist");
+
+        // Reconstruct anchor ring, then apply returned deltas; final hash must equal target (h1).
+        let mut anchor_ring = log
+            .reconstruct(&h2, None)
+            .expect("anchor reconstruct should succeed");
+        for delta in path {
+            apply_delta(&mut anchor_ring, &delta).expect("delta apply");
+        }
+        let resulting_hash = ring_hash_sha3_256(&anchor_ring);
+        assert_eq!(resulting_hash, h1, "backward path must land on target");
     }
 
     #[test]
