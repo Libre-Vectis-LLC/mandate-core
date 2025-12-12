@@ -6,7 +6,7 @@
 //! - Ring reconstruction is the only replay scenario; implementations find a shortest-path delta slice.
 //! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, ring_hash)`, `(master_pubkey, created_at)`, keyset pagination.
 
-use crate::ids::{EventId, GroupId, RingHash, TenantId};
+use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
 use serde::Deserialize;
@@ -196,4 +196,15 @@ pub trait RingView {
 pub trait RingWriter {
     /// Append a delta to the tenant ring log, returning the new head hash.
     fn append_delta(&self, tenant: TenantId, delta: RingDelta) -> Result<RingHash, StorageError>;
+}
+
+/// Optional ban index for fast key-image checks.
+pub trait BanIndex {
+    /// Return whether `key_image` is currently banned for `group_id`.
+    fn is_banned(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        key_image: &KeyImage,
+    ) -> Result<bool, StorageError>;
 }

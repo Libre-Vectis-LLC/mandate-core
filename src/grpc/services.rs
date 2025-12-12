@@ -378,7 +378,7 @@ impl MemberService for MemberServiceImpl {
 mod tests {
     use super::*;
     use crate::event::{Event, EventType, ProofOfInnocence};
-    use crate::grpc::types::{InMemoryEvents, InMemoryRings};
+    use crate::grpc::types::{InMemoryEvents, InMemoryRings, NoopBanIndex};
     use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::ring_log::RingDelta;
@@ -428,8 +428,14 @@ mod tests {
     async fn stream_events_filters_and_paginates_by_sequence() {
         let events = Arc::new(InMemoryEvents::new());
         let rings = Arc::new(InMemoryRings::new());
-        let store =
-            StorageFacade::new(events.clone(), events.clone(), rings.clone(), rings.clone());
+        let bans = Arc::new(NoopBanIndex::default());
+        let store = StorageFacade::new(
+            events.clone(),
+            events.clone(),
+            rings.clone(),
+            rings.clone(),
+            bans,
+        );
         let svc = EventServiceImpl::new(store);
 
         let tenant_ulid = ulid::Ulid::new();
@@ -490,8 +496,14 @@ mod tests {
     async fn stream_ring_returns_deltas_after_anchor_with_limit() {
         let events = Arc::new(InMemoryEvents::new());
         let rings = Arc::new(InMemoryRings::new());
-        let store =
-            StorageFacade::new(events.clone(), events.clone(), rings.clone(), rings.clone());
+        let bans = Arc::new(NoopBanIndex::default());
+        let store = StorageFacade::new(
+            events.clone(),
+            events.clone(),
+            rings.clone(),
+            rings.clone(),
+            bans,
+        );
         let svc = RingServiceImpl::new(store);
 
         let tenant_ulid = ulid::Ulid::new();

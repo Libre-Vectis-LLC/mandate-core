@@ -31,5 +31,5 @@
 - [x] Conversion completeness: proto ↔ core coverage for ring deltas, key blobs, hashes; add tests.
 - [x] Pagination & limits: finalize `PageToken` semantics and default/max `limit` per service.
 - [x] Authn interceptor: enforce `x-api-token` metadata; tonic unit tests.
-- [ ] Storage wiring: map EventStore/RingView/BanIndex traits to service handlers (with in-memory mock for tests).
+- [x] Storage wiring: map EventStore/RingView/BanIndex traits to service handlers (with in-memory mock for tests).
 - [x] Streaming smoke tests: StreamEvents/StreamRing with pagination and batching.

@@ -1,6 +1,6 @@
-use crate::ids::{EventId, TenantId};
+use crate::ids::{EventId, GroupId, KeyImage, TenantId};
 use crate::storage::{
-    EventBytes, EventRecord, EventStore, NotFound, RingView, RingWriter, StorageError,
+    BanIndex, EventBytes, EventRecord, EventStore, NotFound, RingView, RingWriter, StorageError,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -201,6 +201,20 @@ impl RingWriter for InMemoryRings {
             .map_err(|e| StorageError::Backend(e.to_string()))?;
         state.current_hash = hash;
         Ok(hash)
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct NoopBanIndex;
+
+impl BanIndex for NoopBanIndex {
+    fn is_banned(
+        &self,
+        _tenant: TenantId,
+        _group_id: GroupId,
+        _key_image: &KeyImage,
+    ) -> Result<bool, StorageError> {
+        Ok(false)
     }
 }
 
