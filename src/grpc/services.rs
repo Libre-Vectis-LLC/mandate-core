@@ -9,9 +9,15 @@ use crate::{
 };
 use mandate_proto::mandate::v1::{
     auth_service_server::AuthService, billing_service_server::BillingService,
-    event_service_server::EventService, ring_service_server::RingService, GetRingHeadRequest,
-    GetRingHeadResponse, PushEventRequest, PushEventResponse, StreamEventsRequest,
-    StreamEventsResponse, StreamRingRequest, StreamRingResponse,
+    event_service_server::EventService, group_service_server::GroupService,
+    member_service_server::MemberService, ring_service_server::RingService, CreateGroupRequest,
+    CreateGroupResponse, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse, GetGroupRequest,
+    GetGroupResponse, GetRingHeadRequest, GetRingHeadResponse, ListPendingMembersRequest,
+    ListPendingMembersResponse, PushEventRequest, PushEventResponse, RedeemGiftCardRequest,
+    RedeemGiftCardResponse, SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
+    StreamEventsRequest, StreamEventsResponse, StreamRingRequest, StreamRingResponse,
+    SubmitPendingMemberRequest, SubmitPendingMemberResponse, TransferToGroupRequest,
+    TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use nazgul::traits::LocalByteConvertible;
 use tokio::sync::mpsc;
@@ -310,16 +316,77 @@ impl BillingService for BillingServiceImpl {
 
     async fn redeem_gift_card(
         &self,
-        _request: Request<mandate_proto::mandate::v1::RedeemGiftCardRequest>,
-    ) -> Result<Response<mandate_proto::mandate::v1::RedeemGiftCardResponse>, Status> {
+        _request: Request<RedeemGiftCardRequest>,
+    ) -> Result<Response<RedeemGiftCardResponse>, Status> {
         Err(RpcError::Unavailable("billing backend not wired".into()).into())
     }
 
     async fn transfer_to_group(
         &self,
-        _request: Request<mandate_proto::mandate::v1::TransferToGroupRequest>,
-    ) -> Result<Response<mandate_proto::mandate::v1::TransferToGroupResponse>, Status> {
+        _request: Request<TransferToGroupRequest>,
+    ) -> Result<Response<TransferToGroupResponse>, Status> {
         Err(RpcError::Unavailable("billing backend not wired".into()).into())
+    }
+}
+
+/// Group service placeholder (tenant/group management lives in server/enterprise).
+pub struct GroupServiceImpl;
+
+#[tonic::async_trait]
+impl GroupService for GroupServiceImpl {
+    async fn create_group(
+        &self,
+        _request: Request<CreateGroupRequest>,
+    ) -> Result<Response<CreateGroupResponse>, Status> {
+        Err(RpcError::Unavailable("group backend not wired".into()).into())
+    }
+
+    async fn set_owner_public_key(
+        &self,
+        _request: Request<SetOwnerPublicKeyRequest>,
+    ) -> Result<Response<SetOwnerPublicKeyResponse>, Status> {
+        Err(RpcError::Unavailable("group backend not wired".into()).into())
+    }
+
+    async fn get_group(
+        &self,
+        _request: Request<GetGroupRequest>,
+    ) -> Result<Response<GetGroupResponse>, Status> {
+        Err(RpcError::Unavailable("group backend not wired".into()).into())
+    }
+}
+
+/// Member service placeholder (pending members/key blobs handled in server/enterprise).
+pub struct MemberServiceImpl;
+
+#[tonic::async_trait]
+impl MemberService for MemberServiceImpl {
+    async fn submit_pending_member(
+        &self,
+        _request: Request<SubmitPendingMemberRequest>,
+    ) -> Result<Response<SubmitPendingMemberResponse>, Status> {
+        Err(RpcError::Unavailable("member backend not wired".into()).into())
+    }
+
+    async fn list_pending_members(
+        &self,
+        _request: Request<ListPendingMembersRequest>,
+    ) -> Result<Response<ListPendingMembersResponse>, Status> {
+        Err(RpcError::Unavailable("member backend not wired".into()).into())
+    }
+
+    async fn upload_key_blobs(
+        &self,
+        _request: Request<UploadKeyBlobsRequest>,
+    ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
+        Err(RpcError::Unavailable("member backend not wired".into()).into())
+    }
+
+    async fn download_my_key_blob(
+        &self,
+        _request: Request<DownloadMyKeyBlobRequest>,
+    ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
+        Err(RpcError::Unavailable("member backend not wired".into()).into())
     }
 }
 
