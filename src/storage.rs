@@ -12,6 +12,8 @@ use nazgul::ring::Ring;
 use serde::Deserialize;
 use std::sync::Arc;
 
+pub mod facade;
+
 /// Canonical, signed event bytes (audit-preserving).
 pub type EventBytes = Arc<[u8]>;
 

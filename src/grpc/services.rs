@@ -1,7 +1,8 @@
 use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
-use crate::storage::{EventReader, EventWriter, RingView};
+use crate::storage::facade::StorageFacade;
+use crate::storage::RingView;
 use crate::{
     ids::{GroupId, RingHash},
     ring_log::RingDelta,
@@ -18,18 +19,18 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 /// Basic EventService stub wired to EventStore.
-pub struct EventServiceImpl<S: EventWriter + EventReader> {
-    store: S,
+pub struct EventServiceImpl {
+    store: StorageFacade,
 }
 
-impl<S: EventWriter + EventReader> EventServiceImpl<S> {
-    pub fn new(store: S) -> Self {
+impl EventServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
         Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl<S: EventWriter + EventReader + Send + Sync + 'static> EventService for EventServiceImpl<S> {
+impl EventService for EventServiceImpl {
     async fn push_event(
         &self,
         request: Request<PushEventRequest>,
@@ -40,6 +41,7 @@ impl<S: EventWriter + EventReader + Send + Sync + 'static> EventService for Even
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
         let id = self
             .store
+            .event_writer
             .append(tenant, event_bytes.clone())
             .map_err(to_status)?;
         let event_id = format_event_id(&id.0)?;
@@ -69,6 +71,7 @@ impl<S: EventWriter + EventReader + Send + Sync + 'static> EventService for Even
         let limit = clamp_events_limit(body.limit);
         let records = self
             .store
+            .event_reader
             .stream_group(tenant, group_id, cursor, limit)
             .map_err(to_status)?;
 
@@ -142,18 +145,18 @@ fn extract_tenant<T>(req: &Request<T>) -> Result<crate::ids::TenantId, Status> {
 }
 
 /// Ring service backed by a `RingView`.
-pub struct RingServiceImpl<R: RingView> {
-    rings: R,
+pub struct RingServiceImpl {
+    store: StorageFacade,
 }
 
-impl<R: RingView> RingServiceImpl<R> {
-    pub fn new(rings: R) -> Self {
-        Self { rings }
+impl RingServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl<R: RingView + Send + Sync + 'static> RingService for RingServiceImpl<R> {
+impl RingService for RingServiceImpl {
     async fn get_ring_head(
         &self,
         request: Request<GetRingHeadRequest>,
@@ -164,7 +167,11 @@ impl<R: RingView + Send + Sync + 'static> RingService for RingServiceImpl<R> {
             .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
 
         // Current ring for tenant; group_id currently ignored (single-ring per tenant).
-        let ring = self.rings.current_ring(tenant).map_err(to_status)?;
+        let ring = self
+            .store
+            .ring_view
+            .current_ring(tenant)
+            .map_err(to_status)?;
         let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
         let members: Vec<Vec<u8>> = ring
             .members()
@@ -199,15 +206,24 @@ impl<R: RingView + Send + Sync + 'static> RingService for RingServiceImpl<R> {
         };
 
         // For now, stream a single batch from optional anchor to current ring head.
-        let current_ring = self.rings.current_ring(tenant).map_err(to_status)?;
+        let current_ring = self
+            .store
+            .ring_view
+            .current_ring(tenant)
+            .map_err(to_status)?;
         let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
         let path = self
-            .rings
+            .store
+            .ring_view
             .ring_delta_path(tenant, after_hash, current_hash)
             .map_err(to_status)?;
 
-        let entries =
-            encode_ring_delta_path(&self.rings, tenant, &path, clamp_ring_limit(req.limit))?;
+        let entries = encode_ring_delta_path(
+            &*self.store.ring_view,
+            tenant,
+            &path,
+            clamp_ring_limit(req.limit),
+        )?;
         let next_hash = entries
             .last()
             .map(|e| e.ring_hash.clone())
@@ -225,7 +241,7 @@ impl<R: RingView + Send + Sync + 'static> RingService for RingServiceImpl<R> {
 
 #[allow(clippy::result_large_err)]
 fn encode_ring_delta_path(
-    rings: &impl RingView,
+    rings: &(impl RingView + ?Sized),
     tenant: crate::ids::TenantId,
     path: &crate::storage::RingDeltaPath,
     limit: usize,
