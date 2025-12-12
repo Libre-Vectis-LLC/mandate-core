@@ -2,6 +2,7 @@
 //! Keep these minimal to avoid leaking prost/tonic details into the rest of the crate.
 
 use crate::ids::{ContentHash, EventId, GroupId, MasterPublicKey, RingHash};
+use crate::ring_log::RingDelta;
 use mandate_proto::mandate::v1::{Hash32, NazgulMasterPublicKey, RagePublicKey, Ulid as ProtoUlid};
 use thiserror::Error;
 use ulid::Ulid;
@@ -15,6 +16,8 @@ pub enum ProtoConvertError {
     InvalidUlid(String),
     #[error("expected 32 bytes, got {0}")]
     InvalidLength(usize),
+    #[error("invalid ring delta tag: {0}")]
+    InvalidRingDeltaTag(u8),
 }
 
 pub fn parse_ulid(ulid_str: &str) -> Result<Ulid, ProtoConvertError> {
@@ -83,9 +86,43 @@ pub fn ulid_to_proto(id: &Ulid) -> ProtoUlid {
     }
 }
 
+/// Encode a ring delta into the opaque bytes used by gRPC ring streaming.
+/// Format: 1-byte tag (0=add, 1=remove) + 32-byte master public key.
+pub fn ring_delta_to_bytes(delta: &RingDelta) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(33);
+    match delta {
+        RingDelta::Add(pk) => {
+            buf.push(0u8);
+            buf.extend_from_slice(&pk.0);
+        }
+        RingDelta::Remove(pk) => {
+            buf.push(1u8);
+            buf.extend_from_slice(&pk.0);
+        }
+    }
+    buf
+}
+
+/// Decode a ring delta from the opaque bytes used by gRPC ring streaming.
+pub fn ring_delta_from_bytes(bytes: &[u8]) -> Result<RingDelta, ProtoConvertError> {
+    if bytes.len() != 33 {
+        return Err(ProtoConvertError::InvalidLength(bytes.len()));
+    }
+
+    let tag = bytes[0];
+    let pk = MasterPublicKey(expect_32(&bytes[1..])?);
+    match tag {
+        0 => Ok(RingDelta::Add(pk)),
+        1 => Ok(RingDelta::Remove(pk)),
+        other => Err(ProtoConvertError::InvalidRingDeltaTag(other)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::MasterPublicKey;
+    use crate::ring_log::RingDelta;
 
     #[test]
     fn ulid_roundtrip() {
@@ -114,6 +151,35 @@ mod tests {
         assert!(matches!(
             nazgul_pub_from_proto(&bad),
             Err(ProtoConvertError::InvalidLength(10))
+        ));
+    }
+
+    #[test]
+    fn ring_delta_roundtrip() {
+        let pk = MasterPublicKey([7u8; 32]);
+        for delta in [RingDelta::Add(pk), RingDelta::Remove(pk)] {
+            let encoded = ring_delta_to_bytes(&delta);
+            let decoded = ring_delta_from_bytes(&encoded).expect("decode");
+            assert_eq!(delta, decoded);
+        }
+    }
+
+    #[test]
+    fn ring_delta_rejects_bad_length() {
+        let bad = vec![0u8; 10];
+        assert!(matches!(
+            ring_delta_from_bytes(&bad),
+            Err(ProtoConvertError::InvalidLength(10))
+        ));
+    }
+
+    #[test]
+    fn ring_delta_rejects_bad_tag() {
+        let mut bad = vec![9u8];
+        bad.extend_from_slice(&[0u8; 32]);
+        assert!(matches!(
+            ring_delta_from_bytes(&bad),
+            Err(ProtoConvertError::InvalidRingDeltaTag(9))
         ));
     }
 }

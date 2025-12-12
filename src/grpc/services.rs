@@ -1,12 +1,10 @@
+use crate::ids::{GroupId, RingHash};
+use crate::proto::ring_delta_to_bytes;
 use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use crate::storage::RingView;
-use crate::{
-    ids::{GroupId, RingHash},
-    ring_log::RingDelta,
-};
 use mandate_proto::mandate::v1::{
     auth_service_server::AuthService, billing_service_server::BillingService,
     event_service_server::EventService, group_service_server::GroupService,
@@ -261,7 +259,7 @@ fn encode_ring_delta_path(
         .take(limit)
         .map(|d| {
             apply_delta(&mut ring, d).map_err(|e| RpcError::Internal(e.to_string()))?;
-            encode_ring_delta(d)
+            Ok(ring_delta_to_bytes(d))
         })
         .collect::<Result<Vec<_>, Status>>()?;
 
@@ -271,22 +269,6 @@ fn encode_ring_delta_path(
         ring_hash: ring_hash.0.to_vec(),
         deltas: deltas_bytes,
     }])
-}
-
-#[allow(clippy::result_large_err)]
-fn encode_ring_delta(delta: &RingDelta) -> Result<Vec<u8>, Status> {
-    let mut buf = Vec::with_capacity(1 + 32);
-    match delta {
-        RingDelta::Add(pk) => {
-            buf.push(0u8);
-            buf.extend_from_slice(&pk.0);
-        }
-        RingDelta::Remove(pk) => {
-            buf.push(1u8);
-            buf.extend_from_slice(&pk.0);
-        }
-    }
-    Ok(buf)
 }
 
 /// Auth service placeholder (token validation is external in core).
@@ -397,6 +379,7 @@ mod tests {
     use crate::grpc::types::{InMemoryEvents, InMemoryRings};
     use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
     use crate::key_manager::KeyManager;
+    use crate::ring_log::RingDelta;
     use crate::storage::RingWriter;
     use crate::test_utils::TEST_MNEMONIC;
     use nazgul::traits::{Derivable, LocalByteConvertible};
