@@ -210,11 +210,9 @@ mod tests {
     use crate::hashing::ring_hash_sha3_256;
     use crate::ids::MasterPublicKey;
     use crate::key_manager::KeyManager;
+    use crate::test_utils::TEST_MNEMONIC;
     use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
-
-    const TEST_MNEMONIC: &str =
-        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
     fn mpk(label: &[u8]) -> MasterPublicKey {
         let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");

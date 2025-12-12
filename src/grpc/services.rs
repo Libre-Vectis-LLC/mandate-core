@@ -331,13 +331,11 @@ mod tests {
     use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::storage::RingWriter;
+    use crate::test_utils::TEST_MNEMONIC;
     use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
     use std::sync::Arc;
     use tokio_stream::StreamExt;
-
-    const TEST_MNEMONIC: &str =
-        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
     fn mpk(label: &[u8]) -> MasterPublicKey {
         let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
