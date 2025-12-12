@@ -322,3 +322,148 @@ impl BillingService for BillingServiceImpl {
         Err(RpcError::Unavailable("billing backend not wired".into()).into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{Event, EventType, ProofOfInnocence};
+    use crate::grpc::types::{InMemoryEvents, InMemoryRings};
+    use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
+    use crate::storage::RingWriter;
+    use nazgul::{scalar::RistrettoPoint, traits::LocalByteConvertible};
+    use sha3::Sha3_512;
+    use std::sync::Arc;
+    use tokio_stream::StreamExt;
+
+    fn mpk(label: &[u8]) -> MasterPublicKey {
+        let point = RistrettoPoint::hash_from_bytes::<Sha3_512>(label);
+        MasterPublicKey(point.to_bytes())
+    }
+
+    fn make_event_bytes(group_id: GroupId, marker: u8) -> Vec<u8> {
+        let id = EventId([marker; 32]);
+        let previous_id = EventId([marker.wrapping_sub(1); 32]);
+        let ev = Event {
+            id,
+            previous_id,
+            group_id,
+            sequence_no: None,
+            processed_at: 0,
+            serialization_version: 0,
+            event_type: EventType::ProofOfInnocence(ProofOfInnocence {
+                group_id,
+                historical_ring_hash: RingHash([0u8; 32]),
+            }),
+            signature: None,
+        };
+        serde_json::to_vec(&ev).expect("serialize event")
+    }
+
+    fn tenant_request<T>(tenant: TenantId, msg: T) -> Request<T> {
+        let mut req = Request::new(msg);
+        req.metadata_mut().insert(
+            API_TOKEN_METADATA_KEY,
+            tenant.0.to_string().parse().expect("metadata value"),
+        );
+        req
+    }
+
+    #[tokio::test]
+    async fn stream_events_filters_and_paginates_by_sequence() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let store =
+            StorageFacade::new(events.clone(), events.clone(), rings.clone(), rings.clone());
+        let svc = EventServiceImpl::new(store);
+
+        let tenant_ulid = ulid::Ulid::new();
+        let tenant = TenantId(tenant_ulid);
+        let g1 = GroupId(ulid::Ulid::new());
+        let g2 = GroupId(ulid::Ulid::new());
+
+        // seq 0 (g1), seq 1 (g2), seq 2 (g1)
+        for (group, marker) in [(g1, 1u8), (g2, 2u8), (g1, 3u8)] {
+            let bytes = make_event_bytes(group, marker);
+            svc.push_event(tenant_request(
+                tenant,
+                PushEventRequest {
+                    event_bytes: bytes,
+                    ..Default::default()
+                },
+            ))
+            .await
+            .expect("push event");
+        }
+
+        // Full stream for g1 should return seq 0 and 2 only.
+        let mut stream = svc
+            .stream_events(tenant_request(
+                tenant,
+                StreamEventsRequest {
+                    group_id: g1.to_string(),
+                    start_sequence_no: -1,
+                    limit: 10,
+                },
+            ))
+            .await
+            .expect("stream")
+            .into_inner();
+        let resp = stream.next().await.unwrap().unwrap();
+        assert_eq!(resp.sequence_nos, vec![0, 2]);
+        assert_eq!(resp.event_bytes.len(), 2);
+
+        // Resume after seq 0 should return only seq 2.
+        let mut stream = svc
+            .stream_events(tenant_request(
+                tenant,
+                StreamEventsRequest {
+                    group_id: g1.to_string(),
+                    start_sequence_no: 0,
+                    limit: 10,
+                },
+            ))
+            .await
+            .expect("stream")
+            .into_inner();
+        let resp = stream.next().await.unwrap().unwrap();
+        assert_eq!(resp.sequence_nos, vec![2]);
+        assert_eq!(resp.event_bytes.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_ring_returns_deltas_after_anchor_with_limit() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let store =
+            StorageFacade::new(events.clone(), events.clone(), rings.clone(), rings.clone());
+        let svc = RingServiceImpl::new(store);
+
+        let tenant_ulid = ulid::Ulid::new();
+        let tenant = TenantId(tenant_ulid);
+
+        let h1 = rings
+            .append_delta(tenant, RingDelta::Add(mpk(b"a")))
+            .expect("founder");
+        let h2 = rings
+            .append_delta(tenant, RingDelta::Add(mpk(b"b")))
+            .expect("member");
+
+        let mut stream = svc
+            .stream_ring(tenant_request(
+                tenant,
+                StreamRingRequest {
+                    group_id: ulid::Ulid::new().to_string(),
+                    after_ring_hash: h1.0.to_vec(),
+                    limit: 1,
+                },
+            ))
+            .await
+            .expect("stream ring")
+            .into_inner();
+        let resp = stream.next().await.unwrap().unwrap();
+
+        assert_eq!(resp.entries.len(), 1);
+        assert_eq!(resp.entries[0].deltas.len(), 1);
+        assert_eq!(resp.entries[0].ring_hash, h2.0.to_vec());
+    }
+}
