@@ -189,3 +189,9 @@ pub trait RingView {
         ring_hash_target: RingHash,
     ) -> Result<RingDeltaPath, StorageError>;
 }
+
+/// Write-only interface for ring mutations (e.g., Postgres or in-memory log).
+pub trait RingWriter {
+    /// Append a delta to the tenant ring log, returning the new head hash.
+    fn append_delta(&self, tenant: TenantId, delta: RingDelta) -> Result<RingHash, StorageError>;
+}
