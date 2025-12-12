@@ -136,6 +136,10 @@ fn format_event_id(id: &crate::ids::EventId) -> Result<String, Status> {
 
 #[allow(clippy::result_large_err)]
 fn extract_tenant<T>(req: &Request<T>) -> Result<crate::ids::TenantId, Status> {
+    if let Some(tenant) = req.extensions().get::<crate::ids::TenantId>() {
+        return Ok(*tenant);
+    }
+
     let token = req
         .metadata()
         .get(API_TOKEN_METADATA_KEY)
