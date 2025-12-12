@@ -25,6 +25,8 @@ message RagePublicKey {
 }
 
 // Generic pagination cursor.
+// Opaque: clients must not interpret it; pass back verbatim.
+// Empty value means "start from the beginning".
 message PageToken {
   string value = 1;
 }

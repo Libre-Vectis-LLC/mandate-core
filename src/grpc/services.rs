@@ -91,34 +91,32 @@ impl EventService for EventServiceImpl {
     }
 }
 
-fn clamp_limit(client_limit: u32) -> usize {
-    let max_limit = std::env::var("MANDATE_GRPC_EVENTS_MAX_LIMIT")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(100);
+fn clamp_limit(client_limit: u32, default_limit: usize, max_limit: usize) -> usize {
     let requested = if client_limit == 0 {
-        max_limit
+        default_limit
     } else {
         client_limit as usize
     };
     requested.clamp(1, max_limit)
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(default)
 }
 
 fn clamp_events_limit(client_limit: u32) -> usize {
-    clamp_limit(client_limit)
+    let max_limit = env_usize("MANDATE_GRPC_EVENTS_MAX_LIMIT", 100);
+    let default_limit = env_usize("MANDATE_GRPC_EVENTS_DEFAULT_LIMIT", 50).min(max_limit);
+    clamp_limit(client_limit, default_limit, max_limit)
 }
 
 fn clamp_ring_limit(client_limit: u32) -> usize {
-    let max_limit = std::env::var("MANDATE_GRPC_RING_MAX_LIMIT")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(100);
-    let requested = if client_limit == 0 {
-        max_limit
-    } else {
-        client_limit as usize
-    };
-    requested.clamp(1, max_limit)
+    let max_limit = env_usize("MANDATE_GRPC_RING_MAX_LIMIT", 100);
+    let default_limit = env_usize("MANDATE_GRPC_RING_DEFAULT_LIMIT", 50).min(max_limit);
+    clamp_limit(client_limit, default_limit, max_limit)
 }
 
 fn to_status(err: crate::storage::StorageError) -> Status {

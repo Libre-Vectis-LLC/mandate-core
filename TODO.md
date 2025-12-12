@@ -29,7 +29,7 @@
 - [x] Error model & status mapping: gRPC status → domain errors; document token metadata key.
 - [x] Service stubs wired to core types: AuthService, BillingService, GroupService, MemberService, EventService, RingService.
 - [x] Conversion completeness: proto ↔ core coverage for ring deltas, key blobs, hashes; add tests.
-- [ ] Pagination & limits: finalize `PageToken` semantics and default/max `limit` per service.
+- [x] Pagination & limits: finalize `PageToken` semantics and default/max `limit` per service.
 - [x] Authn interceptor: enforce `x-api-token` metadata; tonic unit tests.
 - [ ] Storage wiring: map EventStore/RingView/BanIndex traits to service handlers (with in-memory mock for tests).
 - [x] Streaming smoke tests: StreamEvents/StreamRing with pagination and batching.
