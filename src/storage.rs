@@ -4,7 +4,8 @@
 //! - Single table, multi-tenant, append-only event log (no routine replay; audit-focused).
 //! - Zero-copy reads via `Arc<[u8]>`/slices; deterministic ordering by append sequence.
 //! - Ring reconstruction is the only replay scenario; implementations find a shortest-path delta slice.
-//! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, ring_hash)`, `(master_pubkey, created_at)`, keyset pagination.
+//! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, group_id, ring_hash)`,
+//!   `(master_pubkey, created_at)`, keyset pagination.
 
 use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId, TenantToken};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
@@ -76,13 +77,18 @@ pub enum NotFound {
     Event { id: EventId, tenant: TenantId },
     #[error("tail for tenant {tenant:?}")]
     Tail { tenant: TenantId },
-    #[error("ring {hash:?} for tenant {tenant:?}")]
-    Ring { hash: RingHash, tenant: TenantId },
-    #[error("ring delta path from {from:?} to {to:?} for tenant {tenant:?}")]
+    #[error("ring {hash:?} for tenant {tenant:?} group {group_id:?}")]
+    Ring {
+        hash: RingHash,
+        tenant: TenantId,
+        group_id: GroupId,
+    },
+    #[error("ring delta path from {from:?} to {to:?} for tenant {tenant:?} group {group_id:?}")]
     RingDeltaPath {
         from: Option<RingHash>,
         to: RingHash,
         tenant: TenantId,
+        group_id: GroupId,
     },
 }
 
@@ -194,16 +200,22 @@ pub struct EventGroupView {
 /// Access to ring snapshots and delta paths; caching strategy is implementation-defined.
 pub trait RingView {
     /// Resolve a ring by its hash for the tenant. Reconstruct on miss; `NotFound` if unknown.
-    fn ring_by_hash(&self, tenant: TenantId, hash: &RingHash) -> Result<Arc<Ring>, StorageError>;
+    fn ring_by_hash(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        hash: &RingHash,
+    ) -> Result<Arc<Ring>, StorageError>;
 
-    /// Current ring (one per tenant). `NotFound` if the tenant has no ring yet.
-    fn current_ring(&self, tenant: TenantId) -> Result<Arc<Ring>, StorageError>;
+    /// Current ring for the group. `NotFound` if the group has no ring yet.
+    fn current_ring(&self, tenant: TenantId, group_id: GroupId) -> Result<Arc<Ring>, StorageError>;
 
     /// Shortest-path delta slice from `ring_hash_current` (if provided) to `ring_hash_target`.
     /// Implementations choose the path (e.g., via SQL graph query) and return a replayable slice.
     fn ring_delta_path(
         &self,
         tenant: TenantId,
+        group_id: GroupId,
         ring_hash_current: Option<RingHash>,
         ring_hash_target: RingHash,
     ) -> Result<RingDeltaPath, StorageError>;
@@ -211,8 +223,13 @@ pub trait RingView {
 
 /// Write-only interface for ring mutations (e.g., Postgres or in-memory log).
 pub trait RingWriter {
-    /// Append a delta to the tenant ring log, returning the new head hash.
-    fn append_delta(&self, tenant: TenantId, delta: RingDelta) -> Result<RingHash, StorageError>;
+    /// Append a delta to the group ring log, returning the new head hash.
+    fn append_delta(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        delta: RingDelta,
+    ) -> Result<RingHash, StorageError>;
 }
 
 /// Optional ban index for fast key-image checks.

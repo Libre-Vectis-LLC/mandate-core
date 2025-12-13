@@ -111,7 +111,7 @@ impl EventStore for InMemoryEvents {
 
 #[derive(Default, Clone)]
 pub struct InMemoryRings {
-    rings: Arc<Mutex<HashMap<Tenant, RingState>>>,
+    rings: Arc<Mutex<HashMap<(Tenant, GroupId), RingState>>>,
 }
 
 #[derive(Clone)]
@@ -128,19 +128,26 @@ impl InMemoryRings {
         }
     }
 
-    fn inner(&self) -> std::sync::MutexGuard<'_, HashMap<Tenant, RingState>> {
+    fn inner(&self) -> std::sync::MutexGuard<'_, HashMap<(Tenant, GroupId), RingState>> {
         self.rings.lock().expect("ring mutex poisoned")
     }
 }
 
 impl RingView for InMemoryRings {
-    fn ring_by_hash(&self, tenant: Tenant, hash: &RingHash) -> Result<Arc<Ring>, StorageError> {
+    fn ring_by_hash(
+        &self,
+        tenant: Tenant,
+        group_id: GroupId,
+        hash: &RingHash,
+    ) -> Result<Arc<Ring>, StorageError> {
         let mut map = self.inner();
+        let key = (tenant, group_id);
         let state = map
-            .get_mut(&tenant)
+            .get_mut(&key)
             .ok_or(StorageError::NotFound(NotFound::Ring {
                 hash: *hash,
                 tenant,
+                group_id,
             }))?;
 
         if &state.current_hash == hash {
@@ -154,30 +161,31 @@ impl RingView for InMemoryRings {
         Ok(Arc::new(reconstructed))
     }
 
-    fn current_ring(&self, tenant: Tenant) -> Result<Arc<Ring>, StorageError> {
+    fn current_ring(&self, tenant: Tenant, group_id: GroupId) -> Result<Arc<Ring>, StorageError> {
         let map = self.inner();
-        let state = map
-            .get(&tenant)
-            .ok_or(StorageError::NotFound(NotFound::Ring {
-                hash: RingHash([0; 32]),
-                tenant,
-            }))?;
+        let key = (tenant, group_id);
+        let state = map.get(&key).ok_or(StorageError::NotFound(NotFound::Ring {
+            hash: RingHash([0; 32]),
+            tenant,
+            group_id,
+        }))?;
         Ok(Arc::new(state.current.clone()))
     }
 
     fn ring_delta_path(
         &self,
         tenant: Tenant,
+        group_id: GroupId,
         ring_hash_current: Option<RingHash>,
         ring_hash_target: RingHash,
     ) -> Result<crate::storage::RingDeltaPath, StorageError> {
         let map = self.inner();
-        let state = map
-            .get(&tenant)
-            .ok_or(StorageError::NotFound(NotFound::Ring {
-                hash: ring_hash_current.unwrap_or(ring_hash_target),
-                tenant,
-            }))?;
+        let key = (tenant, group_id);
+        let state = map.get(&key).ok_or(StorageError::NotFound(NotFound::Ring {
+            hash: ring_hash_current.unwrap_or(ring_hash_target),
+            tenant,
+            group_id,
+        }))?;
 
         let deltas = state
             .log
@@ -186,10 +194,12 @@ impl RingView for InMemoryRings {
                 RingLogError::TargetNotFound => StorageError::NotFound(NotFound::Ring {
                     hash: ring_hash_target,
                     tenant,
+                    group_id,
                 }),
                 RingLogError::AnchorNotFound => StorageError::NotFound(NotFound::Ring {
                     hash: ring_hash_current.unwrap_or(ring_hash_target),
                     tenant,
+                    group_id,
                 }),
                 other => StorageError::Backend(other.to_string()),
             })?;
@@ -211,9 +221,15 @@ impl RingView for InMemoryRings {
 }
 
 impl RingWriter for InMemoryRings {
-    fn append_delta(&self, tenant: Tenant, delta: RingDelta) -> Result<RingHash, StorageError> {
+    fn append_delta(
+        &self,
+        tenant: Tenant,
+        group_id: GroupId,
+        delta: RingDelta,
+    ) -> Result<RingHash, StorageError> {
         let mut map = self.inner();
-        let state = map.entry(tenant).or_insert_with(|| RingState {
+        let key = (tenant, group_id);
+        let state = map.entry(key).or_insert_with(|| RingState {
             log: RingDeltaLog::default(),
             current: Ring::new(vec![]),
             current_hash: RingHash([0; 32]),
@@ -263,18 +279,58 @@ mod tests {
     fn ring_writer_roundtrip() {
         let rings = InMemoryRings::new();
         let tenant = Tenant(ulid::Ulid::new());
+        let group = GroupId(ulid::Ulid::new());
 
         let h1 = rings
-            .append_delta(tenant, RingDelta::Add(mpk(b"a")))
+            .append_delta(tenant, group, RingDelta::Add(mpk(b"a")))
             .expect("append should succeed");
-        let ring = rings.current_ring(tenant).expect("ring exists");
+        let ring = rings.current_ring(tenant, group).expect("ring exists");
         assert_eq!(ring_hash_sha3_256(&ring), h1);
 
         // Path from scratch to current should contain founder delta.
         let path = rings
-            .ring_delta_path(tenant, None, h1)
+            .ring_delta_path(tenant, group, None, h1)
             .expect("delta path should exist");
         assert_eq!(path.deltas.len(), 1);
         assert_eq!(path.to, h1);
+    }
+
+    #[test]
+    fn rings_are_scoped_by_group() {
+        let rings = InMemoryRings::new();
+        let tenant = Tenant(ulid::Ulid::new());
+        let g1 = GroupId(ulid::Ulid::new());
+        let g2 = GroupId(ulid::Ulid::new());
+
+        let h = rings
+            .append_delta(tenant, g1, RingDelta::Add(mpk(b"a")))
+            .expect("append should succeed");
+
+        rings
+            .ring_by_hash(tenant, g1, &h)
+            .expect("ring exists for g1");
+
+        let err = rings
+            .ring_by_hash(tenant, g2, &h)
+            .expect_err("g2 must not see g1 ring state");
+        assert!(matches!(
+            err,
+            StorageError::NotFound(NotFound::Ring {
+                tenant: t,
+                group_id,
+                hash
+            }) if t == tenant && group_id == g2 && hash == h
+        ));
+
+        let h2 = rings
+            .append_delta(tenant, g2, RingDelta::Add(mpk(b"a")))
+            .expect("append should succeed");
+        assert_eq!(
+            h2, h,
+            "ring hashes match when membership sets are identical"
+        );
+        rings
+            .ring_by_hash(tenant, g2, &h)
+            .expect("ring exists for g2 after append");
     }
 }

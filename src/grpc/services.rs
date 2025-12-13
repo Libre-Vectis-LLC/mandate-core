@@ -191,14 +191,16 @@ impl RingService for RingServiceImpl {
     ) -> Result<Response<GetRingHeadResponse>, Status> {
         let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let group = request.into_inner().group_id;
-        let _group_id = crate::proto::parse_ulid(&group)
-            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&group)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
 
-        // Current ring for tenant; group_id currently ignored (single-ring per tenant).
+        // Current ring for the requested group.
         let ring = self
             .store
             .ring_view
-            .current_ring(tenant)
+            .current_ring(tenant, group_id)
             .map_err(to_status)?;
         let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
         let members: Vec<Vec<u8>> = ring
@@ -221,6 +223,10 @@ impl RingService for RingServiceImpl {
     ) -> Result<Response<Self::StreamRingStream>, Status> {
         let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let req = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&req.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
         let after_hash = if req.after_ring_hash.is_empty() {
             None
         } else {
@@ -237,18 +243,19 @@ impl RingService for RingServiceImpl {
         let current_ring = self
             .store
             .ring_view
-            .current_ring(tenant)
+            .current_ring(tenant, group_id)
             .map_err(to_status)?;
         let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
         let path = self
             .store
             .ring_view
-            .ring_delta_path(tenant, after_hash, current_hash)
+            .ring_delta_path(tenant, group_id, after_hash, current_hash)
             .map_err(to_status)?;
 
         let entries = encode_ring_delta_path(
             &*self.store.ring_view,
             tenant,
+            group_id,
             &path,
             clamp_ring_limit(req.limit),
         )?;
@@ -271,10 +278,13 @@ impl RingService for RingServiceImpl {
 fn encode_ring_delta_path(
     rings: &(impl RingView + ?Sized),
     tenant: crate::ids::TenantId,
+    group_id: GroupId,
     path: &crate::storage::RingDeltaPath,
     limit: usize,
 ) -> Result<Vec<mandate_proto::mandate::v1::RingDeltaEntry>, Status> {
-    let anchor = rings.ring_by_hash(tenant, &path.from).map_err(to_status)?;
+    let anchor = rings
+        .ring_by_hash(tenant, group_id, &path.from)
+        .map_err(to_status)?;
     let mut ring = (*anchor).clone();
 
     let deltas_bytes = path
@@ -410,6 +420,7 @@ mod tests {
     use sha3::Sha3_512;
     use std::sync::Arc;
     use tokio_stream::StreamExt;
+    use tonic::Code;
 
     fn mpk(label: &[u8]) -> MasterPublicKey {
         let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
@@ -529,6 +540,7 @@ mod tests {
         let tenant = TenantId(ulid::Ulid::new());
         let token = "token-tenant-2";
         tokens.insert(token, tenant);
+        let group = GroupId(ulid::Ulid::new());
 
         let store = StorageFacade::new(
             tokens,
@@ -541,17 +553,17 @@ mod tests {
         let svc = RingServiceImpl::new(store);
 
         let h1 = rings
-            .append_delta(tenant, RingDelta::Add(mpk(b"a")))
+            .append_delta(tenant, group, RingDelta::Add(mpk(b"a")))
             .expect("founder");
         let h2 = rings
-            .append_delta(tenant, RingDelta::Add(mpk(b"b")))
+            .append_delta(tenant, group, RingDelta::Add(mpk(b"b")))
             .expect("member");
 
         let mut stream = svc
             .stream_ring(tenant_request(
                 token,
                 StreamRingRequest {
-                    group_id: ulid::Ulid::new().to_string(),
+                    group_id: group.to_string(),
                     after_ring_hash: h1.0.to_vec(),
                     limit: 1,
                 },
@@ -564,5 +576,57 @@ mod tests {
         assert_eq!(resp.entries.len(), 1);
         assert_eq!(resp.entries[0].deltas.len(), 1);
         assert_eq!(resp.entries[0].ring_hash, h2.0.to_vec());
+    }
+
+    #[tokio::test]
+    async fn get_ring_head_is_scoped_by_group() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-3";
+        tokens.insert(token, tenant);
+
+        let store = StorageFacade::new(
+            tokens,
+            events.clone(),
+            events.clone(),
+            rings.clone(),
+            rings.clone(),
+            bans,
+        );
+        let svc = RingServiceImpl::new(store);
+
+        let g1 = GroupId(ulid::Ulid::new());
+        let g2 = GroupId(ulid::Ulid::new());
+
+        rings
+            .append_delta(tenant, g1, RingDelta::Add(mpk(b"a")))
+            .expect("append should succeed");
+
+        let head = svc
+            .get_ring_head(tenant_request(
+                token,
+                GetRingHeadRequest {
+                    group_id: g1.to_string(),
+                },
+            ))
+            .await
+            .expect("head for g1")
+            .into_inner();
+        assert_eq!(head.member_count, 1);
+
+        let err = svc
+            .get_ring_head(tenant_request(
+                token,
+                GetRingHeadRequest {
+                    group_id: g2.to_string(),
+                },
+            ))
+            .await
+            .expect_err("g2 must not see g1 ring state");
+        assert_eq!(err.code(), Code::NotFound);
     }
 }
