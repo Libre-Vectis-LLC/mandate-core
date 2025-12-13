@@ -2,6 +2,7 @@ use curve25519_dalek::ristretto::RistrettoPoint;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
 
 pub use nazgul::ring::RingHash;
 
@@ -64,6 +65,56 @@ impl FromStr for EventUlid {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TenantId(pub Ulid);
+
+/// Tenant-scoped API token carried via gRPC metadata (`x-api-token`).
+///
+/// This value is **secret and rotatable**; treat it as opaque and avoid logging.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct TenantToken(Arc<str>);
+
+impl TenantToken {
+    pub fn new(token: impl Into<Arc<str>>) -> Self {
+        Self(token.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl fmt::Debug for TenantToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("TenantToken(<redacted>)")
+    }
+}
+
+impl From<String> for TenantToken {
+    fn from(value: String) -> Self {
+        Self::new(Arc::<str>::from(value))
+    }
+}
+
+impl From<&str> for TenantToken {
+    fn from(value: &str) -> Self {
+        Self::new(Arc::<str>::from(value))
+    }
+}
+
+impl From<Arc<str>> for TenantToken {
+    fn from(value: Arc<str>) -> Self {
+        Self::new(value)
+    }
+}
+
+impl AsRef<str> for TenantToken {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
 
 /// Group identifier (server-assigned ULID) used in derivations and hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

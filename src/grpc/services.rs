@@ -4,7 +4,7 @@ use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
-use crate::storage::RingView;
+use crate::storage::{RingView, TenantTokenError, TenantTokenStore};
 use mandate_proto::mandate::v1::{
     auth_service_server::AuthService, billing_service_server::BillingService,
     event_service_server::EventService, group_service_server::GroupService,
@@ -40,7 +40,7 @@ impl EventService for EventServiceImpl {
         request: Request<PushEventRequest>,
     ) -> Result<Response<PushEventResponse>, Status> {
         // In a full implementation we'd parse event_bytes, verify signature, etc.
-        let tenant = extract_tenant(&request)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
         let id = self
@@ -61,7 +61,7 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<StreamEventsRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let tenant = extract_tenant(&request)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -133,9 +133,9 @@ fn format_event_id(id: &crate::ids::EventId) -> Result<String, Status> {
 }
 
 #[allow(clippy::result_large_err)]
-fn extract_tenant<T>(req: &Request<T>) -> Result<crate::ids::TenantId, Status> {
-    if let Some(tenant) = req.extensions().get::<crate::ids::TenantId>() {
-        return Ok(*tenant);
+fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, Status> {
+    if let Some(token) = req.extensions().get::<crate::ids::TenantToken>() {
+        return Ok(token.clone());
     }
 
     let token = req
@@ -144,10 +144,32 @@ fn extract_tenant<T>(req: &Request<T>) -> Result<crate::ids::TenantId, Status> {
         .ok_or_else(|| RpcError::Unauthenticated("missing api token".into()))?
         .to_str()
         .map_err(|_| RpcError::Unauthenticated("bad token".into()))?;
-    // Placeholder: treat token as ULID string for tenant
-    let ulid = ulid::Ulid::from_string(token)
-        .map_err(|_| RpcError::Unauthenticated("invalid token ulid".into()))?;
-    Ok(crate::ids::TenantId(ulid))
+
+    if token.is_empty() {
+        return Err(RpcError::Unauthenticated("empty api token".into()).into());
+    }
+
+    Ok(crate::ids::TenantToken::from(token))
+}
+
+fn to_status_token(err: TenantTokenError) -> Status {
+    match err {
+        TenantTokenError::Unknown => RpcError::Unauthenticated("unknown api token".into()).into(),
+        TenantTokenError::Backend(msg) => RpcError::Unavailable(msg).into(),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn extract_tenant_id<T>(
+    req: &Request<T>,
+    tokens: &(impl TenantTokenStore + ?Sized),
+) -> Result<crate::ids::TenantId, Status> {
+    if let Some(tenant) = req.extensions().get::<crate::ids::TenantId>() {
+        return Ok(*tenant);
+    }
+
+    let token = extract_tenant_token(req)?;
+    tokens.resolve_tenant(&token).map_err(to_status_token)
 }
 
 /// Ring service backed by a `RingView`.
@@ -167,7 +189,7 @@ impl RingService for RingServiceImpl {
         &self,
         request: Request<GetRingHeadRequest>,
     ) -> Result<Response<GetRingHeadResponse>, Status> {
-        let tenant = extract_tenant(&request)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let group = request.into_inner().group_id;
         let _group_id = crate::proto::parse_ulid(&group)
             .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
@@ -197,7 +219,7 @@ impl RingService for RingServiceImpl {
         &self,
         request: Request<StreamRingRequest>,
     ) -> Result<Response<Self::StreamRingStream>, Status> {
-        let tenant = extract_tenant(&request)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let req = request.into_inner();
         let after_hash = if req.after_ring_hash.is_empty() {
             None
@@ -378,7 +400,7 @@ impl MemberService for MemberServiceImpl {
 mod tests {
     use super::*;
     use crate::event::{Event, EventType, ProofOfInnocence};
-    use crate::grpc::types::{InMemoryEvents, InMemoryRings, NoopBanIndex};
+    use crate::grpc::types::{InMemoryEvents, InMemoryRings, InMemoryTenantTokens, NoopBanIndex};
     use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::ring_log::RingDelta;
@@ -415,11 +437,11 @@ mod tests {
         serde_json::to_vec(&ev).expect("serialize event")
     }
 
-    fn tenant_request<T>(tenant: TenantId, msg: T) -> Request<T> {
+    fn tenant_request<T>(token: &str, msg: T) -> Request<T> {
         let mut req = Request::new(msg);
         req.metadata_mut().insert(
             API_TOKEN_METADATA_KEY,
-            tenant.0.to_string().parse().expect("metadata value"),
+            token.parse().expect("metadata value"),
         );
         req
     }
@@ -429,7 +451,14 @@ mod tests {
         let events = Arc::new(InMemoryEvents::new());
         let rings = Arc::new(InMemoryRings::new());
         let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-1";
+        tokens.insert(token, tenant);
+
         let store = StorageFacade::new(
+            tokens,
             events.clone(),
             events.clone(),
             rings.clone(),
@@ -438,8 +467,6 @@ mod tests {
         );
         let svc = EventServiceImpl::new(store);
 
-        let tenant_ulid = ulid::Ulid::new();
-        let tenant = TenantId(tenant_ulid);
         let g1 = GroupId(ulid::Ulid::new());
         let g2 = GroupId(ulid::Ulid::new());
 
@@ -447,7 +474,7 @@ mod tests {
         for (group, marker) in [(g1, 1u8), (g2, 2u8), (g1, 3u8)] {
             let bytes = make_event_bytes(group, marker);
             svc.push_event(tenant_request(
-                tenant,
+                token,
                 PushEventRequest {
                     event_bytes: bytes,
                     ..Default::default()
@@ -460,7 +487,7 @@ mod tests {
         // Full stream for g1 should return seq 0 and 2 only.
         let mut stream = svc
             .stream_events(tenant_request(
-                tenant,
+                token,
                 StreamEventsRequest {
                     group_id: g1.to_string(),
                     start_sequence_no: -1,
@@ -477,7 +504,7 @@ mod tests {
         // Resume after seq 0 should return only seq 2.
         let mut stream = svc
             .stream_events(tenant_request(
-                tenant,
+                token,
                 StreamEventsRequest {
                     group_id: g1.to_string(),
                     start_sequence_no: 0,
@@ -497,7 +524,14 @@ mod tests {
         let events = Arc::new(InMemoryEvents::new());
         let rings = Arc::new(InMemoryRings::new());
         let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-2";
+        tokens.insert(token, tenant);
+
         let store = StorageFacade::new(
+            tokens,
             events.clone(),
             events.clone(),
             rings.clone(),
@@ -505,9 +539,6 @@ mod tests {
             bans,
         );
         let svc = RingServiceImpl::new(store);
-
-        let tenant_ulid = ulid::Ulid::new();
-        let tenant = TenantId(tenant_ulid);
 
         let h1 = rings
             .append_delta(tenant, RingDelta::Add(mpk(b"a")))
@@ -518,7 +549,7 @@ mod tests {
 
         let mut stream = svc
             .stream_ring(tenant_request(
-                tenant,
+                token,
                 StreamRingRequest {
                     group_id: ulid::Ulid::new().to_string(),
                     after_ring_hash: h1.0.to_vec(),

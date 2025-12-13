@@ -1,6 +1,7 @@
-use crate::ids::{EventId, GroupId, KeyImage, TenantId};
+use crate::ids::{EventId, GroupId, KeyImage, TenantId, TenantToken};
 use crate::storage::{
     BanIndex, EventBytes, EventRecord, EventStore, NotFound, RingView, RingWriter, StorageError,
+    TenantTokenError, TenantTokenStore,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -10,6 +11,29 @@ use nazgul::ring::Ring;
 use sha3::{Digest, Sha3_256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Default)]
+pub struct InMemoryTenantTokens {
+    tokens: Arc<Mutex<HashMap<TenantToken, TenantId>>>,
+}
+
+impl InMemoryTenantTokens {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&self, token: impl Into<TenantToken>, tenant: TenantId) {
+        let mut map = self.tokens.lock().expect("poison-free");
+        map.insert(token.into(), tenant);
+    }
+}
+
+impl TenantTokenStore for InMemoryTenantTokens {
+    fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError> {
+        let map = self.tokens.lock().expect("poison-free");
+        map.get(token).copied().ok_or(TenantTokenError::Unknown)
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct InMemoryEvents {

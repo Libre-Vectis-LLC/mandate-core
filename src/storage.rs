@@ -6,7 +6,7 @@
 //! - Ring reconstruction is the only replay scenario; implementations find a shortest-path delta slice.
 //! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, ring_hash)`, `(master_pubkey, created_at)`, keyset pagination.
 
-use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId};
+use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId, TenantToken};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
 use serde::Deserialize;
@@ -51,6 +51,23 @@ pub enum StorageError {
     NotFound(NotFound),
     #[error("backend error: {0}")]
     Backend(String),
+}
+
+/// Errors returned while resolving a tenant token to a tenant identity.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum TenantTokenError {
+    #[error("unknown tenant token")]
+    Unknown,
+    #[error("backend error: {0}")]
+    Backend(String),
+}
+
+/// Resolve a tenant-scoped API token into a tenant identity.
+///
+/// The real implementation belongs to server/enterprise (cache + DB). Core uses this
+/// abstraction so it does not bake in any assumptions about token format or rotation.
+pub trait TenantTokenStore {
+    fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
