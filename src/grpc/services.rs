@@ -1,3 +1,4 @@
+use crate::event::Event;
 use crate::ids::{GroupId, RingHash};
 use crate::proto::ring_delta_to_bytes;
 use crate::proto::API_TOKEN_METADATA_KEY;
@@ -43,14 +44,18 @@ impl EventService for EventServiceImpl {
         let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
+        let event: Event = serde_json::from_slice(&event_bytes)
+            .map_err(|e| RpcError::InvalidArgument(format!("invalid event payload: {e}")))?;
         let id = self
             .store
             .event_writer
             .append(tenant, event_bytes.clone())
             .map_err(to_status)?;
-        let event_id = format_event_id(&id.0)?;
+        let event_hash = crate::proto::event_id_to_hash32(&id.0);
+        let event_ulid = crate::proto::ulid_to_proto(&event.event_ulid.as_ulid());
         Ok(Response::new(PushEventResponse {
-            event_id,
+            event_ulid: Some(event_ulid),
+            event_hash: Some(event_hash),
             sequence_no: id.1,
         }))
     }
@@ -124,12 +129,6 @@ fn to_status(err: crate::storage::StorageError) -> Status {
         crate::storage::StorageError::NotFound(_) => RpcError::NotFound(err.to_string()).into(),
         crate::storage::StorageError::Backend(msg) => RpcError::Internal(msg).into(),
     }
-}
-
-#[allow(clippy::result_large_err)]
-fn format_event_id(id: &crate::ids::EventId) -> Result<String, Status> {
-    // EventId is 32-byte content hash; not ULID. For demo, hex it.
-    Ok(hex::encode(id.0))
 }
 
 #[allow(clippy::result_large_err)]
@@ -490,11 +489,11 @@ mod tests {
     }
 
     fn make_event_bytes(group_id: GroupId, marker: u8) -> Vec<u8> {
-        let id = EventId([marker; 32]);
-        let previous_id = EventId([marker.wrapping_sub(1); 32]);
+        let event_ulid = crate::ids::EventUlid(ulid::Ulid::from_bytes([marker; 16]));
+        let previous_event_hash = EventId([marker.wrapping_sub(1); 32]);
         let ev = Event {
-            id,
-            previous_id,
+            event_ulid,
+            previous_event_hash,
             group_id,
             sequence_no: None,
             processed_at: 0,

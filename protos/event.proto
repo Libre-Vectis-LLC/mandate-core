@@ -17,8 +17,9 @@ message PushEventRequest {
 }
 
 message PushEventResponse {
-  string event_id = 1; // ULID string
-  int64 sequence_no = 2;
+  Ulid event_ulid = 1;
+  Hash32 event_hash = 2;
+  int64 sequence_no = 3;
 }
 
 message StreamEventsRequest {

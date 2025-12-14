@@ -1,3 +1,5 @@
+use crate::event::Event;
+use crate::hashing::event_hash_sha3_256;
 use crate::ids::{EventId, GroupId, KeyImage, TenantId, TenantToken};
 use crate::storage::{
     BanIndex, EventBytes, EventRecord, EventStore, KeyBlobStore, NotFound, RingView, RingWriter,
@@ -8,7 +10,6 @@ use crate::{
     ring_log::{RingDelta, RingDeltaLog, RingLogError},
 };
 use nazgul::ring::Ring;
-use sha3::{Digest, Sha3_256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -60,9 +61,11 @@ impl EventStore for InMemoryEvents {
     ) -> Result<(EventId, i64), StorageError> {
         let mut inner = self.inner();
         let entry = inner.entry(tenant).or_default();
-        let mut hasher = Sha3_256::new();
-        hasher.update(&*event_bytes);
-        let id = EventId(hasher.finalize().into());
+        let event: Event = serde_json::from_slice(&event_bytes)
+            .map_err(|e| StorageError::Backend(format!("invalid event bytes: {e}")))?;
+        let hash = event_hash_sha3_256(&event)
+            .map_err(|e| StorageError::Backend(format!("hash event: {e}")))?;
+        let id = EventId(hash.0);
         let seq = entry.len() as i64;
         entry.push((id, event_bytes, seq));
         Ok((id, seq))

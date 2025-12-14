@@ -52,6 +52,12 @@ pub fn hash32_to_event_id(h: &Hash32) -> Result<EventId, ProtoConvertError> {
     Ok(EventId(expect_32(&h.value)?))
 }
 
+pub fn event_id_to_hash32(id: &EventId) -> Hash32 {
+    Hash32 {
+        value: id.0.to_vec(),
+    }
+}
+
 pub fn nazgul_pub_from_proto(
     pk: &NazgulMasterPublicKey,
 ) -> Result<MasterPublicKey, ProtoConvertError> {

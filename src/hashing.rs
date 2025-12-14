@@ -10,7 +10,7 @@ use crate::event::{
     AnonymousMessage, BanCreate, BanRevoke, Event, EventType, Poll, PollOption, PollQuestion,
     PollQuestionKind, RingUpdate, Vote, VoteSelection,
 };
-use crate::ids::{ContentHash, EventId, GroupId};
+use crate::ids::{ContentHash, EventId, EventUlid, GroupId};
 use nazgul::ring::{Ring, RingHash};
 use serde::Serialize;
 use serde_json::Value;
@@ -217,8 +217,8 @@ pub fn vote_hash_sha3_256(vote: &Vote) -> Result<ContentHash, CanonicalHashError
 
 #[derive(Serialize)]
 struct CanonicalEvent<'a> {
-    id: EventId,
-    previous_id: EventId,
+    event_ulid: EventUlid,
+    previous_event_hash: EventId,
     group_id: GroupId,
     // sequence_no intentionally excluded from canonical hash (storage ordering only)
     processed_at: u64,
@@ -229,8 +229,8 @@ struct CanonicalEvent<'a> {
 impl<'a> From<&'a Event> for CanonicalEvent<'a> {
     fn from(event: &'a Event) -> Self {
         Self {
-            id: event.id,
-            previous_id: event.previous_id,
+            event_ulid: event.event_ulid,
+            previous_event_hash: event.previous_event_hash,
             group_id: event.group_id,
             processed_at: event.processed_at,
             serialization_version: event.serialization_version,

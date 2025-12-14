@@ -2,13 +2,13 @@ use crate::crypto::ciphertext::Ciphertext;
 use crate::crypto::signature::Signature;
 use crate::hashing::CanonicalHashError;
 use crate::hashing::{event_hash_sha3_256, poll_hash_sha3_256, vote_hash_sha3_256};
-use crate::ids::{ContentHash, EventId, GroupId, KeyImage, MasterPublicKey, RingHash};
+use crate::ids::{ContentHash, EventId, EventUlid, GroupId, KeyImage, MasterPublicKey, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
-    pub id: EventId,
-    pub previous_id: EventId,
+    pub event_ulid: EventUlid,
+    pub previous_event_hash: EventId,
     pub group_id: GroupId,
     /// Monotonic sequence assigned by storage; not part of content hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -20,7 +20,7 @@ pub struct Event {
 }
 
 impl Event {
-    /// Compute the canonical content hash of the event (excludes signature).
+    /// Compute the canonical content hash of the event (excludes signature and storage metadata).
     pub fn content_hash(&self) -> Result<ContentHash, CanonicalHashError> {
         event_hash_sha3_256(self)
     }
@@ -185,8 +185,8 @@ mod tests {
         .expect("sign");
 
         let event = Event {
-            id: EventId([1u8; 32]),
-            previous_id: EventId([0u8; 32]),
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([0u8; 32]),
             group_id: gid(),
             sequence_no: Some(0),
             processed_at: 123,
@@ -292,8 +292,8 @@ mod tests {
     fn event_hash_ignores_signature_field() {
         let (signer, ring) = make_ring(3);
         let base_event = Event {
-            id: EventId([9u8; 32]),
-            previous_id: EventId([8u8; 32]),
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([8u8; 32]),
             group_id: gid(),
             sequence_no: Some(1),
             processed_at: 10,
