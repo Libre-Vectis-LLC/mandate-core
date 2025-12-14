@@ -15,6 +15,14 @@ Mandate core provides audit-first primitives (hashing, signing, key derivation, 
 - Single-writer append per tenant; deterministic keyset pagination for readers. No optimistic tokens are needed because the writer is serialized; readers stream in order.
 - Rings are reconstructed from deltas via shortest-path replay; storage traits stay zero-copy (`Arc<[u8]>`).
 
+## Multi-Group Invariants
+- The external API boundary is `(tenant token, group_id)`: every RPC that reads or mutates group state must take a `group_id` and must never mix state across groups.
+- Rings are per group. Two groups may have identical membership sets (and therefore the same ring hash), but they are still distinct groups.
+- Key derivation is group-scoped:
+  - `K_shared` is derived from `group_id`, so event/poll encryption keys derived from `K_shared` inherit group isolation.
+  - Session signing keys are derived from `group_id || ring_hash`, so even identical rings across groups produce distinct session keys.
+- These invariants prevent cross-group privacy leaks and avoid derivation collisions in multi-group tenants.
+
 ## Access After Ban (E2EE)
 - A removed member retains any prior `K_shared`, but cannot fetch new ciphertext after removal. Without the new ciphertext they cannot decrypt new events, even though old keys remain.
 
