@@ -17,7 +17,6 @@ message CreateGroupRequest {
 
 message CreateGroupResponse {
   string group_id = 1; // ULID
-  string api_token = 2; // token for edge/server auth
 }
 
 message SetOwnerPublicKeyRequest {

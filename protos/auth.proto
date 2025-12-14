@@ -3,7 +3,7 @@ package mandate.v1;
 
 import "error.proto";
 
-// Lightweight auth helpers (API token validation).
+// Bot-facing onboarding/auth helpers (token issuance / gift card redemption).
 service AuthService {
   rpc RedeemGiftCard (RedeemGiftCardRequest) returns (RedeemGiftCardResponse);
 }
@@ -15,7 +15,6 @@ message RedeemGiftCardRequest {
 
 message RedeemGiftCardResponse {
   string tenant_id = 1; // ULID
-  string group_id = 2;  // ULID (may be created on redeem)
   int64 new_balance_nanos = 3;
   string api_token = 4; // token for edge/server auth
 }
