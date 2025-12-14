@@ -323,4 +323,31 @@ mod tests {
         let h_signed = signed.content_hash().expect("hash signed");
         assert_eq!(h_base, h_signed, "signature must not affect content hash");
     }
+
+    #[test]
+    fn event_hash_ignores_sequence_no_field() {
+        let base_event = Event {
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([9u8; 32]),
+            group_id: gid(),
+            sequence_no: None,
+            processed_at: 42,
+            serialization_version: 1,
+            event_type: EventType::MessageCreate(AnonymousMessage {
+                group_id: gid(),
+                ring_hash: RingHash([7u8; 32]),
+                message_id: "m".into(),
+                content: Ciphertext(b"hi".to_vec()),
+                sent_at: 42,
+            }),
+            signature: None,
+        };
+
+        let mut with_sequence = base_event.clone();
+        with_sequence.sequence_no = Some(123);
+
+        let h_base = base_event.content_hash().expect("hash base");
+        let h_seq = with_sequence.content_hash().expect("hash with sequence");
+        assert_eq!(h_base, h_seq, "sequence_no must not affect content hash");
+    }
 }
