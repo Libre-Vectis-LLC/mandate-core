@@ -330,13 +330,6 @@ impl AuthService for AuthServiceImpl {
     ) -> Result<Response<RedeemGiftCardResponse>, Status> {
         Err(RpcError::Unavailable("auth backend not wired".into()).into())
     }
-
-    async fn validate_token(
-        &self,
-        _request: Request<mandate_proto::mandate::v1::ValidateTokenRequest>,
-    ) -> Result<Response<mandate_proto::mandate::v1::ValidateTokenResponse>, Status> {
-        Err(RpcError::Unavailable("auth backend not wired".into()).into())
-    }
 }
 
 /// Billing service placeholder.
