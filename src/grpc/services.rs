@@ -247,6 +247,18 @@ impl RingService for RingServiceImpl {
             .current_ring(tenant, group_id)
             .map_err(to_status)?;
         let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
+
+        if after_hash.as_ref() == Some(&current_hash) {
+            let (tx, rx) = mpsc::channel(1);
+            let _ = tx
+                .send(Ok(StreamRingResponse {
+                    entries: Vec::new(),
+                    next_ring_hash: current_hash.0.to_vec(),
+                }))
+                .await;
+            return Ok(Response::new(ReceiverStream::new(rx)));
+        }
+
         let path = self
             .store
             .ring_view
@@ -753,6 +765,51 @@ mod tests {
         assert_eq!(resp.entries.len(), 1);
         assert_eq!(resp.entries[0].deltas.len(), 1);
         assert_eq!(resp.entries[0].ring_hash, h2.0.to_vec());
+    }
+
+    #[tokio::test]
+    async fn stream_ring_returns_empty_batch_when_up_to_date() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-ring-up-to-date";
+        tokens.insert(token, tenant);
+        let group = GroupId(ulid::Ulid::new());
+
+        let store = StorageFacade::new(
+            tokens,
+            events.clone(),
+            events.clone(),
+            Arc::new(InMemoryKeyBlobs::new()),
+            rings.clone(),
+            rings.clone(),
+            bans,
+        );
+        let svc = RingServiceImpl::new(store);
+
+        let head = rings
+            .append_delta(tenant, group, RingDelta::Add(mpk(b"a")))
+            .expect("founder");
+
+        let mut stream = svc
+            .stream_ring(tenant_request(
+                token,
+                StreamRingRequest {
+                    group_id: group.to_string(),
+                    after_ring_hash: head.0.to_vec(),
+                    limit: 10,
+                },
+            ))
+            .await
+            .expect("stream ring")
+            .into_inner();
+        let resp = stream.next().await.unwrap().unwrap();
+
+        assert!(resp.entries.is_empty());
+        assert_eq!(resp.next_ring_hash, head.0.to_vec());
     }
 
     #[tokio::test]
