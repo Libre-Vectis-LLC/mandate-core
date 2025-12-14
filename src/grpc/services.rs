@@ -957,4 +957,83 @@ mod tests {
             .expect_err("other group should not see blob");
         assert_eq!(err.code(), Code::NotFound);
     }
+
+    #[tokio::test]
+    async fn storage_key_blob_same_rage_pub_does_not_collide_across_groups() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+        let blobs = Arc::new(InMemoryKeyBlobs::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-5";
+        tokens.insert(token, tenant);
+
+        let store = StorageFacade::new(
+            tokens,
+            events.clone(),
+            events,
+            blobs,
+            rings.clone(),
+            rings,
+            bans,
+        );
+        let svc = StorageServiceImpl::new(store);
+
+        let group_a = GroupId(ulid::Ulid::new());
+        let group_b = GroupId(ulid::Ulid::new());
+
+        svc.upload_key_blobs(tenant_request(
+            token,
+            UploadKeyBlobsRequest {
+                group_id: group_a.to_string(),
+                blobs: vec![KeyBlob {
+                    rage_pub: Some(rage_pub(1)),
+                    blob: b"blob-a".to_vec(),
+                }],
+            },
+        ))
+        .await
+        .expect("upload group a");
+
+        svc.upload_key_blobs(tenant_request(
+            token,
+            UploadKeyBlobsRequest {
+                group_id: group_b.to_string(),
+                blobs: vec![KeyBlob {
+                    rage_pub: Some(rage_pub(1)),
+                    blob: b"blob-b".to_vec(),
+                }],
+            },
+        ))
+        .await
+        .expect("upload group b");
+
+        let resp_a = svc
+            .download_my_key_blob(tenant_request(
+                token,
+                DownloadMyKeyBlobRequest {
+                    group_id: group_a.to_string(),
+                    rage_pub: Some(rage_pub(1)),
+                },
+            ))
+            .await
+            .expect("download group a")
+            .into_inner();
+        assert_eq!(resp_a.blob, b"blob-a".to_vec());
+
+        let resp_b = svc
+            .download_my_key_blob(tenant_request(
+                token,
+                DownloadMyKeyBlobRequest {
+                    group_id: group_b.to_string(),
+                    rage_pub: Some(rage_pub(1)),
+                },
+            ))
+            .await
+            .expect("download group b")
+            .into_inner();
+        assert_eq!(resp_b.blob, b"blob-b".to_vec());
+    }
 }
