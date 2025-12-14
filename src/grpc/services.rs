@@ -360,7 +360,15 @@ impl BillingService for BillingServiceImpl {
 }
 
 /// Group service placeholder (tenant/group management lives in server/enterprise).
-pub struct GroupServiceImpl;
+pub struct GroupServiceImpl {
+    store: StorageFacade,
+}
+
+impl GroupServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
 
 #[tonic::async_trait]
 impl GroupService for GroupServiceImpl {
@@ -373,9 +381,51 @@ impl GroupService for GroupServiceImpl {
 
     async fn set_owner_public_key(
         &self,
-        _request: Request<SetOwnerPublicKeyRequest>,
+        request: Request<SetOwnerPublicKeyRequest>,
     ) -> Result<Response<SetOwnerPublicKeyResponse>, Status> {
-        Err(RpcError::Unavailable("group backend not wired".into()).into())
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let body = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+
+        let owner_pubkey = body
+            .owner_pubkey
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument("missing owner_pubkey".into()))?;
+        let owner_pubkey = crate::proto::nazgul_pub_from_proto(owner_pubkey)
+            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+
+        match self.store.ring_view.current_ring(tenant, group_id) {
+            Ok(ring) => {
+                let is_idempotent = ring.members().len() == 1
+                    && ring
+                        .members()
+                        .iter()
+                        .any(|p| p.to_bytes() == owner_pubkey.0);
+                if is_idempotent {
+                    return Ok(Response::new(SetOwnerPublicKeyResponse {}));
+                }
+
+                return Err(
+                    RpcError::FailedPrecondition("group ring already initialized".into()).into(),
+                );
+            }
+            Err(crate::storage::StorageError::NotFound(_)) => {}
+            Err(err) => return Err(to_status(err)),
+        }
+
+        self.store
+            .ring_writer
+            .append_delta(
+                tenant,
+                group_id,
+                crate::ring_log::RingDelta::Add(owner_pubkey),
+            )
+            .map_err(to_status)?;
+
+        Ok(Response::new(SetOwnerPublicKeyResponse {}))
     }
 
     async fn get_group(
@@ -652,6 +702,79 @@ mod tests {
         assert_eq!(resp.entries.len(), 1);
         assert_eq!(resp.entries[0].deltas.len(), 1);
         assert_eq!(resp.entries[0].ring_hash, h2.0.to_vec());
+    }
+
+    #[tokio::test]
+    async fn set_owner_public_key_initializes_genesis_ring() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-owner";
+        tokens.insert(token, tenant);
+
+        let store = StorageFacade::new(
+            tokens,
+            events.clone(),
+            events.clone(),
+            Arc::new(InMemoryKeyBlobs::new()),
+            rings.clone(),
+            rings.clone(),
+            bans,
+        );
+        let svc = GroupServiceImpl::new(store);
+
+        let group = GroupId(ulid::Ulid::new());
+        let owner = mpk(b"owner");
+
+        svc.set_owner_public_key(tenant_request(
+            token,
+            SetOwnerPublicKeyRequest {
+                group_id: group.to_string(),
+                owner_pubkey: Some(crate::proto::master_pub_to_proto(&owner)),
+            },
+        ))
+        .await
+        .expect("init should succeed");
+
+        let ring = rings
+            .current_ring(tenant, group)
+            .expect("genesis ring should exist");
+        assert_eq!(ring.members().len(), 1);
+        assert_eq!(ring.members()[0].to_bytes(), owner.0);
+
+        // Idempotent re-submit of the same owner key should succeed.
+        svc.set_owner_public_key(tenant_request(
+            token,
+            SetOwnerPublicKeyRequest {
+                group_id: group.to_string(),
+                owner_pubkey: Some(crate::proto::master_pub_to_proto(&owner)),
+            },
+        ))
+        .await
+        .expect("idempotent init should succeed");
+
+        // Different key must be rejected without mutating the genesis ring.
+        let other = mpk(b"other");
+        let err = svc
+            .set_owner_public_key(tenant_request(
+                token,
+                SetOwnerPublicKeyRequest {
+                    group_id: group.to_string(),
+                    owner_pubkey: Some(crate::proto::master_pub_to_proto(&other)),
+                },
+            ))
+            .await
+            .expect_err("should reject overwriting owner key");
+        assert_eq!(err.code(), Code::FailedPrecondition);
+
+        let ring = rings
+            .current_ring(tenant, group)
+            .expect("genesis ring should exist");
+        assert_eq!(ring.members().len(), 1);
+        assert_eq!(ring.members()[0].to_bytes(), owner.0);
     }
 
     #[tokio::test]
