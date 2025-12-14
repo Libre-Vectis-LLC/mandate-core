@@ -7,15 +7,17 @@ use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use crate::storage::{RingView, TenantTokenError, TenantTokenStore};
 use mandate_proto::mandate::v1::{
-    auth_service_server::AuthService, billing_service_server::BillingService,
-    event_service_server::EventService, group_service_server::GroupService,
-    member_service_server::MemberService, ring_service_server::RingService,
-    storage_service_server::StorageService, CreateGroupRequest, CreateGroupResponse,
-    DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse, GetGroupRequest, GetGroupResponse,
-    GetRingHeadRequest, GetRingHeadResponse, ListPendingMembersRequest, ListPendingMembersResponse,
-    PushEventRequest, PushEventResponse, RedeemGiftCardRequest, RedeemGiftCardResponse,
-    SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse, StreamEventsRequest, StreamEventsResponse,
-    StreamRingRequest, StreamRingResponse, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
+    admin_service_server::AdminService, auth_service_server::AuthService,
+    billing_service_server::BillingService, event_service_server::EventService,
+    group_service_server::GroupService, member_service_server::MemberService,
+    ring_service_server::RingService, storage_service_server::StorageService, CreateGroupRequest,
+    CreateGroupResponse, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse,
+    GetGroupBalanceRequest, GetGroupBalanceResponse, GetGroupRequest, GetGroupResponse,
+    GetRingHeadRequest, GetRingHeadResponse, IssueGiftCardRequest, IssueGiftCardResponse,
+    ListPendingMembersRequest, ListPendingMembersResponse, PushEventRequest, PushEventResponse,
+    RedeemGiftCardRequest, RedeemGiftCardResponse, SetOwnerPublicKeyRequest,
+    SetOwnerPublicKeyResponse, StreamEventsRequest, StreamEventsResponse, StreamRingRequest,
+    StreamRingResponse, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
     TransferToGroupRequest, TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use nazgul::traits::LocalByteConvertible;
@@ -304,11 +306,31 @@ fn encode_ring_delta_path(
     }])
 }
 
-/// Auth service placeholder (token validation is external in core).
+/// Admin service placeholder (operations-only RPCs live in server/enterprise).
+pub struct AdminServiceImpl;
+
+#[tonic::async_trait]
+impl AdminService for AdminServiceImpl {
+    async fn issue_gift_card(
+        &self,
+        _request: Request<IssueGiftCardRequest>,
+    ) -> Result<Response<IssueGiftCardResponse>, Status> {
+        Err(RpcError::Unavailable("admin backend not wired".into()).into())
+    }
+}
+
+/// Auth service placeholder (token issuance/rotation and redeem flow live in server/enterprise).
 pub struct AuthServiceImpl;
 
 #[tonic::async_trait]
 impl AuthService for AuthServiceImpl {
+    async fn redeem_gift_card(
+        &self,
+        _request: Request<RedeemGiftCardRequest>,
+    ) -> Result<Response<RedeemGiftCardResponse>, Status> {
+        Err(RpcError::Unavailable("auth backend not wired".into()).into())
+    }
+
     async fn validate_token(
         &self,
         _request: Request<mandate_proto::mandate::v1::ValidateTokenRequest>,
@@ -322,24 +344,17 @@ pub struct BillingServiceImpl;
 
 #[tonic::async_trait]
 impl BillingService for BillingServiceImpl {
-    async fn issue_gift_card(
-        &self,
-        _request: Request<mandate_proto::mandate::v1::IssueGiftCardRequest>,
-    ) -> Result<Response<mandate_proto::mandate::v1::IssueGiftCardResponse>, Status> {
-        Err(RpcError::Unavailable("billing backend not wired".into()).into())
-    }
-
-    async fn redeem_gift_card(
-        &self,
-        _request: Request<RedeemGiftCardRequest>,
-    ) -> Result<Response<RedeemGiftCardResponse>, Status> {
-        Err(RpcError::Unavailable("billing backend not wired".into()).into())
-    }
-
     async fn transfer_to_group(
         &self,
         _request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
+        Err(RpcError::Unavailable("billing backend not wired".into()).into())
+    }
+
+    async fn get_group_balance(
+        &self,
+        _request: Request<GetGroupBalanceRequest>,
+    ) -> Result<Response<GetGroupBalanceResponse>, Status> {
         Err(RpcError::Unavailable("billing backend not wired".into()).into())
     }
 }

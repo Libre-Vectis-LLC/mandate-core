@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../protos/member.proto",
         "../protos/storage.proto",
         "../protos/billing.proto",
+        "../protos/admin.proto",
         "../protos/auth.proto",
     ];
 

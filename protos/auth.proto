@@ -5,7 +5,20 @@ import "error.proto";
 
 // Lightweight auth helpers (API token validation).
 service AuthService {
+  rpc RedeemGiftCard (RedeemGiftCardRequest) returns (RedeemGiftCardResponse);
   rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message RedeemGiftCardRequest {
+  string tg_user_id = 1;
+  string code = 2;
+}
+
+message RedeemGiftCardResponse {
+  string tenant_id = 1; // ULID
+  string group_id = 2;  // ULID (may be created on redeem)
+  int64 new_balance_nanos = 3;
+  string api_token = 4; // token for edge/server auth
 }
 
 message ValidateTokenRequest {

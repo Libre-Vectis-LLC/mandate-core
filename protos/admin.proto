@@ -1,0 +1,20 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "error.proto";
+
+// Operations-only RPC surface (internal).
+service AdminService {
+  // Issue a gift card code for tenant bootstrap.
+  rpc IssueGiftCard (IssueGiftCardRequest) returns (IssueGiftCardResponse);
+}
+
+message IssueGiftCardRequest {
+  uint64 amount_nanos = 1; // e.g., in smallest unit
+  string reason = 2;
+}
+
+message IssueGiftCardResponse {
+  string code = 1;
+}
+
