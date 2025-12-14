@@ -101,13 +101,18 @@ impl EventStore for InMemoryEvents {
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
         let inner = self.inner();
-        let events = inner
-            .get(&tenant)
-            .ok_or(StorageError::NotFound(NotFound::Tail { tenant }))?;
-        let start = after
-            .and_then(|seq| events.iter().position(|(_, _, s)| *s == seq))
-            .map(|idx| idx + 1)
-            .unwrap_or(0);
+        let Some(events) = inner.get(&tenant) else {
+            return Ok(Vec::new());
+        };
+        let start = match after {
+            None => 0,
+            Some(seq) if seq < 0 => 0,
+            Some(seq) => match seq.checked_add(1) {
+                Some(next) => usize::try_from(next).unwrap_or(events.len()),
+                None => events.len(),
+            },
+        };
+        let start = start.min(events.len());
         Ok(events.iter().skip(start).take(limit).cloned().collect())
     }
 }

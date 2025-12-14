@@ -8,7 +8,8 @@ service EventService {
   // Push a signed event to the server (bytes are canonical, include signature).
   rpc PushEvent (PushEventRequest) returns (PushEventResponse);
 
-  // Stream events for a group, starting after an exclusive sequence.
+  // Fetch a single page of events for a group, starting after an exclusive sequence.
+  // The server sends one response then closes the stream; an empty batch means no new events.
   rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
 }
 
@@ -24,8 +25,8 @@ message PushEventResponse {
 
 message StreamEventsRequest {
   string group_id = 1;       // ULID
-  int64 start_sequence_no = 2; // exclusive (start > this)
-  uint32 limit = 3;            // server may chunk smaller
+  int64 start_sequence_no = 2; // exclusive (start > this); use -1 to start from beginning
+  uint32 limit = 3;            // server clamps to configured max
 }
 
 message StreamEventsResponse {

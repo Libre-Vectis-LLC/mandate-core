@@ -653,6 +653,64 @@ mod tests {
         let resp = stream.next().await.unwrap().unwrap();
         assert_eq!(resp.sequence_nos, vec![2]);
         assert_eq!(resp.event_bytes.len(), 1);
+
+        // Anchor beyond the tail should return an empty batch (no replay).
+        let mut stream = svc
+            .stream_events(tenant_request(
+                token,
+                StreamEventsRequest {
+                    group_id: g1.to_string(),
+                    start_sequence_no: 999,
+                    limit: 10,
+                },
+            ))
+            .await
+            .expect("stream")
+            .into_inner();
+        let resp = stream.next().await.unwrap().unwrap();
+        assert!(resp.sequence_nos.is_empty());
+        assert!(resp.event_bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stream_events_returns_empty_batch_for_empty_tenant() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-empty-tenant";
+        tokens.insert(token, tenant);
+
+        let store = StorageFacade::new(
+            tokens,
+            events.clone(),
+            events.clone(),
+            Arc::new(InMemoryKeyBlobs::new()),
+            rings.clone(),
+            rings.clone(),
+            bans,
+        );
+        let svc = EventServiceImpl::new(store);
+
+        let group = GroupId(ulid::Ulid::new());
+        let mut stream = svc
+            .stream_events(tenant_request(
+                token,
+                StreamEventsRequest {
+                    group_id: group.to_string(),
+                    start_sequence_no: -1,
+                    limit: 10,
+                },
+            ))
+            .await
+            .expect("stream")
+            .into_inner();
+        let resp = stream.next().await.unwrap().unwrap();
+
+        assert!(resp.event_bytes.is_empty());
+        assert!(resp.sequence_nos.is_empty());
     }
 
     #[tokio::test]

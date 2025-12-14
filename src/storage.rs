@@ -182,28 +182,35 @@ impl<T: EventStore> EventReader for T {
         after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut cursor = after_sequence;
         let mut filtered = Vec::new();
 
         loop {
-            let batch = self.stream_from(tenant, cursor, limit)?;
+            let batch = match self.stream_from(tenant, cursor, limit) {
+                Ok(batch) => batch,
+                Err(StorageError::NotFound(NotFound::Tail { .. })) => Vec::new(),
+                Err(err) => return Err(err),
+            };
             if batch.is_empty() {
                 break;
             }
 
             cursor = batch.last().map(|(_, _, seq)| *seq);
             for (id, bytes, seq) in &batch {
-                if serde_json::from_slice::<EventGroupView>(bytes)
-                    .ok()
-                    .filter(|ev| ev.group_id == group_id)
-                    .is_some()
-                {
-                    filtered.push((*id, Arc::clone(bytes), *seq));
-                }
-            }
+                let view: EventGroupView = serde_json::from_slice(bytes).map_err(|e| {
+                    StorageError::Backend(format!("invalid event bytes for group filter: {e}"))
+                })?;
 
-            if filtered.len() >= limit {
-                break;
+                if view.group_id == group_id {
+                    filtered.push((*id, Arc::clone(bytes), *seq));
+                    if filtered.len() == limit {
+                        return Ok(filtered);
+                    }
+                }
             }
 
             if batch.len() < limit {
