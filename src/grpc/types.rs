@@ -2,8 +2,8 @@ use crate::event::Event;
 use crate::hashing::event_hash_sha3_256;
 use crate::ids::{EventId, GroupId, KeyImage, TenantId, TenantToken};
 use crate::storage::{
-    BanIndex, EventBytes, EventRecord, EventStore, KeyBlobStore, NotFound, RingView, RingWriter,
-    StorageError, TenantTokenError, TenantTokenStore,
+    BanIndex, EventBytes, EventReader, EventRecord, EventStore, EventWriter, KeyBlobStore,
+    NotFound, RingView, RingWriter, StorageError, TenantTokenError, TenantTokenStore,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -36,9 +36,12 @@ impl TenantTokenStore for InMemoryTenantTokens {
     }
 }
 
+type InMemoryEventMap = HashMap<(TenantId, GroupId), Vec<EventRecord>>;
+
 #[derive(Clone, Default)]
 pub struct InMemoryEvents {
-    events: Arc<Mutex<HashMap<TenantId, Vec<EventRecord>>>>,
+    // Keyed by (TenantId, GroupId) for isolation
+    events: Arc<Mutex<InMemoryEventMap>>,
 }
 
 impl InMemoryEvents {
@@ -48,19 +51,20 @@ impl InMemoryEvents {
         }
     }
 
-    fn inner(&self) -> std::sync::MutexGuard<'_, HashMap<TenantId, Vec<EventRecord>>> {
+    fn inner(&self) -> std::sync::MutexGuard<'_, InMemoryEventMap> {
         self.events.lock().expect("poison-free")
     }
 }
 
-impl EventStore for InMemoryEvents {
+impl EventWriter for InMemoryEvents {
     fn append(
         &self,
         tenant: TenantId,
+        group_id: GroupId,
         event_bytes: EventBytes,
     ) -> Result<(EventId, i64), StorageError> {
         let mut inner = self.inner();
-        let entry = inner.entry(tenant).or_default();
+        let entry = inner.entry((tenant, group_id)).or_default();
         let event: Event = serde_json::from_slice(&event_bytes)
             .map_err(|e| StorageError::Backend(format!("invalid event bytes: {e}")))?;
         let hash = event_hash_sha3_256(&event)
@@ -70,38 +74,18 @@ impl EventStore for InMemoryEvents {
         entry.push((id, event_bytes, seq));
         Ok((id, seq))
     }
+}
 
-    fn get(&self, tenant: TenantId, id: &EventId) -> Result<EventRecord, StorageError> {
-        let inner = self.inner();
-        let events = inner
-            .get(&tenant)
-            .ok_or(StorageError::NotFound(NotFound::Event { id: *id, tenant }))?;
-        events
-            .iter()
-            .find(|(ev_id, _, _)| ev_id == id)
-            .cloned()
-            .ok_or(StorageError::NotFound(NotFound::Event { id: *id, tenant }))
-    }
-
-    fn tail(&self, tenant: TenantId) -> Result<EventRecord, StorageError> {
-        let inner = self.inner();
-        let events = inner
-            .get(&tenant)
-            .ok_or(StorageError::NotFound(NotFound::Tail { tenant }))?;
-        events
-            .last()
-            .cloned()
-            .ok_or(StorageError::NotFound(NotFound::Tail { tenant }))
-    }
-
-    fn stream_from(
+impl EventReader for InMemoryEvents {
+    fn stream_group(
         &self,
         tenant: TenantId,
+        group_id: GroupId,
         after: Option<i64>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
         let inner = self.inner();
-        let Some(events) = inner.get(&tenant) else {
+        let Some(events) = inner.get(&(tenant, group_id)) else {
             return Ok(Vec::new());
         };
         let start = match after {
@@ -114,6 +98,44 @@ impl EventStore for InMemoryEvents {
         };
         let start = start.min(events.len());
         Ok(events.iter().skip(start).take(limit).cloned().collect())
+    }
+}
+
+impl EventStore for InMemoryEvents {
+    fn get(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        id: &EventId,
+    ) -> Result<EventRecord, StorageError> {
+        let inner = self.inner();
+        let events = inner
+            .get(&(tenant, group_id))
+            .ok_or(StorageError::NotFound(NotFound::Event {
+                id: *id,
+                tenant,
+                group_id,
+            }))?;
+        events
+            .iter()
+            .find(|(ev_id, _, _)| ev_id == id)
+            .cloned()
+            .ok_or(StorageError::NotFound(NotFound::Event {
+                id: *id,
+                tenant,
+                group_id,
+            }))
+    }
+
+    fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError> {
+        let inner = self.inner();
+        let events = inner
+            .get(&(tenant, group_id))
+            .ok_or(StorageError::NotFound(NotFound::Tail { tenant, group_id }))?;
+        events
+            .last()
+            .cloned()
+            .ok_or(StorageError::NotFound(NotFound::Tail { tenant, group_id }))
     }
 }
 

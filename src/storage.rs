@@ -10,7 +10,6 @@
 use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId, TenantToken};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
-use serde::Deserialize;
 use std::sync::Arc;
 
 pub mod facade;
@@ -73,10 +72,14 @@ pub trait TenantTokenStore {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotFound {
-    #[error("event {id:?} for tenant {tenant:?}")]
-    Event { id: EventId, tenant: TenantId },
-    #[error("tail for tenant {tenant:?}")]
-    Tail { tenant: TenantId },
+    #[error("event {id:?} for tenant {tenant:?} group {group_id:?}")]
+    Event {
+        id: EventId,
+        tenant: TenantId,
+        group_id: GroupId,
+    },
+    #[error("tail for tenant {tenant:?} group {group_id:?}")]
+    Tail { tenant: TenantId, group_id: GroupId },
     #[error("ring {hash:?} for tenant {tenant:?} group {group_id:?}")]
     Ring {
         hash: RingHash,
@@ -99,27 +102,17 @@ pub enum NotFound {
 }
 
 /// Append-only event storage. Intended for a single-writer per tenant; multi-tenant shares one table.
-pub trait EventStore {
-    /// Append a canonical, signed event (already serialized). Returns (event_id, sequence_no).
-    fn append(
-        &self,
-        tenant: TenantId,
-        event_bytes: EventBytes,
-    ) -> Result<(EventId, SequenceNo), StorageError>;
-
+pub trait EventStore: EventReader + EventWriter {
     /// Fetch canonical bytes by ID for audit/verification; `NotFound` if absent.
-    fn get(&self, tenant: TenantId, id: &EventId) -> Result<EventRecord, StorageError>;
-
-    /// Latest (tail) event for the tenant; `NotFound` if empty.
-    fn tail(&self, tenant: TenantId) -> Result<EventRecord, StorageError>;
-
-    /// Deterministic forward slice after an optional anchor sequence (exclusive), bounded by `limit`.
-    fn stream_from(
+    fn get(
         &self,
         tenant: TenantId,
-        after_sequence: Option<SequenceNo>,
-        limit: usize,
-    ) -> Result<Vec<EventRecord>, StorageError>;
+        group_id: GroupId,
+        id: &EventId,
+    ) -> Result<EventRecord, StorageError>;
+
+    /// Latest (tail) event for the group; `NotFound` if empty.
+    fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError>;
 }
 
 /// Write-only surface for events; separated to allow distinct read/write backends.
@@ -128,18 +121,9 @@ pub trait EventWriter {
     fn append(
         &self,
         tenant: TenantId,
+        group_id: GroupId,
         event_bytes: EventBytes,
     ) -> Result<(EventId, SequenceNo), StorageError>;
-}
-
-impl<T: EventStore> EventWriter for T {
-    fn append(
-        &self,
-        tenant: TenantId,
-        event_bytes: EventBytes,
-    ) -> Result<(EventId, SequenceNo), StorageError> {
-        EventStore::append(self, tenant, event_bytes)
-    }
 }
 
 /// Read-only grouping helper to support backend-specific implementations (e.g., Postgres).
@@ -171,62 +155,6 @@ pub trait KeyBlobStore {
         group_id: GroupId,
         rage_pub: [u8; 32],
     ) -> Result<Arc<[u8]>, StorageError>;
-}
-
-/// Default filtering implementation on top of `EventStore`.
-impl<T: EventStore> EventReader for T {
-    fn stream_group(
-        &self,
-        tenant: TenantId,
-        group_id: GroupId,
-        after_sequence: Option<SequenceNo>,
-        limit: usize,
-    ) -> Result<Vec<EventRecord>, StorageError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-
-        let mut cursor = after_sequence;
-        let mut filtered = Vec::new();
-
-        loop {
-            let batch = match self.stream_from(tenant, cursor, limit) {
-                Ok(batch) => batch,
-                Err(StorageError::NotFound(NotFound::Tail { .. })) => Vec::new(),
-                Err(err) => return Err(err),
-            };
-            if batch.is_empty() {
-                break;
-            }
-
-            cursor = batch.last().map(|(_, _, seq)| *seq);
-            for (id, bytes, seq) in &batch {
-                let view: EventGroupView = serde_json::from_slice(bytes).map_err(|e| {
-                    StorageError::Backend(format!("invalid event bytes for group filter: {e}"))
-                })?;
-
-                if view.group_id == group_id {
-                    filtered.push((*id, Arc::clone(bytes), *seq));
-                    if filtered.len() == limit {
-                        return Ok(filtered);
-                    }
-                }
-            }
-
-            if batch.len() < limit {
-                // Storage is exhausted.
-                break;
-            }
-        }
-
-        Ok(filtered)
-    }
-}
-
-/// Minimal projection used for group filtering without requiring storage metadata.
-#[derive(Debug, Deserialize)]
-pub struct EventGroupView {
-    pub group_id: GroupId,
 }
 
 /// Access to ring snapshots and delta paths; caching strategy is implementation-defined.

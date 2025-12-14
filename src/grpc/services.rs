@@ -42,17 +42,19 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<PushEventRequest>,
     ) -> Result<Response<PushEventResponse>, Status> {
-        // In a full implementation we'd parse event_bytes, verify signature, etc.
         let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
         let event: Event = serde_json::from_slice(&event_bytes)
             .map_err(|e| RpcError::InvalidArgument(format!("invalid event payload: {e}")))?;
+
+        // Pass group_id to append for scoping
         let id = self
             .store
             .event_writer
-            .append(tenant, event_bytes.clone())
+            .append(tenant, event.group_id, event_bytes.clone())
             .map_err(to_status)?;
+
         let event_hash = crate::proto::event_id_to_hash32(&id.0);
         let event_ulid = crate::proto::ulid_to_proto(&event.event_ulid.as_ulid());
         Ok(Response::new(PushEventResponse {
@@ -639,10 +641,10 @@ mod tests {
             .expect("stream")
             .into_inner();
         let resp = stream.next().await.unwrap().unwrap();
-        assert_eq!(resp.sequence_nos, vec![0, 2]);
+        assert_eq!(resp.sequence_nos, vec![0, 1]);
         assert_eq!(resp.event_bytes.len(), 2);
 
-        // Resume after seq 0 should return only seq 2.
+        // Resume after seq 0 should return only seq 1.
         let mut stream = svc
             .stream_events(tenant_request(
                 token,
@@ -656,7 +658,7 @@ mod tests {
             .expect("stream")
             .into_inner();
         let resp = stream.next().await.unwrap().unwrap();
-        assert_eq!(resp.sequence_nos, vec![2]);
+        assert_eq!(resp.sequence_nos, vec![1]);
         assert_eq!(resp.event_bytes.len(), 1);
 
         // Anchor beyond the tail should return an empty batch (no replay).
