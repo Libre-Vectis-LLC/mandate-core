@@ -8,14 +8,14 @@ use crate::storage::{RingView, TenantTokenError, TenantTokenStore};
 use mandate_proto::mandate::v1::{
     auth_service_server::AuthService, billing_service_server::BillingService,
     event_service_server::EventService, group_service_server::GroupService,
-    member_service_server::MemberService, ring_service_server::RingService, CreateGroupRequest,
-    CreateGroupResponse, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse, GetGroupRequest,
-    GetGroupResponse, GetRingHeadRequest, GetRingHeadResponse, ListPendingMembersRequest,
-    ListPendingMembersResponse, PushEventRequest, PushEventResponse, RedeemGiftCardRequest,
-    RedeemGiftCardResponse, SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
-    StreamEventsRequest, StreamEventsResponse, StreamRingRequest, StreamRingResponse,
-    SubmitPendingMemberRequest, SubmitPendingMemberResponse, TransferToGroupRequest,
-    TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
+    member_service_server::MemberService, ring_service_server::RingService,
+    storage_service_server::StorageService, CreateGroupRequest, CreateGroupResponse,
+    DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse, GetGroupRequest, GetGroupResponse,
+    GetRingHeadRequest, GetRingHeadResponse, ListPendingMembersRequest, ListPendingMembersResponse,
+    PushEventRequest, PushEventResponse, RedeemGiftCardRequest, RedeemGiftCardResponse,
+    SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse, StreamEventsRequest, StreamEventsResponse,
+    StreamRingRequest, StreamRingResponse, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
+    TransferToGroupRequest, TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use nazgul::traits::LocalByteConvertible;
 use tokio::sync::mpsc;
@@ -372,7 +372,7 @@ impl GroupService for GroupServiceImpl {
     }
 }
 
-/// Member service placeholder (pending members/key blobs handled in server/enterprise).
+/// Member service placeholder (pending members handled in server/enterprise).
 pub struct MemberServiceImpl;
 
 #[tonic::async_trait]
@@ -390,19 +390,76 @@ impl MemberService for MemberServiceImpl {
     ) -> Result<Response<ListPendingMembersResponse>, Status> {
         Err(RpcError::Unavailable("member backend not wired".into()).into())
     }
+}
 
+/// Storage service backed by the injected key blob store.
+pub struct StorageServiceImpl {
+    store: StorageFacade,
+}
+
+impl StorageServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
+
+#[tonic::async_trait]
+impl StorageService for StorageServiceImpl {
     async fn upload_key_blobs(
         &self,
-        _request: Request<UploadKeyBlobsRequest>,
+        request: Request<UploadKeyBlobsRequest>,
     ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
-        Err(RpcError::Unavailable("member backend not wired".into()).into())
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let body = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+
+        let mut entries = Vec::with_capacity(body.blobs.len());
+        for blob in body.blobs {
+            let rage_pub = blob
+                .rage_pub
+                .as_ref()
+                .ok_or_else(|| RpcError::InvalidArgument("missing rage_pub".into()))?;
+            let rage_pub = crate::proto::rage_pub_from_proto(rage_pub)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+            entries.push((rage_pub, blob.blob.into()));
+        }
+
+        self.store
+            .key_blobs
+            .put_many(tenant, group_id, entries)
+            .map_err(to_status)?;
+        Ok(Response::new(UploadKeyBlobsResponse {}))
     }
 
     async fn download_my_key_blob(
         &self,
-        _request: Request<DownloadMyKeyBlobRequest>,
+        request: Request<DownloadMyKeyBlobRequest>,
     ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
-        Err(RpcError::Unavailable("member backend not wired".into()).into())
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let body = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+        let rage_pub = body
+            .rage_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument("missing rage_pub".into()))?;
+        let rage_pub = crate::proto::rage_pub_from_proto(rage_pub)
+            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+
+        let blob = self
+            .store
+            .key_blobs
+            .get_one(tenant, group_id, rage_pub)
+            .map_err(to_status)?;
+
+        Ok(Response::new(DownloadMyKeyBlobResponse {
+            blob: blob.to_vec(),
+        }))
     }
 }
 
@@ -410,12 +467,15 @@ impl MemberService for MemberServiceImpl {
 mod tests {
     use super::*;
     use crate::event::{Event, EventType, ProofOfInnocence};
-    use crate::grpc::types::{InMemoryEvents, InMemoryRings, InMemoryTenantTokens, NoopBanIndex};
+    use crate::grpc::types::{
+        InMemoryEvents, InMemoryKeyBlobs, InMemoryRings, InMemoryTenantTokens, NoopBanIndex,
+    };
     use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::ring_log::RingDelta;
     use crate::storage::RingWriter;
     use crate::test_utils::TEST_MNEMONIC;
+    use mandate_proto::mandate::v1::KeyBlob;
     use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
     use std::sync::Arc;
@@ -472,6 +532,7 @@ mod tests {
             tokens,
             events.clone(),
             events.clone(),
+            Arc::new(InMemoryKeyBlobs::new()),
             rings.clone(),
             rings.clone(),
             bans,
@@ -546,6 +607,7 @@ mod tests {
             tokens,
             events.clone(),
             events.clone(),
+            Arc::new(InMemoryKeyBlobs::new()),
             rings.clone(),
             rings.clone(),
             bans,
@@ -593,6 +655,7 @@ mod tests {
             tokens,
             events.clone(),
             events.clone(),
+            Arc::new(InMemoryKeyBlobs::new()),
             rings.clone(),
             rings.clone(),
             bans,
@@ -627,6 +690,83 @@ mod tests {
             ))
             .await
             .expect_err("g2 must not see g1 ring state");
+        assert_eq!(err.code(), Code::NotFound);
+    }
+
+    fn rage_pub(marker: u8) -> mandate_proto::mandate::v1::RagePublicKey {
+        mandate_proto::mandate::v1::RagePublicKey {
+            value: vec![marker; 32],
+        }
+    }
+
+    #[tokio::test]
+    async fn storage_key_blob_roundtrip_is_scoped_by_group() {
+        let events = Arc::new(InMemoryEvents::new());
+        let rings = Arc::new(InMemoryRings::new());
+        let bans = Arc::new(NoopBanIndex::default());
+        let tokens = Arc::new(InMemoryTenantTokens::new());
+        let blobs = Arc::new(InMemoryKeyBlobs::new());
+
+        let tenant = TenantId(ulid::Ulid::new());
+        let token = "token-tenant-4";
+        tokens.insert(token, tenant);
+
+        let store = StorageFacade::new(
+            tokens,
+            events.clone(),
+            events.clone(),
+            blobs,
+            rings.clone(),
+            rings,
+            bans,
+        );
+        let svc = StorageServiceImpl::new(store);
+
+        let group_a = GroupId(ulid::Ulid::new());
+        let group_b = GroupId(ulid::Ulid::new());
+
+        svc.upload_key_blobs(tenant_request(
+            token,
+            UploadKeyBlobsRequest {
+                group_id: group_a.to_string(),
+                blobs: vec![
+                    KeyBlob {
+                        rage_pub: Some(rage_pub(1)),
+                        blob: b"blob-a1".to_vec(),
+                    },
+                    KeyBlob {
+                        rage_pub: Some(rage_pub(2)),
+                        blob: b"blob-a2".to_vec(),
+                    },
+                ],
+            },
+        ))
+        .await
+        .expect("upload should succeed");
+
+        let resp = svc
+            .download_my_key_blob(tenant_request(
+                token,
+                DownloadMyKeyBlobRequest {
+                    group_id: group_a.to_string(),
+                    rage_pub: Some(rage_pub(1)),
+                },
+            ))
+            .await
+            .expect("download should succeed")
+            .into_inner();
+        assert_eq!(resp.blob, b"blob-a1".to_vec());
+
+        let err = svc
+            .download_my_key_blob(tenant_request(
+                token,
+                DownloadMyKeyBlobRequest {
+                    group_id: group_b.to_string(),
+                    rage_pub: Some(rage_pub(1)),
+                },
+            ))
+            .await
+            .expect_err("other group should not see blob");
         assert_eq!(err.code(), Code::NotFound);
     }
 }

@@ -10,12 +10,6 @@ service MemberService {
 
   // Owner/Audit bot lists pending members for approval.
   rpc ListPendingMembers (ListPendingMembersRequest) returns (ListPendingMembersResponse);
-
-  // Owner/Audit bot uploads key blobs for approved members (one bucket per person).
-  rpc UploadKeyBlobs (UploadKeyBlobsRequest) returns (UploadKeyBlobsResponse);
-
-  // Member fetches own key blob.
-  rpc DownloadMyKeyBlob (DownloadMyKeyBlobRequest) returns (DownloadMyKeyBlobResponse);
 }
 
 message SubmitPendingMemberRequest {
@@ -46,24 +40,4 @@ message PendingMember {
 message ListPendingMembersResponse {
   repeated PendingMember members = 1;
   PageToken next_page_token = 2;
-}
-
-message KeyBlobEntry {
-  string member_id = 1; // could be pending_id or member id after approval
-  bytes blob = 2;       // age-encrypted K_shared bucket
-}
-
-message UploadKeyBlobsRequest {
-  string group_id = 1;
-  repeated KeyBlobEntry blobs = 2;
-}
-
-message UploadKeyBlobsResponse {}
-
-message DownloadMyKeyBlobRequest {
-  string group_id = 1;
-}
-
-message DownloadMyKeyBlobResponse {
-  bytes blob = 1;
 }

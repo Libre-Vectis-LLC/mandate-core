@@ -1,7 +1,7 @@
 use crate::ids::{EventId, GroupId, KeyImage, TenantId, TenantToken};
 use crate::storage::{
-    BanIndex, EventBytes, EventRecord, EventStore, NotFound, RingView, RingWriter, StorageError,
-    TenantTokenError, TenantTokenStore,
+    BanIndex, EventBytes, EventRecord, EventStore, KeyBlobStore, NotFound, RingView, RingWriter,
+    StorageError, TenantTokenError, TenantTokenStore,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -106,6 +106,55 @@ impl EventStore for InMemoryEvents {
             .map(|idx| idx + 1)
             .unwrap_or(0);
         Ok(events.iter().skip(start).take(limit).cloned().collect())
+    }
+}
+
+type KeyBlobKey = (TenantId, GroupId, [u8; 32]);
+type KeyBlobMap = HashMap<KeyBlobKey, Arc<[u8]>>;
+
+#[derive(Clone, Default)]
+pub struct InMemoryKeyBlobs {
+    blobs: Arc<Mutex<KeyBlobMap>>,
+}
+
+impl InMemoryKeyBlobs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn inner(&self) -> std::sync::MutexGuard<'_, KeyBlobMap> {
+        self.blobs.lock().expect("poison-free")
+    }
+}
+
+impl KeyBlobStore for InMemoryKeyBlobs {
+    fn put_many(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        blobs: Vec<([u8; 32], Arc<[u8]>)>,
+    ) -> Result<(), StorageError> {
+        let mut map = self.inner();
+        for (rage_pub, blob) in blobs {
+            map.insert((tenant, group_id, rage_pub), blob);
+        }
+        Ok(())
+    }
+
+    fn get_one(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        rage_pub: [u8; 32],
+    ) -> Result<Arc<[u8]>, StorageError> {
+        let map = self.inner();
+        map.get(&(tenant, group_id, rage_pub))
+            .cloned()
+            .ok_or(StorageError::NotFound(NotFound::KeyBlob {
+                tenant,
+                group_id,
+                rage_pub,
+            }))
     }
 }
 

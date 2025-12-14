@@ -1,0 +1,36 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+import "error.proto";
+
+// Blob I/O hot path (Edge-cached). Blobs are indexed by the member's Rage public key.
+service StorageService {
+  // Owner/Audit bot uploads key blobs for approved members (one bucket per person).
+  rpc UploadKeyBlobs (UploadKeyBlobsRequest) returns (UploadKeyBlobsResponse);
+
+  // Member fetches their own key blob by providing their Rage public key.
+  rpc DownloadMyKeyBlob (DownloadMyKeyBlobRequest) returns (DownloadMyKeyBlobResponse);
+}
+
+message KeyBlob {
+  RagePublicKey rage_pub = 1;
+  bytes blob = 2; // age/rage-encrypted bucket containing K_shared
+}
+
+message UploadKeyBlobsRequest {
+  string group_id = 1; // ULID
+  repeated KeyBlob blobs = 2;
+}
+
+message UploadKeyBlobsResponse {}
+
+message DownloadMyKeyBlobRequest {
+  string group_id = 1; // ULID
+  RagePublicKey rage_pub = 2;
+}
+
+message DownloadMyKeyBlobResponse {
+  bytes blob = 1;
+}
+

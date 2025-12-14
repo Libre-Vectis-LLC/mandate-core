@@ -90,6 +90,12 @@ pub enum NotFound {
         tenant: TenantId,
         group_id: GroupId,
     },
+    #[error("key blob for tenant {tenant:?} group {group_id:?} rage_pub {rage_pub:?}")]
+    KeyBlob {
+        tenant: TenantId,
+        group_id: GroupId,
+        rage_pub: [u8; 32],
+    },
 }
 
 /// Append-only event storage. Intended for a single-writer per tenant; multi-tenant shares one table.
@@ -146,6 +152,25 @@ pub trait EventReader {
         after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError>;
+}
+
+/// Store for member key blobs, indexed by Rage public key.
+///
+/// Keys are scoped by `(tenant, group_id, rage_pub)` to avoid cross-group and cross-tenant leaks.
+pub trait KeyBlobStore {
+    fn put_many(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        blobs: Vec<([u8; 32], Arc<[u8]>)>,
+    ) -> Result<(), StorageError>;
+
+    fn get_one(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        rage_pub: [u8; 32],
+    ) -> Result<Arc<[u8]>, StorageError>;
 }
 
 /// Default filtering implementation on top of `EventStore`.
