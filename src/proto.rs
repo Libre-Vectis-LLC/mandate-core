@@ -10,6 +10,9 @@ use ulid::Ulid;
 /// Metadata key for API token expected on incoming gRPC requests.
 pub const API_TOKEN_METADATA_KEY: &str = "x-api-token";
 
+/// Metadata key for internal bot authentication.
+pub const BOT_SECRET_METADATA_KEY: &str = "x-bot-secret";
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProtoConvertError {
     #[error("invalid ulid string: {0}")]

@@ -1,5 +1,5 @@
-use crate::ids::TenantToken;
-use crate::proto::API_TOKEN_METADATA_KEY;
+use crate::ids::{BotSecret, TenantToken};
+use crate::proto::{API_TOKEN_METADATA_KEY, BOT_SECRET_METADATA_KEY};
 use crate::rpc::RpcError;
 use tonic::{Request, Status};
 
@@ -24,6 +24,28 @@ pub fn require_api_token(mut req: Request<()>) -> Result<Request<()>, Status> {
     };
 
     req.extensions_mut().insert(token);
+    Ok(req)
+}
+
+/// Enforce presence of `x-bot-secret` and attach a `BotSecret` to request extensions.
+#[allow(clippy::result_large_err)]
+pub fn require_bot_secret(mut req: Request<()>) -> Result<Request<()>, Status> {
+    let secret = {
+        let secret = req
+            .metadata()
+            .get(BOT_SECRET_METADATA_KEY)
+            .ok_or_else(|| RpcError::Unauthenticated("missing bot secret".into()))?
+            .to_str()
+            .map_err(|_| RpcError::Unauthenticated("bad secret encoding".into()))?;
+
+        if secret.is_empty() {
+            return Err(RpcError::Unauthenticated("empty bot secret".into()).into());
+        }
+
+        BotSecret::from(secret)
+    };
+
+    req.extensions_mut().insert(secret);
     Ok(req)
 }
 
@@ -63,5 +85,29 @@ mod tests {
             .cloned()
             .expect("tenant token extension");
         assert_eq!(stored.as_str(), "token-123");
+    }
+
+    #[test]
+    fn rejects_missing_bot_secret() {
+        let req = Request::new(());
+        let err = require_bot_secret(req).expect_err("missing secret must fail");
+        assert_eq!(err.code(), Code::Unauthenticated);
+    }
+
+    #[test]
+    fn stores_bot_secret_in_extensions() {
+        let mut req = Request::new(());
+        req.metadata_mut().insert(
+            BOT_SECRET_METADATA_KEY,
+            "secret-abc".parse().expect("metadata value"),
+        );
+
+        let req = require_bot_secret(req).expect("valid secret");
+        let stored = req
+            .extensions()
+            .get::<BotSecret>()
+            .cloned()
+            .expect("bot secret extension");
+        assert_eq!(stored.as_str(), "secret-abc");
     }
 }

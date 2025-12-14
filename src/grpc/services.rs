@@ -26,6 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 /// Basic EventService stub wired to EventStore.
+#[derive(Clone)]
 pub struct EventServiceImpl {
     store: StorageFacade,
 }
@@ -176,6 +177,7 @@ fn extract_tenant_id<T>(
 }
 
 /// Ring service backed by a `RingView`.
+#[derive(Clone)]
 pub struct RingServiceImpl {
     store: StorageFacade,
 }
@@ -321,6 +323,7 @@ fn encode_ring_delta_path(
 }
 
 /// Admin service placeholder (operations-only RPCs live in server/enterprise).
+#[derive(Clone)]
 pub struct AdminServiceImpl;
 
 #[tonic::async_trait]
@@ -334,6 +337,7 @@ impl AdminService for AdminServiceImpl {
 }
 
 /// Auth service placeholder (token issuance/rotation and redeem flow live in server/enterprise).
+#[derive(Clone)]
 pub struct AuthServiceImpl;
 
 #[tonic::async_trait]
@@ -347,6 +351,7 @@ impl AuthService for AuthServiceImpl {
 }
 
 /// Billing service placeholder.
+#[derive(Clone)]
 pub struct BillingServiceImpl;
 
 #[tonic::async_trait]
@@ -367,6 +372,7 @@ impl BillingService for BillingServiceImpl {
 }
 
 /// Group service placeholder (tenant/group management lives in server/enterprise).
+#[derive(Clone)]
 pub struct GroupServiceImpl {
     store: StorageFacade,
 }
@@ -444,6 +450,7 @@ impl GroupService for GroupServiceImpl {
 }
 
 /// Member service placeholder (pending members handled in server/enterprise).
+#[derive(Clone)]
 pub struct MemberServiceImpl;
 
 #[tonic::async_trait]
@@ -464,6 +471,7 @@ impl MemberService for MemberServiceImpl {
 }
 
 /// Storage service backed by the injected key blob store.
+#[derive(Clone)]
 pub struct StorageServiceImpl {
     store: StorageFacade,
 }

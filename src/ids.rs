@@ -116,6 +116,38 @@ impl AsRef<str> for TenantToken {
     }
 }
 
+/// Internal bot authentication secret carried via gRPC metadata (`x-bot-secret`).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct BotSecret(Arc<str>);
+
+impl BotSecret {
+    pub fn new(secret: impl Into<Arc<str>>) -> Self {
+        Self(secret.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for BotSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("BotSecret(<redacted>)")
+    }
+}
+
+impl From<String> for BotSecret {
+    fn from(value: String) -> Self {
+        Self::new(Arc::<str>::from(value))
+    }
+}
+
+impl From<&str> for BotSecret {
+    fn from(value: &str) -> Self {
+        Self::new(Arc::<str>::from(value))
+    }
+}
+
 /// Group identifier (server-assigned ULID) used in derivations and hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
