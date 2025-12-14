@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::storage::{
-    BanIndex, EventReader, EventWriter, KeyBlobStore, RingView, RingWriter, TenantTokenStore,
+    BanIndex, EventReader, EventWriter, GiftCardStore, GroupMetadataStore, KeyBlobStore,
+    PendingMemberStore, RingView, RingWriter, TenantTokenStore,
 };
 
 /// Thin convenience wrapper to inject storage capabilities as a single handle.
@@ -14,9 +15,13 @@ pub struct StorageFacade {
     pub ring_view: Arc<dyn RingView + Send + Sync>,
     pub ring_writer: Arc<dyn RingWriter + Send + Sync>,
     pub ban_index: Arc<dyn BanIndex + Send + Sync>,
+    pub gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
+    pub groups: Arc<dyn GroupMetadataStore + Send + Sync>,
+    pub pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
 }
 
 impl StorageFacade {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tenant_tokens: Arc<dyn TenantTokenStore + Send + Sync>,
         event_reader: Arc<dyn EventReader + Send + Sync>,
@@ -25,6 +30,9 @@ impl StorageFacade {
         ring_view: Arc<dyn RingView + Send + Sync>,
         ring_writer: Arc<dyn RingWriter + Send + Sync>,
         ban_index: Arc<dyn BanIndex + Send + Sync>,
+        gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
+        groups: Arc<dyn GroupMetadataStore + Send + Sync>,
+        pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
     ) -> Self {
         Self {
             tenant_tokens,
@@ -34,6 +42,9 @@ impl StorageFacade {
             ring_view,
             ring_writer,
             ban_index,
+            gift_cards,
+            groups,
+            pending_members,
         }
     }
 }

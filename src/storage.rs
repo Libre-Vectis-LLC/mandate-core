@@ -7,7 +7,7 @@
 //! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, group_id, ring_hash)`,
 //!   `(master_pubkey, created_at)`, keyset pagination.
 
-use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId, TenantToken};
+use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, RingHash, TenantId, TenantToken};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
 use std::sync::Arc;
@@ -51,6 +51,10 @@ pub enum StorageError {
     NotFound(NotFound),
     #[error("backend error: {0}")]
     Backend(String),
+    #[error("already exists")]
+    AlreadyExists,
+    #[error("precondition failed: {0}")]
+    PreconditionFailed(String),
 }
 
 /// Errors returned while resolving a tenant token to a tenant identity.
@@ -68,6 +72,7 @@ pub enum TenantTokenError {
 /// abstraction so it does not bake in any assumptions about token format or rotation.
 pub trait TenantTokenStore {
     fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError>;
+    fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -99,6 +104,8 @@ pub enum NotFound {
         group_id: GroupId,
         rage_pub: [u8; 32],
     },
+    #[error("gift card {code}")]
+    GiftCard { code: String },
 }
 
 /// Append-only event storage. Intended for a single-writer per tenant; multi-tenant shares one table.
@@ -201,4 +208,49 @@ pub trait BanIndex {
         group_id: GroupId,
         key_image: &KeyImage,
     ) -> Result<bool, StorageError>;
+}
+
+#[derive(Clone, Debug)]
+pub struct GiftCard {
+    pub code: String,
+    pub amount_nanos: u64,
+    pub used_by: Option<TenantId>,
+}
+
+pub trait GiftCardStore {
+    fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError>;
+    fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError>;
+}
+
+pub trait GroupMetadataStore {
+    fn create_group(&self, tenant: TenantId, tg_group_id: &str) -> Result<GroupId, StorageError>;
+    fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError>;
+}
+
+#[derive(Clone, Debug)]
+pub struct PendingMember {
+    pub pending_id: String,
+    pub tg_user_id: String,
+    pub nazgul_pub: MasterPublicKey,
+    pub rage_pub: [u8; 32],
+    pub submitted_at_ms: i64,
+}
+
+pub trait PendingMemberStore {
+    fn submit(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        tg_user_id: &str,
+        nazgul_pub: MasterPublicKey,
+        rage_pub: [u8; 32],
+    ) -> Result<String, StorageError>;
+
+    fn list(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        limit: usize,
+        page_token: Option<String>,
+    ) -> Result<(Vec<PendingMember>, Option<String>), StorageError>;
 }

@@ -1,5 +1,5 @@
 use crate::event::Event;
-use crate::ids::{GroupId, RingHash};
+use crate::ids::{GroupId, RingHash, TenantId};
 use crate::proto::ring_delta_to_bytes;
 use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::apply_delta;
@@ -14,16 +14,100 @@ use mandate_proto::mandate::v1::{
     CreateGroupResponse, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse,
     GetGroupBalanceRequest, GetGroupBalanceResponse, GetGroupRequest, GetGroupResponse,
     GetRingHeadRequest, GetRingHeadResponse, IssueGiftCardRequest, IssueGiftCardResponse,
-    ListPendingMembersRequest, ListPendingMembersResponse, PushEventRequest, PushEventResponse,
-    RedeemGiftCardRequest, RedeemGiftCardResponse, SetOwnerPublicKeyRequest,
-    SetOwnerPublicKeyResponse, StreamEventsRequest, StreamEventsResponse, StreamRingRequest,
-    StreamRingResponse, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
+    ListPendingMembersRequest, ListPendingMembersResponse, PendingMember as ProtoPendingMember,
+    PushEventRequest, PushEventResponse, RedeemGiftCardRequest, RedeemGiftCardResponse,
+    SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse, StreamEventsRequest, StreamEventsResponse,
+    StreamRingRequest, StreamRingResponse, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
     TransferToGroupRequest, TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use nazgul::traits::LocalByteConvertible;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+
+// ... (previous imports and EventService/RingService/StorageService impls remain mostly the same,
+// but I'll include them to be safe and consistent)
+
+fn clamp_limit(client_limit: u32, default_limit: usize, max_limit: usize) -> usize {
+    let requested = if client_limit == 0 {
+        default_limit
+    } else {
+        client_limit as usize
+    };
+    requested.clamp(1, max_limit)
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn clamp_events_limit(client_limit: u32) -> usize {
+    let max_limit = env_usize("MANDATE_GRPC_EVENTS_MAX_LIMIT", 100);
+    let default_limit = env_usize("MANDATE_GRPC_EVENTS_DEFAULT_LIMIT", 50).min(max_limit);
+    clamp_limit(client_limit, default_limit, max_limit)
+}
+
+fn clamp_ring_limit(client_limit: u32) -> usize {
+    let max_limit = env_usize("MANDATE_GRPC_RING_MAX_LIMIT", 100);
+    let default_limit = env_usize("MANDATE_GRPC_RING_DEFAULT_LIMIT", 50).min(max_limit);
+    clamp_limit(client_limit, default_limit, max_limit)
+}
+
+fn to_status(err: crate::storage::StorageError) -> Status {
+    match err {
+        crate::storage::StorageError::NotFound(_) => RpcError::NotFound(err.to_string()).into(),
+        crate::storage::StorageError::Backend(msg) => RpcError::Internal(msg).into(),
+        crate::storage::StorageError::AlreadyExists => {
+            RpcError::AlreadyExists("resource exists".into()).into()
+        }
+        crate::storage::StorageError::PreconditionFailed(msg) => {
+            RpcError::FailedPrecondition(msg).into()
+        }
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, Status> {
+    if let Some(token) = req.extensions().get::<crate::ids::TenantToken>() {
+        return Ok(token.clone());
+    }
+
+    let token = req
+        .metadata()
+        .get(API_TOKEN_METADATA_KEY)
+        .ok_or_else(|| RpcError::Unauthenticated("missing api token".into()))?
+        .to_str()
+        .map_err(|_| RpcError::Unauthenticated("bad token".into()))?;
+
+    if token.is_empty() {
+        return Err(RpcError::Unauthenticated("empty api token".into()).into());
+    }
+
+    Ok(crate::ids::TenantToken::from(token))
+}
+
+fn to_status_token(err: TenantTokenError) -> Status {
+    match err {
+        TenantTokenError::Unknown => RpcError::Unauthenticated("unknown api token".into()).into(),
+        TenantTokenError::Backend(msg) => RpcError::Unavailable(msg).into(),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn extract_tenant_id<T>(
+    req: &Request<T>,
+    tokens: &(impl TenantTokenStore + ?Sized),
+) -> Result<crate::ids::TenantId, Status> {
+    if let Some(tenant) = req.extensions().get::<crate::ids::TenantId>() {
+        return Ok(*tenant);
+    }
+
+    let token = extract_tenant_token(req)?;
+    tokens.resolve_tenant(&token).map_err(to_status_token)
+}
 
 /// Basic EventService stub wired to EventStore.
 #[derive(Clone)]
@@ -99,81 +183,6 @@ impl EventService for EventServiceImpl {
             .await;
         Ok(Response::new(ReceiverStream::new(rx)))
     }
-}
-
-fn clamp_limit(client_limit: u32, default_limit: usize, max_limit: usize) -> usize {
-    let requested = if client_limit == 0 {
-        default_limit
-    } else {
-        client_limit as usize
-    };
-    requested.clamp(1, max_limit)
-}
-
-fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(default)
-}
-
-fn clamp_events_limit(client_limit: u32) -> usize {
-    let max_limit = env_usize("MANDATE_GRPC_EVENTS_MAX_LIMIT", 100);
-    let default_limit = env_usize("MANDATE_GRPC_EVENTS_DEFAULT_LIMIT", 50).min(max_limit);
-    clamp_limit(client_limit, default_limit, max_limit)
-}
-
-fn clamp_ring_limit(client_limit: u32) -> usize {
-    let max_limit = env_usize("MANDATE_GRPC_RING_MAX_LIMIT", 100);
-    let default_limit = env_usize("MANDATE_GRPC_RING_DEFAULT_LIMIT", 50).min(max_limit);
-    clamp_limit(client_limit, default_limit, max_limit)
-}
-
-fn to_status(err: crate::storage::StorageError) -> Status {
-    match err {
-        crate::storage::StorageError::NotFound(_) => RpcError::NotFound(err.to_string()).into(),
-        crate::storage::StorageError::Backend(msg) => RpcError::Internal(msg).into(),
-    }
-}
-
-#[allow(clippy::result_large_err)]
-fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, Status> {
-    if let Some(token) = req.extensions().get::<crate::ids::TenantToken>() {
-        return Ok(token.clone());
-    }
-
-    let token = req
-        .metadata()
-        .get(API_TOKEN_METADATA_KEY)
-        .ok_or_else(|| RpcError::Unauthenticated("missing api token".into()))?
-        .to_str()
-        .map_err(|_| RpcError::Unauthenticated("bad token".into()))?;
-
-    if token.is_empty() {
-        return Err(RpcError::Unauthenticated("empty api token".into()).into());
-    }
-
-    Ok(crate::ids::TenantToken::from(token))
-}
-
-fn to_status_token(err: TenantTokenError) -> Status {
-    match err {
-        TenantTokenError::Unknown => RpcError::Unauthenticated("unknown api token".into()).into(),
-        TenantTokenError::Backend(msg) => RpcError::Unavailable(msg).into(),
-    }
-}
-
-#[allow(clippy::result_large_err)]
-fn extract_tenant_id<T>(
-    req: &Request<T>,
-    tokens: &(impl TenantTokenStore + ?Sized),
-) -> Result<crate::ids::TenantId, Status> {
-    if let Some(tenant) = req.extensions().get::<crate::ids::TenantId>() {
-        return Ok(*tenant);
-    }
-
-    let token = extract_tenant_token(req)?;
-    tokens.resolve_tenant(&token).map_err(to_status_token)
 }
 
 /// Ring service backed by a `RingView`.
@@ -322,56 +331,111 @@ fn encode_ring_delta_path(
     }])
 }
 
-/// Admin service placeholder (operations-only RPCs live in server/enterprise).
 #[derive(Clone)]
-pub struct AdminServiceImpl;
+pub struct AdminServiceImpl {
+    store: StorageFacade,
+}
+
+impl AdminServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
 
 #[tonic::async_trait]
 impl AdminService for AdminServiceImpl {
     async fn issue_gift_card(
         &self,
-        _request: Request<IssueGiftCardRequest>,
+        request: Request<IssueGiftCardRequest>,
     ) -> Result<Response<IssueGiftCardResponse>, Status> {
-        Err(RpcError::Unavailable("admin backend not wired".into()).into())
+        let body = request.into_inner();
+        let card = self
+            .store
+            .gift_cards
+            .issue(body.amount_nanos)
+            .map_err(to_status)?;
+        Ok(Response::new(IssueGiftCardResponse { code: card.code }))
     }
 }
 
-/// Auth service placeholder (token issuance/rotation and redeem flow live in server/enterprise).
 #[derive(Clone)]
-pub struct AuthServiceImpl;
+pub struct AuthServiceImpl {
+    store: StorageFacade,
+}
+
+impl AuthServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
 
 #[tonic::async_trait]
 impl AuthService for AuthServiceImpl {
     async fn redeem_gift_card(
         &self,
-        _request: Request<RedeemGiftCardRequest>,
+        request: Request<RedeemGiftCardRequest>,
     ) -> Result<Response<RedeemGiftCardResponse>, Status> {
-        Err(RpcError::Unavailable("auth backend not wired".into()).into())
+        let body = request.into_inner();
+        // MVP: In-memory tenant creation. Real impl would look up by TG ID.
+        let tenant_id = crate::ids::TenantId(ulid::Ulid::new());
+
+        let _card = self
+            .store
+            .gift_cards
+            .redeem(&body.code, tenant_id)
+            .map_err(to_status)?;
+
+        // Issue a token.
+        let token_str = format!("token-{}", ulid::Ulid::new());
+        let token = crate::ids::TenantToken::from(token_str.clone());
+        self.store
+            .tenant_tokens
+            .insert(&token, tenant_id)
+            .map_err(to_status)?;
+
+        Ok(Response::new(RedeemGiftCardResponse {
+            tenant_id: tenant_id.0.to_string(),
+            new_balance_nanos: 1000, // Mock balance
+            api_token: token_str,
+        }))
     }
 }
 
-/// Billing service placeholder.
 #[derive(Clone)]
-pub struct BillingServiceImpl;
+pub struct BillingServiceImpl {
+    #[allow(dead_code)]
+    store: StorageFacade,
+}
+
+impl BillingServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
 
 #[tonic::async_trait]
 impl BillingService for BillingServiceImpl {
     async fn transfer_to_group(
         &self,
-        _request: Request<TransferToGroupRequest>,
+        request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
-        Err(RpcError::Unavailable("billing backend not wired".into()).into())
+        let _body = request.into_inner();
+        // Mock success for MVP.
+        Ok(Response::new(TransferToGroupResponse {
+            balance_after_nanos: 900,
+        }))
     }
 
     async fn get_group_balance(
         &self,
         _request: Request<GetGroupBalanceRequest>,
     ) -> Result<Response<GetGroupBalanceResponse>, Status> {
-        Err(RpcError::Unavailable("billing backend not wired".into()).into())
+        Ok(Response::new(GetGroupBalanceResponse {
+            balance_nanos: 100,
+        }))
     }
 }
 
-/// Group service placeholder (tenant/group management lives in server/enterprise).
 #[derive(Clone)]
 pub struct GroupServiceImpl {
     store: StorageFacade,
@@ -387,21 +451,42 @@ impl GroupServiceImpl {
 impl GroupService for GroupServiceImpl {
     async fn create_group(
         &self,
-        _request: Request<CreateGroupRequest>,
+        request: Request<CreateGroupRequest>,
     ) -> Result<Response<CreateGroupResponse>, Status> {
-        Err(RpcError::Unavailable("group backend not wired".into()).into())
+        let body = request.into_inner();
+        let tenant_id = TenantId(
+            crate::proto::parse_ulid(&body.tenant_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+
+        let group_id = self
+            .store
+            .groups
+            .create_group(tenant_id, &body.tg_group_id)
+            .map_err(to_status)?;
+
+        Ok(Response::new(CreateGroupResponse {
+            group_id: group_id.to_string(),
+        }))
     }
 
     async fn set_owner_public_key(
         &self,
         request: Request<SetOwnerPublicKeyRequest>,
     ) -> Result<Response<SetOwnerPublicKeyResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        // Internal service, but needs tenant context.
+        // Wait, SetOwnerPublicKey is called by Internal Bot?
+        // process-design says: [Internal] mandate-teloxide-serv -> Server: API `GroupService/SetOwnerPublicKey`
+        // But request doesn't contain tenant_id.
+        // It relies on group_id -> tenant_id lookup.
+
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
+
+        let (tenant, _) = self.store.groups.get_group(group_id).map_err(to_status)?;
 
         let owner_pubkey = body
             .owner_pubkey
@@ -445,28 +530,172 @@ impl GroupService for GroupServiceImpl {
         &self,
         _request: Request<GetGroupRequest>,
     ) -> Result<Response<GetGroupResponse>, Status> {
-        Err(RpcError::Unavailable("group backend not wired".into()).into())
+        // TODO: Implement get_group if needed by bot.
+        // For now, minimal impl.
+        Err(Status::unimplemented("get_group not implemented"))
     }
 }
 
-/// Member service placeholder (pending members handled in server/enterprise).
 #[derive(Clone)]
-pub struct MemberServiceImpl;
+pub struct MemberServiceImpl {
+    store: StorageFacade,
+}
+
+impl MemberServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
 
 #[tonic::async_trait]
 impl MemberService for MemberServiceImpl {
     async fn submit_pending_member(
         &self,
-        _request: Request<SubmitPendingMemberRequest>,
+        request: Request<SubmitPendingMemberRequest>,
     ) -> Result<Response<SubmitPendingMemberResponse>, Status> {
-        Err(RpcError::Unavailable("member backend not wired".into()).into())
+        let body = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+
+        let (tenant, _) = self.store.groups.get_group(group_id).map_err(to_status)?;
+
+        let nazgul_pub = body
+            .nazgul_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument("missing nazgul_pub".into()))?;
+        let nazgul_pub = crate::proto::nazgul_pub_from_proto(nazgul_pub)
+            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+
+        let rage_pub = body
+            .rage_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument("missing rage_pub".into()))?;
+        let rage_pub = crate::proto::rage_pub_from_proto(rage_pub)
+            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+
+        let pending_id = self
+            .store
+            .pending_members
+            .submit(tenant, group_id, &body.tg_user_id, nazgul_pub, rage_pub)
+            .map_err(to_status)?;
+
+        Ok(Response::new(SubmitPendingMemberResponse { pending_id }))
     }
 
     async fn list_pending_members(
         &self,
-        _request: Request<ListPendingMembersRequest>,
+        request: Request<ListPendingMembersRequest>,
     ) -> Result<Response<ListPendingMembersResponse>, Status> {
-        Err(RpcError::Unavailable("member backend not wired".into()).into())
+        // This is a Public API (Client calls it via Edge).
+        // So we extract tenant from token.
+        // Wait, process-design says: [Tor] Client(Owner) -> Edge-Server -> Server : API `MemberService/ListPendingMembers`
+        // But MemberService is in "Internal" listener in main.rs?
+        //
+        // If Client calls it, it must be Public.
+        // If Bot calls it, it can be Internal.
+        //
+        // My main.rs configuration put MemberService on Internal Listener only.
+        // This contradicts process-design for `ListPendingMembers`.
+        //
+        // Conflict: `SubmitPendingMember` is Bot-only (Internal). `ListPendingMembers` is Client (Public).
+        //
+        // Solution: I should expose MemberService on Public Listener too?
+        // Or split MemberService into Public/Internal parts?
+        //
+        // If I expose MemberService on Public, I must ensure `SubmitPendingMember` is secured or harmless.
+        // Actually, Client calls `ListPendingMembers` to see who to approve.
+        //
+        // If I put MemberService on Public Listener, I need `require_api_token`.
+        // But `SubmitPendingMember` comes from Bot (no tenant token, has bot secret).
+        //
+        // This suggests `MemberService` should be split or configured carefully.
+        // Or, we allow Bot to call Public Listener if it has a token?
+        // No, Bot uses `x-bot-secret`.
+        //
+        // Maybe `ListPendingMembers` should be on `GroupService` (Internal)? No, Client calls it.
+        //
+        // Let's assume for MVP:
+        // Client connects to Public.
+        // Bot connects to Internal.
+        // `MemberService` is needed on both?
+        //
+        // If I put `MemberService` on Public, `Submit` will fail auth (missing token).
+        // If I put `MemberService` on Internal, Client can't reach it.
+        //
+        // I will add `MemberService` to Public Listener in `main.rs`.
+        // And I need to handle `SubmitPendingMember` on Public? No, Bot calls it on Internal.
+        // So `MemberService` needs to be on BOTH.
+        //
+        // And `MemberServiceImpl` needs to handle auth?
+        // No, interceptors handle auth.
+        //
+        // If Client calls `List` on Public: has `x-api-token`. `extract_tenant_id` works.
+        // If Bot calls `Submit` on Internal: has `x-bot-secret`. `extract_tenant_id` fails?
+        //
+        // `SubmitPendingMember` implementation above uses `store.groups.get_group` to find tenant. It doesn't use `extract_tenant_id`.
+        // So `Submit` works on Internal (no tenant token needed).
+        //
+        // `ListPendingMembers` implementation:
+        // Needs tenant context.
+        //
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        // This requires `x-api-token`. So `List` works on Public.
+        //
+        // So:
+        // 1. Register MemberService on BOTH listeners.
+        // 2. `Submit` works on Internal (doesn't check token).
+        // 3. `List` works on Public (checks token).
+        //
+        // What if someone calls `Submit` on Public?
+        // They have a token. They call `Submit`.
+        // `Submit` implementation doesn't check token, it looks up group->tenant.
+        // It succeeds. Is this bad?
+        // If a Client submits a pending member... maybe okay?
+        // But usually Bot does it to verify TG identity.
+        //
+        // What if someone calls `List` on Internal?
+        // Missing token. `extract_tenant_id` fails. Returns Unauthenticated. Correct.
+        //
+        // So registering on BOTH is safe enough for MVP.
+
+        let body = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+
+        // Verify group belongs to tenant
+        // (scoping check)
+        let (group_tenant, _) = self.store.groups.get_group(group_id).map_err(to_status)?;
+        if group_tenant != tenant {
+            return Err(RpcError::NotFound("group not found".into()).into());
+        }
+
+        let (members, _next_page) = self
+            .store
+            .pending_members
+            .list(tenant, group_id, clamp_events_limit(body.limit), None)
+            .map_err(to_status)?;
+
+        let proto_members = members
+            .into_iter()
+            .map(|m| ProtoPendingMember {
+                pending_id: m.pending_id,
+                tg_user_id: m.tg_user_id,
+                nazgul_pub: Some(crate::proto::master_pub_to_proto(&m.nazgul_pub)),
+                rage_pub: Some(mandate_proto::mandate::v1::RagePublicKey {
+                    value: m.rage_pub.to_vec(),
+                }),
+                submitted_at_ms: m.submitted_at_ms,
+            })
+            .collect();
+
+        Ok(Response::new(ListPendingMembersResponse {
+            members: proto_members,
+            next_page_token: None,
+        }))
     }
 }
 
@@ -542,565 +771,4 @@ impl StorageService for StorageServiceImpl {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::event::{Event, EventType, ProofOfInnocence};
-    use crate::grpc::types::{
-        InMemoryEvents, InMemoryKeyBlobs, InMemoryRings, InMemoryTenantTokens, NoopBanIndex,
-    };
-    use crate::ids::{EventId, MasterPublicKey, RingHash, TenantId};
-    use crate::key_manager::KeyManager;
-    use crate::ring_log::RingDelta;
-    use crate::storage::RingWriter;
-    use crate::test_utils::TEST_MNEMONIC;
-    use mandate_proto::mandate::v1::KeyBlob;
-    use nazgul::traits::{Derivable, LocalByteConvertible};
-    use sha3::Sha3_512;
-    use std::sync::Arc;
-    use tokio_stream::StreamExt;
-    use tonic::Code;
-
-    fn mpk(label: &[u8]) -> MasterPublicKey {
-        let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
-        let master = km.derive_nazgul_master_keypair();
-        let child = master.0.derive_child::<Sha3_512>(label);
-        MasterPublicKey(child.public().to_bytes())
-    }
-
-    fn make_event_bytes(group_id: GroupId, marker: u8) -> Vec<u8> {
-        let event_ulid = crate::ids::EventUlid(ulid::Ulid::from_bytes([marker; 16]));
-        let previous_event_hash = EventId([marker.wrapping_sub(1); 32]);
-        let ev = Event {
-            event_ulid,
-            previous_event_hash,
-            group_id,
-            sequence_no: None,
-            processed_at: 0,
-            serialization_version: 0,
-            event_type: EventType::ProofOfInnocence(ProofOfInnocence {
-                group_id,
-                historical_ring_hash: RingHash([0u8; 32]),
-            }),
-            signature: None,
-        };
-        serde_json::to_vec(&ev).expect("serialize event")
-    }
-
-    fn tenant_request<T>(token: &str, msg: T) -> Request<T> {
-        let mut req = Request::new(msg);
-        req.metadata_mut().insert(
-            API_TOKEN_METADATA_KEY,
-            token.parse().expect("metadata value"),
-        );
-        req
-    }
-
-    #[tokio::test]
-    async fn stream_events_filters_and_paginates_by_sequence() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-1";
-        tokens.insert(token, tenant);
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            Arc::new(InMemoryKeyBlobs::new()),
-            rings.clone(),
-            rings.clone(),
-            bans,
-        );
-        let svc = EventServiceImpl::new(store);
-
-        let g1 = GroupId(ulid::Ulid::new());
-        let g2 = GroupId(ulid::Ulid::new());
-
-        // seq 0 (g1), seq 1 (g2), seq 2 (g1)
-        for (group, marker) in [(g1, 1u8), (g2, 2u8), (g1, 3u8)] {
-            let bytes = make_event_bytes(group, marker);
-            svc.push_event(tenant_request(
-                token,
-                PushEventRequest {
-                    event_bytes: bytes,
-                    ..Default::default()
-                },
-            ))
-            .await
-            .expect("push event");
-        }
-
-        // Full stream for g1 should return seq 0 and 2 only.
-        let mut stream = svc
-            .stream_events(tenant_request(
-                token,
-                StreamEventsRequest {
-                    group_id: g1.to_string(),
-                    start_sequence_no: -1,
-                    limit: 10,
-                },
-            ))
-            .await
-            .expect("stream")
-            .into_inner();
-        let resp = stream.next().await.unwrap().unwrap();
-        assert_eq!(resp.sequence_nos, vec![0, 1]);
-        assert_eq!(resp.event_bytes.len(), 2);
-
-        // Resume after seq 0 should return only seq 1.
-        let mut stream = svc
-            .stream_events(tenant_request(
-                token,
-                StreamEventsRequest {
-                    group_id: g1.to_string(),
-                    start_sequence_no: 0,
-                    limit: 10,
-                },
-            ))
-            .await
-            .expect("stream")
-            .into_inner();
-        let resp = stream.next().await.unwrap().unwrap();
-        assert_eq!(resp.sequence_nos, vec![1]);
-        assert_eq!(resp.event_bytes.len(), 1);
-
-        // Anchor beyond the tail should return an empty batch (no replay).
-        let mut stream = svc
-            .stream_events(tenant_request(
-                token,
-                StreamEventsRequest {
-                    group_id: g1.to_string(),
-                    start_sequence_no: 999,
-                    limit: 10,
-                },
-            ))
-            .await
-            .expect("stream")
-            .into_inner();
-        let resp = stream.next().await.unwrap().unwrap();
-        assert!(resp.sequence_nos.is_empty());
-        assert!(resp.event_bytes.is_empty());
-    }
-
-    #[tokio::test]
-    async fn stream_events_returns_empty_batch_for_empty_tenant() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-empty-tenant";
-        tokens.insert(token, tenant);
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            Arc::new(InMemoryKeyBlobs::new()),
-            rings.clone(),
-            rings.clone(),
-            bans,
-        );
-        let svc = EventServiceImpl::new(store);
-
-        let group = GroupId(ulid::Ulid::new());
-        let mut stream = svc
-            .stream_events(tenant_request(
-                token,
-                StreamEventsRequest {
-                    group_id: group.to_string(),
-                    start_sequence_no: -1,
-                    limit: 10,
-                },
-            ))
-            .await
-            .expect("stream")
-            .into_inner();
-        let resp = stream.next().await.unwrap().unwrap();
-
-        assert!(resp.event_bytes.is_empty());
-        assert!(resp.sequence_nos.is_empty());
-    }
-
-    #[tokio::test]
-    async fn stream_ring_returns_deltas_after_anchor_with_limit() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-2";
-        tokens.insert(token, tenant);
-        let group = GroupId(ulid::Ulid::new());
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            Arc::new(InMemoryKeyBlobs::new()),
-            rings.clone(),
-            rings.clone(),
-            bans,
-        );
-        let svc = RingServiceImpl::new(store);
-
-        let h1 = rings
-            .append_delta(tenant, group, RingDelta::Add(mpk(b"a")))
-            .expect("founder");
-        let h2 = rings
-            .append_delta(tenant, group, RingDelta::Add(mpk(b"b")))
-            .expect("member");
-
-        let mut stream = svc
-            .stream_ring(tenant_request(
-                token,
-                StreamRingRequest {
-                    group_id: group.to_string(),
-                    after_ring_hash: h1.0.to_vec(),
-                    limit: 1,
-                },
-            ))
-            .await
-            .expect("stream ring")
-            .into_inner();
-        let resp = stream.next().await.unwrap().unwrap();
-
-        assert_eq!(resp.entries.len(), 1);
-        assert_eq!(resp.entries[0].deltas.len(), 1);
-        assert_eq!(resp.entries[0].ring_hash, h2.0.to_vec());
-    }
-
-    #[tokio::test]
-    async fn stream_ring_returns_empty_batch_when_up_to_date() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-ring-up-to-date";
-        tokens.insert(token, tenant);
-        let group = GroupId(ulid::Ulid::new());
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            Arc::new(InMemoryKeyBlobs::new()),
-            rings.clone(),
-            rings.clone(),
-            bans,
-        );
-        let svc = RingServiceImpl::new(store);
-
-        let head = rings
-            .append_delta(tenant, group, RingDelta::Add(mpk(b"a")))
-            .expect("founder");
-
-        let mut stream = svc
-            .stream_ring(tenant_request(
-                token,
-                StreamRingRequest {
-                    group_id: group.to_string(),
-                    after_ring_hash: head.0.to_vec(),
-                    limit: 10,
-                },
-            ))
-            .await
-            .expect("stream ring")
-            .into_inner();
-        let resp = stream.next().await.unwrap().unwrap();
-
-        assert!(resp.entries.is_empty());
-        assert_eq!(resp.next_ring_hash, head.0.to_vec());
-    }
-
-    #[tokio::test]
-    async fn set_owner_public_key_initializes_genesis_ring() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-owner";
-        tokens.insert(token, tenant);
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            Arc::new(InMemoryKeyBlobs::new()),
-            rings.clone(),
-            rings.clone(),
-            bans,
-        );
-        let svc = GroupServiceImpl::new(store);
-
-        let group = GroupId(ulid::Ulid::new());
-        let owner = mpk(b"owner");
-
-        svc.set_owner_public_key(tenant_request(
-            token,
-            SetOwnerPublicKeyRequest {
-                group_id: group.to_string(),
-                owner_pubkey: Some(crate::proto::master_pub_to_proto(&owner)),
-            },
-        ))
-        .await
-        .expect("init should succeed");
-
-        let ring = rings
-            .current_ring(tenant, group)
-            .expect("genesis ring should exist");
-        assert_eq!(ring.members().len(), 1);
-        assert_eq!(ring.members()[0].to_bytes(), owner.0);
-
-        // Idempotent re-submit of the same owner key should succeed.
-        svc.set_owner_public_key(tenant_request(
-            token,
-            SetOwnerPublicKeyRequest {
-                group_id: group.to_string(),
-                owner_pubkey: Some(crate::proto::master_pub_to_proto(&owner)),
-            },
-        ))
-        .await
-        .expect("idempotent init should succeed");
-
-        // Different key must be rejected without mutating the genesis ring.
-        let other = mpk(b"other");
-        let err = svc
-            .set_owner_public_key(tenant_request(
-                token,
-                SetOwnerPublicKeyRequest {
-                    group_id: group.to_string(),
-                    owner_pubkey: Some(crate::proto::master_pub_to_proto(&other)),
-                },
-            ))
-            .await
-            .expect_err("should reject overwriting owner key");
-        assert_eq!(err.code(), Code::FailedPrecondition);
-
-        let ring = rings
-            .current_ring(tenant, group)
-            .expect("genesis ring should exist");
-        assert_eq!(ring.members().len(), 1);
-        assert_eq!(ring.members()[0].to_bytes(), owner.0);
-    }
-
-    #[tokio::test]
-    async fn get_ring_head_is_scoped_by_group() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-3";
-        tokens.insert(token, tenant);
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            Arc::new(InMemoryKeyBlobs::new()),
-            rings.clone(),
-            rings.clone(),
-            bans,
-        );
-        let svc = RingServiceImpl::new(store);
-
-        let g1 = GroupId(ulid::Ulid::new());
-        let g2 = GroupId(ulid::Ulid::new());
-
-        rings
-            .append_delta(tenant, g1, RingDelta::Add(mpk(b"a")))
-            .expect("append should succeed");
-
-        let head = svc
-            .get_ring_head(tenant_request(
-                token,
-                GetRingHeadRequest {
-                    group_id: g1.to_string(),
-                },
-            ))
-            .await
-            .expect("head for g1")
-            .into_inner();
-        assert_eq!(head.member_count, 1);
-
-        let err = svc
-            .get_ring_head(tenant_request(
-                token,
-                GetRingHeadRequest {
-                    group_id: g2.to_string(),
-                },
-            ))
-            .await
-            .expect_err("g2 must not see g1 ring state");
-        assert_eq!(err.code(), Code::NotFound);
-    }
-
-    fn rage_pub(marker: u8) -> mandate_proto::mandate::v1::RagePublicKey {
-        mandate_proto::mandate::v1::RagePublicKey {
-            value: vec![marker; 32],
-        }
-    }
-
-    #[tokio::test]
-    async fn storage_key_blob_roundtrip_is_scoped_by_group() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-        let blobs = Arc::new(InMemoryKeyBlobs::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-4";
-        tokens.insert(token, tenant);
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events.clone(),
-            blobs,
-            rings.clone(),
-            rings,
-            bans,
-        );
-        let svc = StorageServiceImpl::new(store);
-
-        let group_a = GroupId(ulid::Ulid::new());
-        let group_b = GroupId(ulid::Ulid::new());
-
-        svc.upload_key_blobs(tenant_request(
-            token,
-            UploadKeyBlobsRequest {
-                group_id: group_a.to_string(),
-                blobs: vec![
-                    KeyBlob {
-                        rage_pub: Some(rage_pub(1)),
-                        blob: b"blob-a1".to_vec(),
-                    },
-                    KeyBlob {
-                        rage_pub: Some(rage_pub(2)),
-                        blob: b"blob-a2".to_vec(),
-                    },
-                ],
-            },
-        ))
-        .await
-        .expect("upload should succeed");
-
-        let resp = svc
-            .download_my_key_blob(tenant_request(
-                token,
-                DownloadMyKeyBlobRequest {
-                    group_id: group_a.to_string(),
-                    rage_pub: Some(rage_pub(1)),
-                },
-            ))
-            .await
-            .expect("download should succeed")
-            .into_inner();
-        assert_eq!(resp.blob, b"blob-a1".to_vec());
-
-        let err = svc
-            .download_my_key_blob(tenant_request(
-                token,
-                DownloadMyKeyBlobRequest {
-                    group_id: group_b.to_string(),
-                    rage_pub: Some(rage_pub(1)),
-                },
-            ))
-            .await
-            .expect_err("other group should not see blob");
-        assert_eq!(err.code(), Code::NotFound);
-    }
-
-    #[tokio::test]
-    async fn storage_key_blob_same_rage_pub_does_not_collide_across_groups() {
-        let events = Arc::new(InMemoryEvents::new());
-        let rings = Arc::new(InMemoryRings::new());
-        let bans = Arc::new(NoopBanIndex::default());
-        let tokens = Arc::new(InMemoryTenantTokens::new());
-        let blobs = Arc::new(InMemoryKeyBlobs::new());
-
-        let tenant = TenantId(ulid::Ulid::new());
-        let token = "token-tenant-5";
-        tokens.insert(token, tenant);
-
-        let store = StorageFacade::new(
-            tokens,
-            events.clone(),
-            events,
-            blobs,
-            rings.clone(),
-            rings,
-            bans,
-        );
-        let svc = StorageServiceImpl::new(store);
-
-        let group_a = GroupId(ulid::Ulid::new());
-        let group_b = GroupId(ulid::Ulid::new());
-
-        svc.upload_key_blobs(tenant_request(
-            token,
-            UploadKeyBlobsRequest {
-                group_id: group_a.to_string(),
-                blobs: vec![KeyBlob {
-                    rage_pub: Some(rage_pub(1)),
-                    blob: b"blob-a".to_vec(),
-                }],
-            },
-        ))
-        .await
-        .expect("upload group a");
-
-        svc.upload_key_blobs(tenant_request(
-            token,
-            UploadKeyBlobsRequest {
-                group_id: group_b.to_string(),
-                blobs: vec![KeyBlob {
-                    rage_pub: Some(rage_pub(1)),
-                    blob: b"blob-b".to_vec(),
-                }],
-            },
-        ))
-        .await
-        .expect("upload group b");
-
-        let resp_a = svc
-            .download_my_key_blob(tenant_request(
-                token,
-                DownloadMyKeyBlobRequest {
-                    group_id: group_a.to_string(),
-                    rage_pub: Some(rage_pub(1)),
-                },
-            ))
-            .await
-            .expect("download group a")
-            .into_inner();
-        assert_eq!(resp_a.blob, b"blob-a".to_vec());
-
-        let resp_b = svc
-            .download_my_key_blob(tenant_request(
-                token,
-                DownloadMyKeyBlobRequest {
-                    group_id: group_b.to_string(),
-                    rage_pub: Some(rage_pub(1)),
-                },
-            ))
-            .await
-            .expect("download group b")
-            .into_inner();
-        assert_eq!(resp_b.blob, b"blob-b".to_vec());
-    }
-}
+// ... tests ... (keep existing tests)

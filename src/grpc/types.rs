@@ -1,9 +1,10 @@
 use crate::event::Event;
 use crate::hashing::event_hash_sha3_256;
-use crate::ids::{EventId, GroupId, KeyImage, TenantId, TenantToken};
+use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, TenantId, TenantToken};
 use crate::storage::{
-    BanIndex, EventBytes, EventReader, EventRecord, EventStore, EventWriter, KeyBlobStore,
-    NotFound, RingView, RingWriter, StorageError, TenantTokenError, TenantTokenStore,
+    BanIndex, EventBytes, EventReader, EventRecord, EventStore, EventWriter, GiftCard,
+    GiftCardStore, GroupMetadataStore, KeyBlobStore, NotFound, PendingMember, PendingMemberStore,
+    RingView, RingWriter, StorageError, TenantTokenError, TenantTokenStore,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -33,6 +34,12 @@ impl TenantTokenStore for InMemoryTenantTokens {
     fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError> {
         let map = self.tokens.lock().expect("poison-free");
         map.get(token).copied().ok_or(TenantTokenError::Unknown)
+    }
+
+    fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError> {
+        let mut map = self.tokens.lock().expect("poison-free");
+        map.insert(token.clone(), tenant);
+        Ok(())
     }
 }
 
@@ -334,6 +341,133 @@ impl BanIndex for NoopBanIndex {
         _key_image: &KeyImage,
     ) -> Result<bool, StorageError> {
         Ok(false)
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct InMemoryGiftCards {
+    cards: Arc<Mutex<HashMap<String, GiftCard>>>,
+}
+
+impl InMemoryGiftCards {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl GiftCardStore for InMemoryGiftCards {
+    fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError> {
+        let mut map = self.cards.lock().expect("poison-free");
+        let code = format!("GIFT-{}", ulid::Ulid::new());
+        let card = GiftCard {
+            code: code.clone(),
+            amount_nanos,
+            used_by: None,
+        };
+        map.insert(code, card.clone());
+        Ok(card)
+    }
+
+    fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError> {
+        let mut map = self.cards.lock().expect("poison-free");
+        if let Some(card) = map.get_mut(code) {
+            if card.used_by.is_some() {
+                return Err(StorageError::PreconditionFailed("already redeemed".into()));
+            }
+            card.used_by = Some(tenant);
+            Ok(card.clone())
+        } else {
+            Err(StorageError::NotFound(NotFound::GiftCard {
+                code: code.to_string(),
+            }))
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct InMemoryGroups {
+    groups: Arc<Mutex<HashMap<GroupId, (TenantId, String)>>>,
+}
+
+impl InMemoryGroups {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl GroupMetadataStore for InMemoryGroups {
+    fn create_group(&self, tenant: TenantId, tg_group_id: &str) -> Result<GroupId, StorageError> {
+        let mut map = self.groups.lock().expect("poison-free");
+        let group_id = GroupId(ulid::Ulid::new());
+        map.insert(group_id, (tenant, tg_group_id.to_string()));
+        Ok(group_id)
+    }
+
+    fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
+        let map = self.groups.lock().expect("poison-free");
+        map.get(&group_id)
+            .cloned()
+            .ok_or(StorageError::Backend("group not found".into()))
+    }
+}
+
+type PendingMemberMap = HashMap<(TenantId, GroupId), Vec<PendingMember>>;
+
+#[derive(Clone, Default)]
+pub struct InMemoryPendingMembers {
+    // Keyed by (TenantId, GroupId)
+    members: Arc<Mutex<PendingMemberMap>>,
+}
+
+impl InMemoryPendingMembers {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl PendingMemberStore for InMemoryPendingMembers {
+    fn submit(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        tg_user_id: &str,
+        nazgul_pub: MasterPublicKey,
+        rage_pub: [u8; 32],
+    ) -> Result<String, StorageError> {
+        let mut map = self.members.lock().expect("poison-free");
+        let list = map.entry((tenant, group_id)).or_default();
+
+        let pending_id = format!("PENDING-{}", ulid::Ulid::new());
+        let member = PendingMember {
+            pending_id: pending_id.clone(),
+            tg_user_id: tg_user_id.to_string(),
+            nazgul_pub,
+            rage_pub,
+            submitted_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        };
+        // Idempotency: append for MVP
+        list.push(member);
+        Ok(pending_id)
+    }
+
+    fn list(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        limit: usize,
+        _page_token: Option<String>,
+    ) -> Result<(Vec<PendingMember>, Option<String>), StorageError> {
+        let map = self.members.lock().expect("poison-free");
+        if let Some(list) = map.get(&(tenant, group_id)) {
+            // MVP: naive pagination
+            let result = list.iter().take(limit).cloned().collect();
+            Ok((result, None))
+        } else {
+            Ok((Vec::new(), None))
+        }
     }
 }
 
