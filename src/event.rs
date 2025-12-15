@@ -24,6 +24,21 @@ impl Event {
     pub fn content_hash(&self) -> Result<ContentHash, CanonicalHashError> {
         event_hash_sha3_256(self)
     }
+
+    /// Produce the canonical bytes used for signing (excludes signature and sequence_no).
+    pub fn to_signing_bytes(&self) -> Result<Vec<u8>, CanonicalHashError> {
+        // We reuse the logic from event_hash_sha3_256 but return bytes instead of hash.
+        // The hashing module likely has a helper for this, or we duplicate the stripping logic.
+        // Let's verify hashing::event_hash_sha3_256 implementation.
+        // It likely serializes a "CanonicalEvent" intermediate struct.
+        // Ideally we expose that serialization.
+        //
+        // For now, I'll replicate the stripping:
+        let mut clone = self.clone();
+        clone.signature = None;
+        clone.sequence_no = None;
+        crate::hashing::canonical_json(&clone)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

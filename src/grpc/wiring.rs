@@ -40,6 +40,7 @@ impl CoreServices {
         let gift_cards = Arc::new(InMemoryGiftCards::new());
         let groups = Arc::new(InMemoryGroups::new());
         let pending_members = Arc::new(InMemoryPendingMembers::new());
+        let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
         let facade = StorageFacade::new(
             tenant_tokens,
@@ -55,7 +56,7 @@ impl CoreServices {
         );
 
         Self {
-            event: EventServiceImpl::new(facade.clone()),
+            event: EventServiceImpl::new(facade.clone(), verifier),
             ring: RingServiceImpl::new(facade.clone()),
             storage: StorageServiceImpl::new(facade.clone()),
             admin: AdminServiceImpl::new(facade.clone()),

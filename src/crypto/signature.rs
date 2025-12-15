@@ -60,6 +60,14 @@ impl Signature {
         self.proof.signature.key_image()
     }
 
+    /// Return the storage mode (Compact/Archival).
+    pub fn mode(&self) -> StorageMode {
+        match &self.proof.context {
+            RingContext::Compact(_) => StorageMode::Compact,
+            RingContext::Archival(_) => StorageMode::Archival,
+        }
+    }
+
     /// Verify with SHA3-512; external ring required for compact mode.
     pub fn verify(&self, external_ring: Option<&Ring>, message: &[u8]) -> bool {
         self.proof.verify::<Sha3_512>(external_ring, None, message)

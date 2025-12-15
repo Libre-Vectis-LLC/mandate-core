@@ -158,7 +158,7 @@ impl DigestAlgorithm for Sha3_512Digest {
 }
 
 /// Serialize to canonical JSON (sorted keys, no whitespace) for stable hashing.
-pub fn canonical_json_bytes(value: &impl Serialize) -> Result<Vec<u8>, CanonicalHashError> {
+pub fn canonical_json(value: &impl Serialize) -> Result<Vec<u8>, CanonicalHashError> {
     let mut v = serde_json::to_value(value)?;
     normalize_value(&mut v);
     let mut buf = Vec::new();
@@ -192,7 +192,7 @@ pub fn canonical_content_hash_sha3_256(
     domain: &[u8],
     value: &impl Serialize,
 ) -> Result<ContentHash, CanonicalHashError> {
-    let json = canonical_json_bytes(value)?;
+    let json = canonical_json(value)?;
     let hash = Sha3_256Digest::hash_with_domain(domain, &json);
     Ok(ContentHash(hash.into_inner()))
 }
@@ -461,8 +461,8 @@ mod tests {
         let obj1 = DemoObj { a: 1, b: 2 };
         let obj2 = DemoObj { b: 2, a: 1 };
 
-        let j1 = canonical_json_bytes(&obj1).expect("json");
-        let j2 = canonical_json_bytes(&obj2).expect("json");
+        let j1 = canonical_json(&obj1).expect("json");
+        let j2 = canonical_json(&obj2).expect("json");
         assert_eq!(j1, j2, "canonical JSON must be order independent");
 
         let h1 = canonical_content_hash_sha3_256(domain::EVENT, &obj1).expect("hash");
@@ -514,8 +514,8 @@ mod tests {
                 map_b.insert(k.clone(), Value::from(*v as u64));
             }
 
-            let a = canonical_json_bytes(&Value::Object(map_a)).expect("canon a");
-            let b = canonical_json_bytes(&Value::Object(map_b)).expect("canon b");
+            let a = canonical_json(&Value::Object(map_a)).expect("canon a");
+            let b = canonical_json(&Value::Object(map_b)).expect("canon b");
             prop_assert_eq!(a, b);
         }
     }

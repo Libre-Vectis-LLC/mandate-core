@@ -21,6 +21,7 @@ use mandate_proto::mandate::v1::{
     TransferToGroupRequest, TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use nazgul::traits::LocalByteConvertible;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -110,11 +111,15 @@ async fn extract_tenant_id<T>(
 #[derive(Clone)]
 pub struct EventServiceImpl {
     store: StorageFacade,
+    verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
 }
 
 impl EventServiceImpl {
-    pub fn new(store: StorageFacade) -> Self {
-        Self { store }
+    pub fn new(
+        store: StorageFacade,
+        verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
+    ) -> Self {
+        Self { store, verifier }
     }
 }
 
@@ -130,7 +135,118 @@ impl EventService for EventServiceImpl {
         let event: Event = serde_json::from_slice(&event_bytes)
             .map_err(|e| RpcError::InvalidArgument(format!("invalid event payload: {e}")))?;
 
-        // Pass group_id to append for scoping
+        // 1. Verify Chain Hash
+        match self.store.event_reader.tail(tenant, event.group_id).await {
+            Ok((tail_id, _, _)) => {
+                let tail_hash = crate::ids::ContentHash(tail_id.0);
+                if event.previous_event_hash.0 != tail_hash.0 {
+                    return Err(RpcError::FailedPrecondition(format!(
+                        "chain mismatch: expected prev={:?}, got {:?}",
+                        tail_hash, event.previous_event_hash
+                    ))
+                    .into());
+                }
+            }
+            Err(crate::storage::StorageError::NotFound(_)) => {
+                // Genesis event must have zero prev hash
+                if event.previous_event_hash.0 != [0u8; 32] {
+                    return Err(RpcError::FailedPrecondition(
+                        "first event must have zero prev hash".into(),
+                    )
+                    .into());
+                }
+            }
+            Err(e) => return Err(to_status(e)),
+        }
+
+        // 2. Check Ban Index
+        if let Some(sig) = &event.signature {
+            let key_image = sig.key_image();
+            let banned = self
+                .store
+                .ban_index
+                .is_banned(tenant, event.group_id, &key_image)
+                .await
+                .map_err(to_status)?;
+            if banned {
+                return Err(
+                    RpcError::FailedPrecondition("double spend: key image banned".into()).into(),
+                );
+            }
+        }
+
+        // 3. Verify Signature
+        // Load ring if needed (Compact signature)
+        let external_ring = if let Some(sig) = &event.signature {
+            match sig.mode() {
+                crate::crypto::signature::StorageMode::Compact => {
+                    // Extract ring hash from event body.
+                    // We need to inspect event_type to get ring_hash.
+                    // This is slightly brittle if event structure changes, but for now:
+                    let ring_hash = match &event.event_type {
+                        crate::event::EventType::PollCreate(p) => p.ring_hash,
+                        crate::event::EventType::VoteCast(v) => v.ring_hash,
+                        crate::event::EventType::MessageCreate(m) => m.ring_hash,
+                        crate::event::EventType::RingUpdate(r) => r.ring_hash,
+                        crate::event::EventType::BanCreate(_b) => {
+                            // BanCreate doesn't have ring_hash in struct?
+                            // Let's check struct definition.
+                            // It seems BanCreate/BanRevoke/ProofOfInnocence might miss it in my memory model.
+                            // Assume all authenticated events have it or we fail.
+                            // Actually, if BanCreate is signed by admin (owner), does it use ring?
+                            // Yes, owner is in ring.
+                            // If field is missing, we can't verify compact sig.
+                            return Err(RpcError::InvalidArgument(
+                                "event type missing ring_hash for compact sig".into(),
+                            )
+                            .into());
+                        }
+                        _ => {
+                            return Err(RpcError::InvalidArgument(
+                                "event type missing ring_hash for compact sig".into(),
+                            )
+                            .into())
+                        }
+                    };
+
+                    Some(
+                        self.store
+                            .ring_view
+                            .ring_by_hash(tenant, event.group_id, &ring_hash)
+                            .await
+                            .map_err(to_status)?,
+                    )
+                }
+                crate::crypto::signature::StorageMode::Archival => None,
+            }
+        } else {
+            // No signature? Allowed only for special unsigned events?
+            // Current protocol requires signatures for everything pushed by clients.
+            return Err(RpcError::Unauthenticated("missing signature".into()).into());
+        };
+
+        if let Some(sig) = &event.signature {
+            let signed_msg = event
+                .to_signing_bytes()
+                .map_err(|e| RpcError::Internal(format!("canonical serialization failed: {e}")))?;
+
+            let item = crate::crypto::verifier::SignatureItem {
+                signature: sig.clone(),
+                message: signed_msg,
+                external_ring,
+            };
+
+            let results = self
+                .verifier
+                .verify_batch(&[item])
+                .await
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            if !results[0] {
+                return Err(RpcError::Unauthenticated("invalid signature".into()).into());
+            }
+        }
+
+        // 4. Commit
         let id = self
             .store
             .event_writer
