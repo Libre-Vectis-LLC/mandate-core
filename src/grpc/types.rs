@@ -10,6 +10,7 @@ use crate::{
     ids::{RingHash, TenantId as Tenant},
     ring_log::{RingDelta, RingDeltaLog, RingLogError},
 };
+use async_trait::async_trait;
 use nazgul::ring::Ring;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -30,13 +31,14 @@ impl InMemoryTenantTokens {
     }
 }
 
+#[async_trait]
 impl TenantTokenStore for InMemoryTenantTokens {
-    fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError> {
+    async fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError> {
         let map = self.tokens.lock().expect("poison-free");
         map.get(token).copied().ok_or(TenantTokenError::Unknown)
     }
 
-    fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError> {
+    async fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError> {
         let mut map = self.tokens.lock().expect("poison-free");
         map.insert(token.clone(), tenant);
         Ok(())
@@ -63,8 +65,9 @@ impl InMemoryEvents {
     }
 }
 
+#[async_trait]
 impl EventWriter for InMemoryEvents {
-    fn append(
+    async fn append(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -83,8 +86,9 @@ impl EventWriter for InMemoryEvents {
     }
 }
 
+#[async_trait]
 impl EventReader for InMemoryEvents {
-    fn stream_group(
+    async fn stream_group(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -106,10 +110,8 @@ impl EventReader for InMemoryEvents {
         let start = start.min(events.len());
         Ok(events.iter().skip(start).take(limit).cloned().collect())
     }
-}
 
-impl EventStore for InMemoryEvents {
-    fn get(
+    async fn get(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -134,7 +136,7 @@ impl EventStore for InMemoryEvents {
             }))
     }
 
-    fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError> {
+    async fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError> {
         let inner = self.inner();
         let events = inner
             .get(&(tenant, group_id))
@@ -145,6 +147,8 @@ impl EventStore for InMemoryEvents {
             .ok_or(StorageError::NotFound(NotFound::Tail { tenant, group_id }))
     }
 }
+
+impl EventStore for InMemoryEvents {}
 
 type KeyBlobKey = (TenantId, GroupId, [u8; 32]);
 type KeyBlobMap = HashMap<KeyBlobKey, Arc<[u8]>>;
@@ -164,8 +168,9 @@ impl InMemoryKeyBlobs {
     }
 }
 
+#[async_trait]
 impl KeyBlobStore for InMemoryKeyBlobs {
-    fn put_many(
+    async fn put_many(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -178,7 +183,7 @@ impl KeyBlobStore for InMemoryKeyBlobs {
         Ok(())
     }
 
-    fn get_one(
+    async fn get_one(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -219,8 +224,9 @@ impl InMemoryRings {
     }
 }
 
+#[async_trait]
 impl RingView for InMemoryRings {
-    fn ring_by_hash(
+    async fn ring_by_hash(
         &self,
         tenant: Tenant,
         group_id: GroupId,
@@ -247,7 +253,11 @@ impl RingView for InMemoryRings {
         Ok(Arc::new(reconstructed))
     }
 
-    fn current_ring(&self, tenant: Tenant, group_id: GroupId) -> Result<Arc<Ring>, StorageError> {
+    async fn current_ring(
+        &self,
+        tenant: Tenant,
+        group_id: GroupId,
+    ) -> Result<Arc<Ring>, StorageError> {
         let map = self.inner();
         let key = (tenant, group_id);
         let state = map.get(&key).ok_or(StorageError::NotFound(NotFound::Ring {
@@ -258,7 +268,7 @@ impl RingView for InMemoryRings {
         Ok(Arc::new(state.current.clone()))
     }
 
-    fn ring_delta_path(
+    async fn ring_delta_path(
         &self,
         tenant: Tenant,
         group_id: GroupId,
@@ -306,8 +316,9 @@ impl RingView for InMemoryRings {
     }
 }
 
+#[async_trait]
 impl RingWriter for InMemoryRings {
-    fn append_delta(
+    async fn append_delta(
         &self,
         tenant: Tenant,
         group_id: GroupId,
@@ -333,8 +344,9 @@ impl RingWriter for InMemoryRings {
 #[derive(Default, Clone)]
 pub struct NoopBanIndex;
 
+#[async_trait]
 impl BanIndex for NoopBanIndex {
-    fn is_banned(
+    async fn is_banned(
         &self,
         _tenant: TenantId,
         _group_id: GroupId,
@@ -355,8 +367,9 @@ impl InMemoryGiftCards {
     }
 }
 
+#[async_trait]
 impl GiftCardStore for InMemoryGiftCards {
-    fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError> {
+    async fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError> {
         let mut map = self.cards.lock().expect("poison-free");
         let code = format!("GIFT-{}", ulid::Ulid::new());
         let card = GiftCard {
@@ -368,7 +381,7 @@ impl GiftCardStore for InMemoryGiftCards {
         Ok(card)
     }
 
-    fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError> {
+    async fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError> {
         let mut map = self.cards.lock().expect("poison-free");
         if let Some(card) = map.get_mut(code) {
             if card.used_by.is_some() {
@@ -395,15 +408,20 @@ impl InMemoryGroups {
     }
 }
 
+#[async_trait]
 impl GroupMetadataStore for InMemoryGroups {
-    fn create_group(&self, tenant: TenantId, tg_group_id: &str) -> Result<GroupId, StorageError> {
+    async fn create_group(
+        &self,
+        tenant: TenantId,
+        tg_group_id: &str,
+    ) -> Result<GroupId, StorageError> {
         let mut map = self.groups.lock().expect("poison-free");
         let group_id = GroupId(ulid::Ulid::new());
         map.insert(group_id, (tenant, tg_group_id.to_string()));
         Ok(group_id)
     }
 
-    fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
+    async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
         let map = self.groups.lock().expect("poison-free");
         map.get(&group_id)
             .cloned()
@@ -425,8 +443,9 @@ impl InMemoryPendingMembers {
     }
 }
 
+#[async_trait]
 impl PendingMemberStore for InMemoryPendingMembers {
-    fn submit(
+    async fn submit(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -453,7 +472,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
         Ok(pending_id)
     }
 
-    fn list(
+    async fn list(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -488,28 +507,33 @@ mod tests {
         MasterPublicKey(child.public().to_bytes())
     }
 
-    #[test]
-    fn ring_writer_roundtrip() {
+    #[tokio::test]
+    async fn ring_writer_roundtrip() {
         let rings = InMemoryRings::new();
         let tenant = Tenant(ulid::Ulid::new());
         let group = GroupId(ulid::Ulid::new());
 
         let h1 = rings
             .append_delta(tenant, group, RingDelta::Add(mpk(b"a")))
+            .await
             .expect("append should succeed");
-        let ring = rings.current_ring(tenant, group).expect("ring exists");
+        let ring = rings
+            .current_ring(tenant, group)
+            .await
+            .expect("ring exists");
         assert_eq!(ring_hash_sha3_256(&ring), h1);
 
         // Path from scratch to current should contain founder delta.
         let path = rings
             .ring_delta_path(tenant, group, None, h1)
+            .await
             .expect("delta path should exist");
         assert_eq!(path.deltas.len(), 1);
         assert_eq!(path.to, h1);
     }
 
-    #[test]
-    fn rings_are_scoped_by_group() {
+    #[tokio::test]
+    async fn rings_are_scoped_by_group() {
         let rings = InMemoryRings::new();
         let tenant = Tenant(ulid::Ulid::new());
         let g1 = GroupId(ulid::Ulid::new());
@@ -517,14 +541,17 @@ mod tests {
 
         let h = rings
             .append_delta(tenant, g1, RingDelta::Add(mpk(b"a")))
+            .await
             .expect("append should succeed");
 
         rings
             .ring_by_hash(tenant, g1, &h)
+            .await
             .expect("ring exists for g1");
 
         let err = rings
             .ring_by_hash(tenant, g2, &h)
+            .await
             .expect_err("g2 must not see g1 ring state");
         assert!(matches!(
             err,
@@ -537,6 +564,7 @@ mod tests {
 
         let h2 = rings
             .append_delta(tenant, g2, RingDelta::Add(mpk(b"a")))
+            .await
             .expect("append should succeed");
         assert_eq!(
             h2, h,
@@ -544,6 +572,7 @@ mod tests {
         );
         rings
             .ring_by_hash(tenant, g2, &h)
+            .await
             .expect("ring exists for g2 after append");
     }
 }

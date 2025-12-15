@@ -9,6 +9,7 @@
 
 use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, RingHash, TenantId, TenantToken};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
+use async_trait::async_trait;
 use nazgul::ring::Ring;
 use std::sync::Arc;
 
@@ -70,9 +71,10 @@ pub enum TenantTokenError {
 ///
 /// The real implementation belongs to server/enterprise (cache + DB). Core uses this
 /// abstraction so it does not bake in any assumptions about token format or rotation.
+#[async_trait]
 pub trait TenantTokenStore {
-    fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError>;
-    fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError>;
+    async fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError>;
+    async fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -109,23 +111,13 @@ pub enum NotFound {
 }
 
 /// Append-only event storage. Intended for a single-writer per tenant; multi-tenant shares one table.
-pub trait EventStore: EventReader + EventWriter {
-    /// Fetch canonical bytes by ID for audit/verification; `NotFound` if absent.
-    fn get(
-        &self,
-        tenant: TenantId,
-        group_id: GroupId,
-        id: &EventId,
-    ) -> Result<EventRecord, StorageError>;
-
-    /// Latest (tail) event for the group; `NotFound` if empty.
-    fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError>;
-}
+pub trait EventStore: EventReader + EventWriter {}
 
 /// Write-only surface for events; separated to allow distinct read/write backends.
+#[async_trait]
 pub trait EventWriter {
     /// Append a canonical, signed event (already serialized). Returns (event_id, sequence_no).
-    fn append(
+    async fn append(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -134,29 +126,47 @@ pub trait EventWriter {
 }
 
 /// Read-only grouping helper to support backend-specific implementations (e.g., Postgres).
+#[async_trait]
 pub trait EventReader {
     /// Deterministic forward slice for a specific group, after an optional anchor.
-    fn stream_group(
+    async fn stream_group(
         &self,
         tenant: TenantId,
         group_id: GroupId,
         after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError>;
+
+    async fn get(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        id: &EventId,
+    ) -> Result<EventRecord, StorageError>;
+
+    async fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError>;
 }
+
+// Redefine EventStore to inherit async traits?
+// Trait inheritance with async_trait is tricky.
+// Usually we just implement the supertraits.
+// Or we can just use EventReader + EventWriter.
+// The `EventStore` trait in previous code combined them and added `get` and `tail`.
+// I moved `get` and `tail` to `EventReader`.
 
 /// Store for member key blobs, indexed by Rage public key.
 ///
 /// Keys are scoped by `(tenant, group_id, rage_pub)` to avoid cross-group and cross-tenant leaks.
+#[async_trait]
 pub trait KeyBlobStore {
-    fn put_many(
+    async fn put_many(
         &self,
         tenant: TenantId,
         group_id: GroupId,
         blobs: Vec<([u8; 32], Arc<[u8]>)>,
     ) -> Result<(), StorageError>;
 
-    fn get_one(
+    async fn get_one(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -165,9 +175,10 @@ pub trait KeyBlobStore {
 }
 
 /// Access to ring snapshots and delta paths; caching strategy is implementation-defined.
+#[async_trait]
 pub trait RingView {
     /// Resolve a ring by its hash for the tenant. Reconstruct on miss; `NotFound` if unknown.
-    fn ring_by_hash(
+    async fn ring_by_hash(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -175,11 +186,15 @@ pub trait RingView {
     ) -> Result<Arc<Ring>, StorageError>;
 
     /// Current ring for the group. `NotFound` if the group has no ring yet.
-    fn current_ring(&self, tenant: TenantId, group_id: GroupId) -> Result<Arc<Ring>, StorageError>;
+    async fn current_ring(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+    ) -> Result<Arc<Ring>, StorageError>;
 
     /// Shortest-path delta slice from `ring_hash_current` (if provided) to `ring_hash_target`.
     /// Implementations choose the path (e.g., via SQL graph query) and return a replayable slice.
-    fn ring_delta_path(
+    async fn ring_delta_path(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -189,9 +204,10 @@ pub trait RingView {
 }
 
 /// Write-only interface for ring mutations (e.g., Postgres or in-memory log).
+#[async_trait]
 pub trait RingWriter {
     /// Append a delta to the group ring log, returning the new head hash.
-    fn append_delta(
+    async fn append_delta(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -200,9 +216,10 @@ pub trait RingWriter {
 }
 
 /// Optional ban index for fast key-image checks.
+#[async_trait]
 pub trait BanIndex {
     /// Return whether `key_image` is currently banned for `group_id`.
-    fn is_banned(
+    async fn is_banned(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -217,14 +234,20 @@ pub struct GiftCard {
     pub used_by: Option<TenantId>,
 }
 
+#[async_trait]
 pub trait GiftCardStore {
-    fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError>;
-    fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError>;
+    async fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError>;
+    async fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError>;
 }
 
+#[async_trait]
 pub trait GroupMetadataStore {
-    fn create_group(&self, tenant: TenantId, tg_group_id: &str) -> Result<GroupId, StorageError>;
-    fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError>;
+    async fn create_group(
+        &self,
+        tenant: TenantId,
+        tg_group_id: &str,
+    ) -> Result<GroupId, StorageError>;
+    async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError>;
 }
 
 #[derive(Clone, Debug)]
@@ -236,8 +259,9 @@ pub struct PendingMember {
     pub submitted_at_ms: i64,
 }
 
+#[async_trait]
 pub trait PendingMemberStore {
-    fn submit(
+    async fn submit(
         &self,
         tenant: TenantId,
         group_id: GroupId,
@@ -246,7 +270,7 @@ pub trait PendingMemberStore {
         rage_pub: [u8; 32],
     ) -> Result<String, StorageError>;
 
-    fn list(
+    async fn list(
         &self,
         tenant: TenantId,
         group_id: GroupId,

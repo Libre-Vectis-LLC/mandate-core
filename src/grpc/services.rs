@@ -25,9 +25,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-// ... (previous imports and EventService/RingService/StorageService impls remain mostly the same,
-// but I'll include them to be safe and consistent)
-
 fn clamp_limit(client_limit: u32, default_limit: usize, max_limit: usize) -> usize {
     let requested = if client_limit == 0 {
         default_limit
@@ -97,7 +94,7 @@ fn to_status_token(err: TenantTokenError) -> Status {
 }
 
 #[allow(clippy::result_large_err)]
-fn extract_tenant_id<T>(
+async fn extract_tenant_id<T>(
     req: &Request<T>,
     tokens: &(impl TenantTokenStore + ?Sized),
 ) -> Result<crate::ids::TenantId, Status> {
@@ -106,7 +103,7 @@ fn extract_tenant_id<T>(
     }
 
     let token = extract_tenant_token(req)?;
-    tokens.resolve_tenant(&token).map_err(to_status_token)
+    tokens.resolve_tenant(&token).await.map_err(to_status_token)
 }
 
 /// Basic EventService stub wired to EventStore.
@@ -127,7 +124,7 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<PushEventRequest>,
     ) -> Result<Response<PushEventResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
         let event: Event = serde_json::from_slice(&event_bytes)
@@ -138,6 +135,7 @@ impl EventService for EventServiceImpl {
             .store
             .event_writer
             .append(tenant, event.group_id, event_bytes.clone())
+            .await
             .map_err(to_status)?;
 
         let event_hash = crate::proto::event_id_to_hash32(&id.0);
@@ -155,7 +153,7 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<StreamEventsRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -171,6 +169,7 @@ impl EventService for EventServiceImpl {
             .store
             .event_reader
             .stream_group(tenant, group_id, cursor, limit)
+            .await
             .map_err(to_status)?;
 
         let (tx, rx) = mpsc::channel(1);
@@ -203,7 +202,7 @@ impl RingService for RingServiceImpl {
         &self,
         request: Request<GetRingHeadRequest>,
     ) -> Result<Response<GetRingHeadResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let group = request.into_inner().group_id;
         let group_id = GroupId(
             crate::proto::parse_ulid(&group)
@@ -215,6 +214,7 @@ impl RingService for RingServiceImpl {
             .store
             .ring_view
             .current_ring(tenant, group_id)
+            .await
             .map_err(to_status)?;
         let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
         let members: Vec<Vec<u8>> = ring
@@ -235,7 +235,7 @@ impl RingService for RingServiceImpl {
         &self,
         request: Request<StreamRingRequest>,
     ) -> Result<Response<Self::StreamRingStream>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let req = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&req.group_id)
@@ -258,6 +258,7 @@ impl RingService for RingServiceImpl {
             .store
             .ring_view
             .current_ring(tenant, group_id)
+            .await
             .map_err(to_status)?;
         let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
 
@@ -276,6 +277,7 @@ impl RingService for RingServiceImpl {
             .store
             .ring_view
             .ring_delta_path(tenant, group_id, after_hash, current_hash)
+            .await
             .map_err(to_status)?;
 
         let entries = encode_ring_delta_path(
@@ -284,7 +286,8 @@ impl RingService for RingServiceImpl {
             group_id,
             &path,
             clamp_ring_limit(req.limit),
-        )?;
+        )
+        .await?;
         let next_hash = entries
             .last()
             .map(|e| e.ring_hash.clone())
@@ -301,7 +304,7 @@ impl RingService for RingServiceImpl {
 }
 
 #[allow(clippy::result_large_err)]
-fn encode_ring_delta_path(
+async fn encode_ring_delta_path(
     rings: &(impl RingView + ?Sized),
     tenant: crate::ids::TenantId,
     group_id: GroupId,
@@ -310,6 +313,7 @@ fn encode_ring_delta_path(
 ) -> Result<Vec<mandate_proto::mandate::v1::RingDeltaEntry>, Status> {
     let anchor = rings
         .ring_by_hash(tenant, group_id, &path.from)
+        .await
         .map_err(to_status)?;
     let mut ring = (*anchor).clone();
 
@@ -353,6 +357,7 @@ impl AdminService for AdminServiceImpl {
             .store
             .gift_cards
             .issue(body.amount_nanos)
+            .await
             .map_err(to_status)?;
         Ok(Response::new(IssueGiftCardResponse { code: card.code }))
     }
@@ -383,6 +388,7 @@ impl AuthService for AuthServiceImpl {
             .store
             .gift_cards
             .redeem(&body.code, tenant_id)
+            .await
             .map_err(to_status)?;
 
         // Issue a token.
@@ -391,6 +397,7 @@ impl AuthService for AuthServiceImpl {
         self.store
             .tenant_tokens
             .insert(&token, tenant_id)
+            .await
             .map_err(to_status)?;
 
         Ok(Response::new(RedeemGiftCardResponse {
@@ -463,6 +470,7 @@ impl GroupService for GroupServiceImpl {
             .store
             .groups
             .create_group(tenant_id, &body.tg_group_id)
+            .await
             .map_err(to_status)?;
 
         Ok(Response::new(CreateGroupResponse {
@@ -474,19 +482,18 @@ impl GroupService for GroupServiceImpl {
         &self,
         request: Request<SetOwnerPublicKeyRequest>,
     ) -> Result<Response<SetOwnerPublicKeyResponse>, Status> {
-        // Internal service, but needs tenant context.
-        // Wait, SetOwnerPublicKey is called by Internal Bot?
-        // process-design says: [Internal] mandate-teloxide-serv -> Server: API `GroupService/SetOwnerPublicKey`
-        // But request doesn't contain tenant_id.
-        // It relies on group_id -> tenant_id lookup.
-
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        let (tenant, _) = self.store.groups.get_group(group_id).map_err(to_status)?;
+        let (tenant, _) = self
+            .store
+            .groups
+            .get_group(group_id)
+            .await
+            .map_err(to_status)?;
 
         let owner_pubkey = body
             .owner_pubkey
@@ -495,7 +502,7 @@ impl GroupService for GroupServiceImpl {
         let owner_pubkey = crate::proto::nazgul_pub_from_proto(owner_pubkey)
             .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
 
-        match self.store.ring_view.current_ring(tenant, group_id) {
+        match self.store.ring_view.current_ring(tenant, group_id).await {
             Ok(ring) => {
                 let is_idempotent = ring.members().len() == 1
                     && ring
@@ -521,6 +528,7 @@ impl GroupService for GroupServiceImpl {
                 group_id,
                 crate::ring_log::RingDelta::Add(owner_pubkey),
             )
+            .await
             .map_err(to_status)?;
 
         Ok(Response::new(SetOwnerPublicKeyResponse {}))
@@ -530,8 +538,6 @@ impl GroupService for GroupServiceImpl {
         &self,
         _request: Request<GetGroupRequest>,
     ) -> Result<Response<GetGroupResponse>, Status> {
-        // TODO: Implement get_group if needed by bot.
-        // For now, minimal impl.
         Err(Status::unimplemented("get_group not implemented"))
     }
 }
@@ -559,7 +565,12 @@ impl MemberService for MemberServiceImpl {
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        let (tenant, _) = self.store.groups.get_group(group_id).map_err(to_status)?;
+        let (tenant, _) = self
+            .store
+            .groups
+            .get_group(group_id)
+            .await
+            .map_err(to_status)?;
 
         let nazgul_pub = body
             .nazgul_pub
@@ -579,6 +590,7 @@ impl MemberService for MemberServiceImpl {
             .store
             .pending_members
             .submit(tenant, group_id, &body.tg_user_id, nazgul_pub, rage_pub)
+            .await
             .map_err(to_status)?;
 
         Ok(Response::new(SubmitPendingMemberResponse { pending_id }))
@@ -588,87 +600,19 @@ impl MemberService for MemberServiceImpl {
         &self,
         request: Request<ListPendingMembersRequest>,
     ) -> Result<Response<ListPendingMembersResponse>, Status> {
-        // This is a Public API (Client calls it via Edge).
-        // So we extract tenant from token.
-        // Wait, process-design says: [Tor] Client(Owner) -> Edge-Server -> Server : API `MemberService/ListPendingMembers`
-        // But MemberService is in "Internal" listener in main.rs?
-        //
-        // If Client calls it, it must be Public.
-        // If Bot calls it, it can be Internal.
-        //
-        // My main.rs configuration put MemberService on Internal Listener only.
-        // This contradicts process-design for `ListPendingMembers`.
-        //
-        // Conflict: `SubmitPendingMember` is Bot-only (Internal). `ListPendingMembers` is Client (Public).
-        //
-        // Solution: I should expose MemberService on Public Listener too?
-        // Or split MemberService into Public/Internal parts?
-        //
-        // If I expose MemberService on Public, I must ensure `SubmitPendingMember` is secured or harmless.
-        // Actually, Client calls `ListPendingMembers` to see who to approve.
-        //
-        // If I put MemberService on Public Listener, I need `require_api_token`.
-        // But `SubmitPendingMember` comes from Bot (no tenant token, has bot secret).
-        //
-        // This suggests `MemberService` should be split or configured carefully.
-        // Or, we allow Bot to call Public Listener if it has a token?
-        // No, Bot uses `x-bot-secret`.
-        //
-        // Maybe `ListPendingMembers` should be on `GroupService` (Internal)? No, Client calls it.
-        //
-        // Let's assume for MVP:
-        // Client connects to Public.
-        // Bot connects to Internal.
-        // `MemberService` is needed on both?
-        //
-        // If I put `MemberService` on Public, `Submit` will fail auth (missing token).
-        // If I put `MemberService` on Internal, Client can't reach it.
-        //
-        // I will add `MemberService` to Public Listener in `main.rs`.
-        // And I need to handle `SubmitPendingMember` on Public? No, Bot calls it on Internal.
-        // So `MemberService` needs to be on BOTH.
-        //
-        // And `MemberServiceImpl` needs to handle auth?
-        // No, interceptors handle auth.
-        //
-        // If Client calls `List` on Public: has `x-api-token`. `extract_tenant_id` works.
-        // If Bot calls `Submit` on Internal: has `x-bot-secret`. `extract_tenant_id` fails?
-        //
-        // `SubmitPendingMember` implementation above uses `store.groups.get_group` to find tenant. It doesn't use `extract_tenant_id`.
-        // So `Submit` works on Internal (no tenant token needed).
-        //
-        // `ListPendingMembers` implementation:
-        // Needs tenant context.
-        //
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
-        // This requires `x-api-token`. So `List` works on Public.
-        //
-        // So:
-        // 1. Register MemberService on BOTH listeners.
-        // 2. `Submit` works on Internal (doesn't check token).
-        // 3. `List` works on Public (checks token).
-        //
-        // What if someone calls `Submit` on Public?
-        // They have a token. They call `Submit`.
-        // `Submit` implementation doesn't check token, it looks up group->tenant.
-        // It succeeds. Is this bad?
-        // If a Client submits a pending member... maybe okay?
-        // But usually Bot does it to verify TG identity.
-        //
-        // What if someone calls `List` on Internal?
-        // Missing token. `extract_tenant_id` fails. Returns Unauthenticated. Correct.
-        //
-        // So registering on BOTH is safe enough for MVP.
-
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        // Verify group belongs to tenant
-        // (scoping check)
-        let (group_tenant, _) = self.store.groups.get_group(group_id).map_err(to_status)?;
+        let (group_tenant, _) = self
+            .store
+            .groups
+            .get_group(group_id)
+            .await
+            .map_err(to_status)?;
         if group_tenant != tenant {
             return Err(RpcError::NotFound("group not found".into()).into());
         }
@@ -677,6 +621,7 @@ impl MemberService for MemberServiceImpl {
             .store
             .pending_members
             .list(tenant, group_id, clamp_events_limit(body.limit), None)
+            .await
             .map_err(to_status)?;
 
         let proto_members = members
@@ -699,7 +644,6 @@ impl MemberService for MemberServiceImpl {
     }
 }
 
-/// Storage service backed by the injected key blob store.
 #[derive(Clone)]
 pub struct StorageServiceImpl {
     store: StorageFacade,
@@ -717,7 +661,7 @@ impl StorageService for StorageServiceImpl {
         &self,
         request: Request<UploadKeyBlobsRequest>,
     ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -738,6 +682,7 @@ impl StorageService for StorageServiceImpl {
         self.store
             .key_blobs
             .put_many(tenant, group_id, entries)
+            .await
             .map_err(to_status)?;
         Ok(Response::new(UploadKeyBlobsResponse {}))
     }
@@ -746,7 +691,7 @@ impl StorageService for StorageServiceImpl {
         &self,
         request: Request<DownloadMyKeyBlobRequest>,
     ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens)?;
+        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -763,6 +708,7 @@ impl StorageService for StorageServiceImpl {
             .store
             .key_blobs
             .get_one(tenant, group_id, rage_pub)
+            .await
             .map_err(to_status)?;
 
         Ok(Response::new(DownloadMyKeyBlobResponse {
@@ -770,5 +716,3 @@ impl StorageService for StorageServiceImpl {
         }))
     }
 }
-
-// ... tests ... (keep existing tests)

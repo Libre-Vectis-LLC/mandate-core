@@ -34,3 +34,4 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 tonic = { version = "0.12", default-features = false, features = ["prost"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 tokio-stream = "0.1"
+futures-util = "0.3"
