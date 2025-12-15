@@ -3,3 +3,4 @@
 pub mod interceptor;
 pub mod services;
 pub mod types;
+pub mod wiring;
