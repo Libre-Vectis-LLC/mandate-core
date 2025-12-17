@@ -18,6 +18,8 @@ pub struct SignatureItem {
     pub signature: Signature,
     /// The signed message bytes.
     pub message: Vec<u8>,
+    /// Scheduling weight (per-item), forwarded to cluster verifiers. MVP default is 1.
+    pub weight: u64,
     /// External ring required for compact signatures.
     pub external_ring: Option<Arc<Ring>>,
 }
@@ -88,6 +90,7 @@ mod tests {
         let items = [SignatureItem {
             signature: sig,
             message: msg.to_vec(),
+            weight: 1,
             external_ring: None,
         }];
         let out = verifier.verify_batch(&items).await.expect("verify");
@@ -111,6 +114,7 @@ mod tests {
         let items = [SignatureItem {
             signature: sig,
             message: msg.to_vec(),
+            weight: 1,
             external_ring: None,
         }];
         let out = verifier.verify_batch(&items).await.expect("verify");
@@ -119,6 +123,7 @@ mod tests {
         let items = [SignatureItem {
             signature: items[0].signature.clone(),
             message: msg.to_vec(),
+            weight: 1,
             external_ring: Some(ring.clone()),
         }];
         let out = verifier.verify_batch(&items).await.expect("verify");

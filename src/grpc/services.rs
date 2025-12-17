@@ -233,6 +233,7 @@ impl EventService for EventServiceImpl {
             let item = crate::crypto::verifier::SignatureItem {
                 signature: sig.clone(),
                 message: signed_msg,
+                weight: 1,
                 external_ring,
             };
 
