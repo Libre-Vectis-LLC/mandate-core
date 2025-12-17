@@ -18,6 +18,17 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::transport::Server;
 
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn grpc_max_message_bytes() -> usize {
+    env_usize("MANDATE_GRPC_MAX_MESSAGE_BYTES", 4 * 1024 * 1024)
+}
+
 #[derive(Clone)]
 pub struct CoreServices {
     pub event: EventServiceImpl,
@@ -75,13 +86,30 @@ pub fn run_public_server(
     member: MemberServiceImpl, // ListPendingMembers is public
     addr: SocketAddr,
 ) -> impl std::future::Future<Output = Result<(), tonic::transport::Error>> {
+    let max_bytes = grpc_max_message_bytes();
     Server::builder()
         .layer(tonic::service::interceptor(require_api_token))
         .accept_http1(true)
-        .add_service(tonic_web::enable(EventServiceServer::new(event)))
-        .add_service(tonic_web::enable(RingServiceServer::new(ring)))
-        .add_service(tonic_web::enable(StorageServiceServer::new(storage)))
-        .add_service(tonic_web::enable(MemberServiceServer::new(member)))
+        .add_service(tonic_web::enable(
+            EventServiceServer::new(event)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            RingServiceServer::new(ring)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            StorageServiceServer::new(storage)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            MemberServiceServer::new(member)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
         .serve(addr)
 }
 
@@ -94,13 +122,34 @@ pub fn run_internal_server(
     _bot_secret: &str, // Injected via env/config usually, but interceptor uses env var directly in current impl
     addr: SocketAddr,
 ) -> impl std::future::Future<Output = Result<(), tonic::transport::Error>> {
+    let max_bytes = grpc_max_message_bytes();
     Server::builder()
         .layer(tonic::service::interceptor(require_bot_secret))
         .accept_http1(true)
-        .add_service(tonic_web::enable(AdminServiceServer::new(admin)))
-        .add_service(tonic_web::enable(AuthServiceServer::new(auth)))
-        .add_service(tonic_web::enable(BillingServiceServer::new(billing)))
-        .add_service(tonic_web::enable(GroupServiceServer::new(group)))
-        .add_service(tonic_web::enable(MemberServiceServer::new(member)))
+        .add_service(tonic_web::enable(
+            AdminServiceServer::new(admin)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            AuthServiceServer::new(auth)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            BillingServiceServer::new(billing)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            GroupServiceServer::new(group)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            MemberServiceServer::new(member)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
         .serve(addr)
 }

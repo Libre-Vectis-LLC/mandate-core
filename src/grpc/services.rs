@@ -42,6 +42,18 @@ fn env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn max_event_bytes() -> usize {
+    env_usize("MANDATE_GRPC_MAX_EVENT_BYTES", 1024 * 1024)
+}
+
+fn keyblobs_max_count() -> usize {
+    env_usize("MANDATE_GRPC_KEYBLOBS_MAX_COUNT", 1024)
+}
+
+fn keyblobs_max_blob_bytes() -> usize {
+    env_usize("MANDATE_GRPC_KEYBLOBS_MAX_BLOB_BYTES", 64 * 1024)
+}
+
 fn clamp_events_limit(client_limit: u32) -> usize {
     let max_limit = env_usize("MANDATE_GRPC_EVENTS_MAX_LIMIT", 100);
     let default_limit = env_usize("MANDATE_GRPC_EVENTS_DEFAULT_LIMIT", 50).min(max_limit);
@@ -132,6 +144,9 @@ impl EventService for EventServiceImpl {
         let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
+        if event_bytes.len() > max_event_bytes() {
+            return Err(RpcError::InvalidArgument("event_bytes too large".into()).into());
+        }
         let event: Event = serde_json::from_slice(&event_bytes)
             .map_err(|e| RpcError::InvalidArgument(format!("invalid event payload: {e}")))?;
 
@@ -785,6 +800,14 @@ impl StorageService for StorageServiceImpl {
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
+        if body.blobs.len() > keyblobs_max_count() {
+            return Err(RpcError::InvalidArgument("too many key blobs".into()).into());
+        }
+        let max_blob_bytes = keyblobs_max_blob_bytes();
+        if body.blobs.iter().any(|b| b.blob.len() > max_blob_bytes) {
+            return Err(RpcError::InvalidArgument("key blob too large".into()).into());
+        }
+
         let mut entries = Vec::with_capacity(body.blobs.len());
         for blob in body.blobs {
             let rage_pub = blob
@@ -831,5 +854,78 @@ impl StorageService for StorageServiceImpl {
         Ok(Response::new(DownloadMyKeyBlobResponse {
             blob: blob.to_vec(),
         }))
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::grpc::wiring::CoreServices;
+    use mandate_proto::mandate::v1::{KeyBlob, RagePublicKey};
+    use tonic::Code;
+
+    #[tokio::test]
+    async fn push_event_rejects_oversized_event_bytes() {
+        let services = CoreServices::new_in_memory();
+        let tenant = TenantId(ulid::Ulid::new());
+
+        let mut req = Request::new(PushEventRequest {
+            event_bytes: vec![0u8; max_event_bytes() + 1],
+        });
+        req.extensions_mut().insert(tenant);
+
+        let err = services.event.push_event(req).await.expect_err("reject");
+        assert_eq!(err.code(), Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn upload_key_blobs_rejects_oversized_blob() {
+        let services = CoreServices::new_in_memory();
+        let tenant = TenantId(ulid::Ulid::new());
+        let group_id = ulid::Ulid::new().to_string();
+
+        let mut req = Request::new(UploadKeyBlobsRequest {
+            group_id,
+            blobs: vec![KeyBlob {
+                rage_pub: Some(RagePublicKey {
+                    value: vec![7u8; 32],
+                }),
+                blob: vec![0u8; keyblobs_max_blob_bytes() + 1],
+            }],
+        });
+        req.extensions_mut().insert(tenant);
+
+        let err = services
+            .storage
+            .upload_key_blobs(req)
+            .await
+            .expect_err("reject");
+        assert_eq!(err.code(), Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn upload_key_blobs_rejects_too_many_entries() {
+        let services = CoreServices::new_in_memory();
+        let tenant = TenantId(ulid::Ulid::new());
+        let group_id = ulid::Ulid::new().to_string();
+
+        let blobs = (0..(keyblobs_max_count() + 1))
+            .map(|_| KeyBlob {
+                rage_pub: Some(RagePublicKey {
+                    value: vec![7u8; 32],
+                }),
+                blob: vec![0u8; 1],
+            })
+            .collect();
+
+        let mut req = Request::new(UploadKeyBlobsRequest { group_id, blobs });
+        req.extensions_mut().insert(tenant);
+
+        let err = services
+            .storage
+            .upload_key_blobs(req)
+            .await
+            .expect_err("reject");
+        assert_eq!(err.code(), Code::InvalidArgument);
     }
 }
