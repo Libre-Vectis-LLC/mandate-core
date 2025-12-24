@@ -219,7 +219,7 @@ mod tests {
         let json = serde_json::to_string(&event).expect("serialize");
         let decoded: Event = serde_json::from_str(&json).expect("deserialize");
         let sig = decoded.signature.expect("signature present");
-        assert!(sig.verify(Some(&ring), msg));
+        assert!(sig.verify(Some(&ring), msg).expect("verify"));
     }
 
     #[test]

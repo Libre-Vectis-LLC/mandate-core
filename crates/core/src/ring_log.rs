@@ -32,6 +32,8 @@ pub enum RingLogError {
     InvalidKey,
     #[error("ring delta log capacity exceeded")]
     LogCapacityExceeded,
+    #[error("member not found in ring for removal")]
+    MemberNotInRing,
 }
 
 /// Append-only log of ring deltas.
@@ -254,7 +256,10 @@ pub fn apply_delta(ring: &mut Ring, delta: &RingDelta) -> Result<(), RingLogErro
         }
         RingDelta::Remove(pk) => {
             let point = point_from(pk)?;
-            let _ = ring.remove_public_key(point);
+            if !ring.members().contains(&point) {
+                return Err(RingLogError::MemberNotInRing);
+            }
+            ring.remove_public_key(point);
         }
     }
     Ok(())
@@ -263,10 +268,15 @@ pub fn apply_delta(ring: &mut Ring, delta: &RingDelta) -> Result<(), RingLogErro
 fn apply_inverse_delta(ring: &mut Ring, delta: &RingDelta) -> Result<(), RingLogError> {
     match delta {
         RingDelta::Add(pk) => {
+            // Inverse of Add is Remove - verify member exists
             let point = point_from(pk)?;
-            let _ = ring.remove_public_key(point);
+            if !ring.members().contains(&point) {
+                return Err(RingLogError::MemberNotInRing);
+            }
+            ring.remove_public_key(point);
         }
         RingDelta::Remove(pk) => {
+            // Inverse of Remove is Add - no check needed
             let point = point_from(pk)?;
             ring.add_public_key(point);
         }

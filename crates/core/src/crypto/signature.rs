@@ -69,8 +69,25 @@ impl Signature {
     }
 
     /// Verify with SHA3-512; external ring required for compact mode.
-    pub fn verify(&self, external_ring: Option<&Ring>, message: &[u8]) -> bool {
-        self.proof.verify::<Sha3_512>(external_ring, None, message)
+    ///
+    /// For Compact signatures, the external ring must be provided.
+    /// The nazgul library internally validates that the ring matches the stored hash.
+    pub fn verify(
+        &self,
+        external_ring: Option<&Ring>,
+        message: &[u8],
+    ) -> Result<bool, SigVerificationError> {
+        match self.mode() {
+            StorageMode::Compact => {
+                let ring = external_ring.ok_or(SigVerificationError::MissingRingForCompact)?;
+                // The nazgul library's verify method internally validates
+                // that the provided ring matches the stored ring hash
+                Ok(self.proof.verify::<Sha3_512>(Some(ring), None, message))
+            }
+            StorageMode::Archival => {
+                Ok(self.proof.verify::<Sha3_512>(external_ring, None, message))
+            }
+        }
     }
 
     pub fn ring_context(&self) -> &RingContext {
@@ -120,6 +137,13 @@ impl MasterKeypair {
     pub fn derive_for_context(&self, derivation: &[u8]) -> KeyPair {
         self.0.derive_child::<Sha3_512>(derivation)
     }
+}
+
+/// Errors from signature verification.
+#[derive(Debug, Error)]
+pub enum SigVerificationError {
+    #[error("compact signature requires external ring for verification")]
+    MissingRingForCompact,
 }
 
 /// Errors from signing helpers.
@@ -190,7 +214,7 @@ mod tests {
         .expect("sign");
         let ki = sig.key_image();
         assert_eq!(ki.compress().to_bytes().len(), 32);
-        assert!(sig.verify(Some(&ring), msg));
+        assert!(sig.verify(Some(&ring), msg).expect("verify"));
     }
 
     #[test]
@@ -205,8 +229,31 @@ mod tests {
             msg,
         )
         .expect("sign");
-        assert!(!sig.verify(None, msg));
-        assert!(sig.verify(Some(&ring), msg));
+        // Compact signature without ring should return error
+        assert!(matches!(
+            sig.verify(None, msg),
+            Err(SigVerificationError::MissingRingForCompact)
+        ));
+        // With correct ring, verification should succeed
+        assert!(sig.verify(Some(&ring), msg).expect("verify"));
+    }
+
+    #[test]
+    fn compact_signature_rejects_wrong_ring() {
+        let (signer, ring) = make_ring(4);
+        let (_, wrong_ring) = make_ring(4); // Different ring
+        let msg = b"compact";
+        let sig = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign");
+        // Wrong ring should fail verification (returns false, not error)
+        // The nazgul library internally validates the ring hash
+        assert!(!sig.verify(Some(&wrong_ring), msg).expect("verify"));
     }
 
     #[test]
@@ -242,7 +289,7 @@ mod tests {
 
         let json = serde_json::to_string(&sig).expect("serialize");
         let de: Signature = serde_json::from_str(&json).expect("deserialize");
-        assert!(de.verify(Some(&ring), msg));
+        assert!(de.verify(Some(&ring), msg).expect("verify"));
         assert_eq!(sig.kind, de.kind);
         assert_eq!(sig.ring_hash(), de.ring_hash());
     }

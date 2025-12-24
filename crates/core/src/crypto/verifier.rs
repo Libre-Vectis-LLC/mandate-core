@@ -24,10 +24,14 @@ pub struct SignatureItem {
     pub external_ring: Option<Arc<Ring>>,
 }
 
+use crate::crypto::signature::SigVerificationError;
+
 #[derive(Debug, Error)]
 pub enum VerificationError {
     #[error("internal verifier error: {0}")]
     Internal(String),
+    #[error("signature verification error: {0}")]
+    Signature(#[from] SigVerificationError),
 }
 
 /// Batch signature verifier (WASM-safe).
@@ -46,13 +50,14 @@ pub struct LocalSignatureVerifier;
 #[async_trait]
 impl SignatureVerifier for LocalSignatureVerifier {
     async fn verify_batch(&self, items: &[SignatureItem]) -> Result<Vec<bool>, VerificationError> {
-        Ok(items
+        items
             .iter()
             .map(|item| {
                 item.signature
                     .verify(item.external_ring.as_deref(), &item.message)
+                    .map_err(VerificationError::from)
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -111,17 +116,23 @@ mod tests {
         .expect("sign");
 
         let verifier = LocalSignatureVerifier::default();
+
+        // Missing ring should return error
         let items = [SignatureItem {
-            signature: sig,
+            signature: sig.clone(),
             message: msg.to_vec(),
             weight: 1,
             external_ring: None,
         }];
-        let out = verifier.verify_batch(&items).await.expect("verify");
-        assert_eq!(out, vec![false]);
+        let err = verifier
+            .verify_batch(&items)
+            .await
+            .expect_err("should error");
+        assert!(matches!(err, VerificationError::Signature(_)));
 
+        // With correct ring, verification should succeed
         let items = [SignatureItem {
-            signature: items[0].signature.clone(),
+            signature: sig,
             message: msg.to_vec(),
             weight: 1,
             external_ring: Some(ring.clone()),
