@@ -34,17 +34,35 @@ impl KdfAlgorithm {
     }
 }
 
+/// HKDF-SHA3-256 key derivation.
+///
+/// # Panics
+/// Panics if N > 8160 bytes (255 * 32-byte hash output). All current usages
+/// derive 32-byte keys, which is well within limits.
 fn hkdf_sha3_256<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
+    const MAX_OUTPUT: usize = 255 * 32; // SHA3-256 hash length
+    const { assert!(N <= MAX_OUTPUT, "HKDF output exceeds maximum") };
+
     let hkdf = Hkdf::<Sha3_256>::new(None, ikm);
     let mut okm = [0u8; N];
-    hkdf.expand(info, &mut okm).expect("HKDF expand failed");
+    hkdf.expand(info, &mut okm)
+        .expect("HKDF expand infallible for N <= 8160");
     okm
 }
 
+/// HKDF-SHA3-512 key derivation.
+///
+/// # Panics
+/// Panics if N > 16320 bytes (255 * 64-byte hash output). All current usages
+/// derive 32-byte keys, which is well within limits.
 fn hkdf_sha3_512<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
+    const MAX_OUTPUT: usize = 255 * 64; // SHA3-512 hash length
+    const { assert!(N <= MAX_OUTPUT, "HKDF output exceeds maximum") };
+
     let hkdf = Hkdf::<Sha3_512>::new(None, ikm);
     let mut okm = [0u8; N];
-    hkdf.expand(info, &mut okm).expect("HKDF expand failed");
+    hkdf.expand(info, &mut okm)
+        .expect("HKDF expand infallible for N <= 16320");
     okm
 }
 

@@ -13,8 +13,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use nazgul::ring::Ring;
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub struct InMemoryTenantTokens {
@@ -27,7 +28,7 @@ impl InMemoryTenantTokens {
     }
 
     pub fn insert(&self, token: impl Into<TenantToken>, tenant: TenantId) {
-        let mut map = self.tokens.lock().expect("poison-free");
+        let mut map = self.tokens.lock();
         map.insert(token.into(), tenant);
     }
 }
@@ -35,12 +36,12 @@ impl InMemoryTenantTokens {
 #[async_trait]
 impl TenantTokenStore for InMemoryTenantTokens {
     async fn resolve_tenant(&self, token: &TenantToken) -> Result<TenantId, TenantTokenError> {
-        let map = self.tokens.lock().expect("poison-free");
+        let map = self.tokens.lock();
         map.get(token).copied().ok_or(TenantTokenError::Unknown)
     }
 
     async fn insert(&self, token: &TenantToken, tenant: TenantId) -> Result<(), StorageError> {
-        let mut map = self.tokens.lock().expect("poison-free");
+        let mut map = self.tokens.lock();
         map.insert(token.clone(), tenant);
         Ok(())
     }
@@ -115,8 +116,8 @@ impl InMemoryEvents {
         }
     }
 
-    fn inner(&self) -> std::sync::MutexGuard<'_, InMemoryEventMap> {
-        self.events.lock().expect("poison-free")
+    fn inner(&self) -> parking_lot::MutexGuard<'_, InMemoryEventMap> {
+        self.events.lock()
     }
 }
 
@@ -174,7 +175,7 @@ impl InMemoryEvents {
                 )?;
             }
             crate::event::EventType::RingUpdate(update) => {
-                let mut members = self.pending_members.lock().expect("poison-free");
+                let mut members = self.pending_members.lock();
                 for operation in &update.operations {
                     if let crate::event::RingOperation::AddMember { public_key } = operation {
                         approve_pending_member(&mut members, tenant, group_id, *public_key);
@@ -264,8 +265,8 @@ impl InMemoryKeyBlobs {
         Self::default()
     }
 
-    fn inner(&self) -> std::sync::MutexGuard<'_, KeyBlobMap> {
-        self.blobs.lock().expect("poison-free")
+    fn inner(&self) -> parking_lot::MutexGuard<'_, KeyBlobMap> {
+        self.blobs.lock()
     }
 }
 
@@ -320,8 +321,8 @@ impl InMemoryRings {
         }
     }
 
-    fn inner(&self) -> std::sync::MutexGuard<'_, HashMap<(Tenant, GroupId), RingState>> {
-        self.rings.lock().expect("ring mutex poisoned")
+    fn inner(&self) -> parking_lot::MutexGuard<'_, HashMap<(Tenant, GroupId), RingState>> {
+        self.rings.lock()
     }
 }
 
@@ -486,7 +487,7 @@ impl InMemoryBanIndex {
         ban_event_id: EventId,
     ) -> Result<(), StorageError> {
         let key_image = key_image_bytes(&key_image);
-        let mut ban_events = self.ban_events.lock().expect("poison-free");
+        let mut ban_events = self.ban_events.lock();
         if ban_events.contains_key(&ban_event_id) {
             return Err(StorageError::PreconditionFailed(
                 "ban already recorded".into(),
@@ -502,7 +503,7 @@ impl InMemoryBanIndex {
             },
         );
 
-        let mut bans = self.bans.lock().expect("poison-free");
+        let mut bans = self.bans.lock();
         let entry = bans.entry((tenant, group_id, key_image)).or_default();
         if !entry.insert(scope) {
             return Err(StorageError::PreconditionFailed(
@@ -513,12 +514,12 @@ impl InMemoryBanIndex {
     }
 
     pub fn revoke_ban(&self, ban_event_id: EventId) -> Result<(), StorageError> {
-        let mut ban_events = self.ban_events.lock().expect("poison-free");
+        let mut ban_events = self.ban_events.lock();
         let record = ban_events
             .remove(&ban_event_id)
             .ok_or_else(|| StorageError::PreconditionFailed("unknown ban event".into()))?;
 
-        let mut bans = self.bans.lock().expect("poison-free");
+        let mut bans = self.bans.lock();
         if let Some(scopes) = bans.get_mut(&(record.tenant, record.group_id, record.key_image)) {
             scopes.remove(&record.scope);
             if scopes.is_empty() {
@@ -539,7 +540,7 @@ impl BanIndex for InMemoryBanIndex {
         operation: BannedOperation,
     ) -> Result<bool, StorageError> {
         let key_image = key_image_bytes(key_image);
-        let bans = self.bans.lock().expect("poison-free");
+        let bans = self.bans.lock();
         let Some(scopes) = bans.get(&(tenant, group_id, key_image)) else {
             return Ok(false);
         };
@@ -573,7 +574,7 @@ impl InMemoryVoteKeyImages {
             poll_id.to_string(),
             key_image_bytes(&key_image),
         );
-        let mut used = self.used.lock().expect("poison-free");
+        let mut used = self.used.lock();
         if !used.insert(key) {
             return Err(StorageError::PreconditionFailed("vote already cast".into()));
         }
@@ -596,7 +597,7 @@ impl VoteKeyImageIndex for InMemoryVoteKeyImages {
             poll_id.to_string(),
             key_image_bytes(key_image),
         );
-        let used = self.used.lock().expect("poison-free");
+        let used = self.used.lock();
         Ok(used.contains(&key))
     }
 }
@@ -631,7 +632,7 @@ impl InMemoryGiftCards {
 #[async_trait]
 impl GiftCardStore for InMemoryGiftCards {
     async fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError> {
-        let mut map = self.cards.lock().expect("poison-free");
+        let mut map = self.cards.lock();
         let code = format!("GIFT-{}", ulid::Ulid::new());
         let card = GiftCard {
             code: code.clone(),
@@ -643,7 +644,7 @@ impl GiftCardStore for InMemoryGiftCards {
     }
 
     async fn redeem(&self, code: &str, tenant: TenantId) -> Result<GiftCard, StorageError> {
-        let mut map = self.cards.lock().expect("poison-free");
+        let mut map = self.cards.lock();
         if let Some(card) = map.get_mut(code) {
             if card.used_by.is_some() {
                 return Err(StorageError::PreconditionFailed("already redeemed".into()));
@@ -687,7 +688,7 @@ impl GroupMetadataStore for InMemoryGroups {
         tenant: TenantId,
         tg_group_id: &str,
     ) -> Result<GroupId, StorageError> {
-        let mut map = self.groups.lock().expect("poison-free");
+        let mut map = self.groups.lock();
         let group_id = GroupId(ulid::Ulid::new());
         map.insert(
             group_id,
@@ -701,7 +702,7 @@ impl GroupMetadataStore for InMemoryGroups {
     }
 
     async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
-        let map = self.groups.lock().expect("poison-free");
+        let map = self.groups.lock();
         map.get(&group_id)
             .map(|record| (record.tenant, record.tg_group_id.clone()))
             .ok_or(StorageError::NotFound(NotFound::Group { group_id }))
@@ -733,7 +734,7 @@ impl BillingStore for InMemoryBilling {
     ) -> Result<i64, StorageError> {
         let delta = i64::try_from(amount_nanos)
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
-        let mut map = self.tenants.lock().expect("poison-free");
+        let mut map = self.tenants.lock();
         let balance = map.entry(tenant).or_insert(0);
         *balance = balance
             .checked_add(delta)
@@ -749,7 +750,7 @@ impl BillingStore for InMemoryBilling {
     ) -> Result<i64, StorageError> {
         let delta = i64::try_from(amount_nanos)
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
-        let mut tenants = self.tenants.lock().expect("poison-free");
+        let mut tenants = self.tenants.lock();
         let tenant_balance = tenants.entry(tenant).or_insert(0);
         if *tenant_balance < delta {
             return Err(StorageError::PreconditionFailed(
@@ -757,7 +758,7 @@ impl BillingStore for InMemoryBilling {
             ));
         }
 
-        let mut groups = self.groups.lock().expect("poison-free");
+        let mut groups = self.groups.lock();
         let record = groups
             .get_mut(&group_id)
             .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
@@ -777,7 +778,7 @@ impl BillingStore for InMemoryBilling {
     }
 
     async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError> {
-        let groups = self.groups.lock().expect("poison-free");
+        let groups = self.groups.lock();
         let record = groups
             .get(&group_id)
             .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
@@ -811,7 +812,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
     ) -> Result<String, StorageError> {
-        let mut map = self.members.lock().expect("poison-free");
+        let mut map = self.members.lock();
         let list = map.entry((tenant, group_id)).or_default();
 
         let pending_id = format!("PENDING-{}", ulid::Ulid::new());
@@ -841,7 +842,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
         limit: usize,
         _page_token: Option<String>,
     ) -> Result<(Vec<PendingMember>, Option<String>), StorageError> {
-        let map = self.members.lock().expect("poison-free");
+        let map = self.members.lock();
         if let Some(list) = map.get(&(tenant, group_id)) {
             // MVP: naive pagination
             let result = list
