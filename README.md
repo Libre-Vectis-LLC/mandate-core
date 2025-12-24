@@ -15,6 +15,10 @@ Mandate core provides audit-first primitives (hashing, signing, key derivation, 
 - Single-writer append per tenant; deterministic keyset pagination for readers. No optimistic tokens are needed because the writer is serialized; readers stream in order.
 - Rings are reconstructed from deltas via shortest-path replay; storage traits stay zero-copy (`Arc<[u8]>`).
 
+## Pending Members
+- Pending member submissions are tracked with a status (`pending`/`approved`).
+- Writers update the status atomically with `RingUpdate(AddMember)` and list calls return only pending entries.
+
 ## Billing Semantics
 - Tenants hold a spendable balance in nanos; gift card redemption credits that balance.
 - Group budgets are funded by tenant transfers; `BillingStore` debits the tenant and credits the group in one transaction, rejecting overdrafts.

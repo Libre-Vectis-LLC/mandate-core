@@ -4,8 +4,8 @@ use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, TenantId, TenantTo
 use crate::storage::{
     BanIndex, BannedOperation, BillingStore, EventBytes, EventReader, EventRecord, EventStore,
     EventWriter, GiftCard, GiftCardStore, GroupMetadataStore, KeyBlobStore, NotFound,
-    PendingMember, PendingMemberStore, RingView, RingWriter, StorageError, TenantTokenError,
-    TenantTokenStore, VoteKeyImageIndex,
+    PendingMember, PendingMemberStatus, PendingMemberStore, RingView, RingWriter, StorageError,
+    TenantTokenError, TenantTokenStore, VoteKeyImageIndex,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -54,6 +54,13 @@ type VoteKey = (TenantId, GroupId, String, [u8; 32]);
 type VoteKeySet = HashSet<VoteKey>;
 pub(crate) type GroupMap = HashMap<GroupId, GroupRecord>;
 type TenantBalanceMap = HashMap<TenantId, i64>;
+type PendingMemberMap = HashMap<(TenantId, GroupId), Vec<PendingMemberRecord>>;
+
+#[derive(Clone, Debug)]
+struct PendingMemberRecord {
+    member: PendingMember,
+    status: PendingMemberStatus,
+}
 
 fn key_image_bytes(key_image: &KeyImage) -> [u8; 32] {
     *key_image.compress().as_bytes()
@@ -69,23 +76,42 @@ fn ban_scopes_for_operation(operation: BannedOperation) -> &'static [BanScope] {
     }
 }
 
+fn approve_pending_member(
+    members: &mut PendingMemberMap,
+    tenant: TenantId,
+    group_id: GroupId,
+    public_key: MasterPublicKey,
+) {
+    let Some(list) = members.get_mut(&(tenant, group_id)) else {
+        return;
+    };
+    for record in list.iter_mut() {
+        if record.status == PendingMemberStatus::Pending && record.member.nazgul_pub == public_key {
+            record.status = PendingMemberStatus::Approved;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct InMemoryEvents {
     // Keyed by (TenantId, GroupId) for isolation
     events: Arc<Mutex<InMemoryEventMap>>,
     ban_index: Arc<InMemoryBanIndex>,
     vote_key_images: Arc<InMemoryVoteKeyImages>,
+    pending_members: Arc<Mutex<PendingMemberMap>>,
 }
 
 impl InMemoryEvents {
     pub fn new(
         ban_index: Arc<InMemoryBanIndex>,
         vote_key_images: Arc<InMemoryVoteKeyImages>,
+        pending_members: Arc<InMemoryPendingMembers>,
     ) -> Self {
         Self {
             events: Arc::new(Mutex::new(HashMap::new())),
             ban_index,
             vote_key_images,
+            pending_members: pending_members.shared(),
         }
     }
 
@@ -146,6 +172,14 @@ impl InMemoryEvents {
                     &vote.poll_id,
                     sig.key_image(),
                 )?;
+            }
+            crate::event::EventType::RingUpdate(update) => {
+                let mut members = self.pending_members.lock().expect("poison-free");
+                for operation in &update.operations {
+                    if let crate::event::RingOperation::AddMember { public_key } = operation {
+                        approve_pending_member(&mut members, tenant, group_id, *public_key);
+                    }
+                }
             }
             _ => {}
         }
@@ -751,8 +785,6 @@ impl BillingStore for InMemoryBilling {
     }
 }
 
-type PendingMemberMap = HashMap<(TenantId, GroupId), Vec<PendingMember>>;
-
 #[derive(Clone, Default)]
 pub struct InMemoryPendingMembers {
     // Keyed by (TenantId, GroupId)
@@ -762,6 +794,10 @@ pub struct InMemoryPendingMembers {
 impl InMemoryPendingMembers {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn shared(&self) -> Arc<Mutex<PendingMemberMap>> {
+        Arc::clone(&self.members)
     }
 }
 
@@ -789,8 +825,12 @@ impl PendingMemberStore for InMemoryPendingMembers {
                 .unwrap_or_default()
                 .as_millis() as i64,
         };
+        let record = PendingMemberRecord {
+            member,
+            status: PendingMemberStatus::Pending,
+        };
         // Idempotency: append for MVP
-        list.push(member);
+        list.push(record);
         Ok(pending_id)
     }
 
@@ -804,7 +844,12 @@ impl PendingMemberStore for InMemoryPendingMembers {
         let map = self.members.lock().expect("poison-free");
         if let Some(list) = map.get(&(tenant, group_id)) {
             // MVP: naive pagination
-            let result = list.iter().take(limit).cloned().collect();
+            let result = list
+                .iter()
+                .filter(|record| record.status == PendingMemberStatus::Pending)
+                .take(limit)
+                .map(|record| record.member.clone())
+                .collect();
             Ok((result, None))
         } else {
             Ok((Vec::new(), None))
@@ -815,13 +860,15 @@ impl PendingMemberStore for InMemoryPendingMembers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::{Event, EventType, RingOperation, RingUpdate};
     use crate::hashing::ring_hash_sha3_256;
-    use crate::ids::MasterPublicKey;
+    use crate::ids::{EventId, EventUlid, MasterPublicKey, RingHash};
     use crate::key_manager::KeyManager;
     use crate::test_utils::TEST_MNEMONIC;
     use curve25519_dalek::ristretto::RistrettoPoint;
     use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
+    use std::sync::Arc;
 
     fn mpk(label: &[u8]) -> MasterPublicKey {
         let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
@@ -853,6 +900,56 @@ mod tests {
             .expect("delta path should exist");
         assert_eq!(path.deltas.len(), 1);
         assert_eq!(path.to, h1);
+    }
+
+    #[tokio::test]
+    async fn pending_members_only_list_pending_after_ring_add() {
+        let tenant = Tenant(ulid::Ulid::new());
+        let group = GroupId(ulid::Ulid::new());
+        let pending = Arc::new(InMemoryPendingMembers::new());
+        let events = InMemoryEvents::new(
+            Arc::new(InMemoryBanIndex::new()),
+            Arc::new(InMemoryVoteKeyImages::new()),
+            Arc::clone(&pending),
+        );
+
+        let member_key = MasterPublicKey([0x11; 32]);
+        pending
+            .submit(tenant, group, "tg-user", member_key, [0x22; 32])
+            .await
+            .expect("pending submit");
+
+        let event = Event {
+            event_ulid: EventUlid(ulid::Ulid::new()),
+            previous_event_hash: EventId([0u8; 32]),
+            group_id: group,
+            sequence_no: None,
+            processed_at: 0,
+            serialization_version: 1,
+            event_type: EventType::RingUpdate(RingUpdate {
+                group_id: group,
+                ring_hash: RingHash([7u8; 32]),
+                operations: vec![RingOperation::AddMember {
+                    public_key: member_key,
+                }],
+            }),
+            signature: None,
+        };
+
+        events
+            .append(
+                tenant,
+                group,
+                serde_json::to_vec(&event).expect("serialize").into(),
+            )
+            .await
+            .expect("append event");
+
+        let (members, _) = pending
+            .list(tenant, group, 10, None)
+            .await
+            .expect("list pending");
+        assert!(members.is_empty());
     }
 
     #[tokio::test]

@@ -303,6 +303,21 @@ pub trait GroupMetadataStore {
     async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError>;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingMemberStatus {
+    Pending,
+    Approved,
+}
+
+impl PendingMemberStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PendingMemberStatus::Pending => "pending",
+            PendingMemberStatus::Approved => "approved",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PendingMember {
     pub pending_id: String,
@@ -323,6 +338,7 @@ pub trait PendingMemberStore {
         rage_pub: [u8; 32],
     ) -> Result<String, StorageError>;
 
+    /// List pending members only (approved members are excluded).
     async fn list(
         &self,
         tenant: TenantId,

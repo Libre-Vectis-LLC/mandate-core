@@ -47,16 +47,17 @@ impl CoreServices {
         let tenant_tokens = Arc::new(InMemoryTenantTokens::new());
         let ban_index = Arc::new(InMemoryBanIndex::new());
         let vote_key_images = Arc::new(InMemoryVoteKeyImages::new());
+        let pending_members = Arc::new(InMemoryPendingMembers::new());
         let events = Arc::new(InMemoryEvents::new(
             ban_index.clone(),
             vote_key_images.clone(),
+            pending_members.clone(),
         ));
         let key_blobs = Arc::new(InMemoryKeyBlobs::new());
         let rings = Arc::new(InMemoryRings::new());
         let gift_cards = Arc::new(InMemoryGiftCards::new());
         let groups = Arc::new(InMemoryGroups::new());
         let billing = Arc::new(InMemoryBilling::new(groups.shared()));
-        let pending_members = Arc::new(InMemoryPendingMembers::new());
         let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
         let facade = StorageFacade::new(
