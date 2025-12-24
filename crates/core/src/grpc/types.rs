@@ -2,10 +2,10 @@ use crate::event::{BanScope, Event};
 use crate::hashing::event_hash_sha3_256;
 use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, TenantId, TenantToken};
 use crate::storage::{
-    BanIndex, BannedOperation, EventBytes, EventReader, EventRecord, EventStore, EventWriter,
-    GiftCard, GiftCardStore, GroupMetadataStore, KeyBlobStore, NotFound, PendingMember,
-    PendingMemberStore, RingView, RingWriter, StorageError, TenantTokenError, TenantTokenStore,
-    VoteKeyImageIndex,
+    BanIndex, BannedOperation, BillingStore, EventBytes, EventReader, EventRecord, EventStore,
+    EventWriter, GiftCard, GiftCardStore, GroupMetadataStore, KeyBlobStore, NotFound,
+    PendingMember, PendingMemberStore, RingView, RingWriter, StorageError, TenantTokenError,
+    TenantTokenStore, VoteKeyImageIndex,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -52,6 +52,8 @@ type BanScopeSet = HashSet<BanScope>;
 type BanMap = HashMap<BanKey, BanScopeSet>;
 type VoteKey = (TenantId, GroupId, String, [u8; 32]);
 type VoteKeySet = HashSet<VoteKey>;
+pub(crate) type GroupMap = HashMap<GroupId, GroupRecord>;
+type TenantBalanceMap = HashMap<TenantId, i64>;
 
 fn key_image_bytes(key_image: &KeyImage) -> [u8; 32] {
     *key_image.compress().as_bytes()
@@ -624,13 +626,24 @@ impl GiftCardStore for InMemoryGiftCards {
 
 #[derive(Clone, Default)]
 pub struct InMemoryGroups {
-    groups: Arc<Mutex<HashMap<GroupId, (TenantId, String)>>>,
+    groups: Arc<Mutex<GroupMap>>,
 }
 
 impl InMemoryGroups {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub(crate) fn shared(&self) -> Arc<Mutex<GroupMap>> {
+        Arc::clone(&self.groups)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct GroupRecord {
+    tenant: TenantId,
+    tg_group_id: String,
+    balance_nanos: i64,
 }
 
 #[async_trait]
@@ -642,15 +655,99 @@ impl GroupMetadataStore for InMemoryGroups {
     ) -> Result<GroupId, StorageError> {
         let mut map = self.groups.lock().expect("poison-free");
         let group_id = GroupId(ulid::Ulid::new());
-        map.insert(group_id, (tenant, tg_group_id.to_string()));
+        map.insert(
+            group_id,
+            GroupRecord {
+                tenant,
+                tg_group_id: tg_group_id.to_string(),
+                balance_nanos: 0,
+            },
+        );
         Ok(group_id)
     }
 
     async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
         let map = self.groups.lock().expect("poison-free");
         map.get(&group_id)
-            .cloned()
-            .ok_or(StorageError::Backend("group not found".into()))
+            .map(|record| (record.tenant, record.tg_group_id.clone()))
+            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))
+    }
+}
+
+#[derive(Clone)]
+pub struct InMemoryBilling {
+    tenants: Arc<Mutex<TenantBalanceMap>>,
+    groups: Arc<Mutex<GroupMap>>,
+}
+
+impl InMemoryBilling {
+    pub(crate) fn new(groups: Arc<Mutex<GroupMap>>) -> Self {
+        Self {
+            tenants: Arc::new(Mutex::new(HashMap::new())),
+            groups,
+        }
+    }
+}
+
+#[async_trait]
+impl BillingStore for InMemoryBilling {
+    async fn credit_tenant(
+        &self,
+        tenant: TenantId,
+        _owner_tg_user_id: &str,
+        amount_nanos: u64,
+    ) -> Result<i64, StorageError> {
+        let delta = i64::try_from(amount_nanos)
+            .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+        let mut map = self.tenants.lock().expect("poison-free");
+        let balance = map.entry(tenant).or_insert(0);
+        *balance = balance
+            .checked_add(delta)
+            .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
+        Ok(*balance)
+    }
+
+    async fn transfer_to_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        amount_nanos: u64,
+    ) -> Result<i64, StorageError> {
+        let delta = i64::try_from(amount_nanos)
+            .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+        let mut tenants = self.tenants.lock().expect("poison-free");
+        let tenant_balance = tenants.entry(tenant).or_insert(0);
+        if *tenant_balance < delta {
+            return Err(StorageError::PreconditionFailed(
+                "insufficient balance".into(),
+            ));
+        }
+
+        let mut groups = self.groups.lock().expect("poison-free");
+        let record = groups
+            .get_mut(&group_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+        if record.tenant != tenant {
+            return Err(StorageError::PreconditionFailed(
+                "group does not belong to tenant".into(),
+            ));
+        }
+
+        *tenant_balance -= delta;
+        record.balance_nanos = record
+            .balance_nanos
+            .checked_add(delta)
+            .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
+
+        Ok(record.balance_nanos)
+    }
+
+    async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError> {
+        let groups = self.groups.lock().expect("poison-free");
+        let record = groups
+            .get(&group_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+        Ok(record.balance_nanos)
     }
 }
 
@@ -868,6 +965,58 @@ mod tests {
         let err = vote_index
             .record_vote(tenant, group, poll_id, key_image)
             .expect_err("duplicate vote");
+        assert!(matches!(err, StorageError::PreconditionFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn billing_transfer_updates_group_balance() {
+        let tenant = TenantId(ulid::Ulid::new());
+        let groups = InMemoryGroups::new();
+        let group_id = groups
+            .create_group(tenant, "tg-group")
+            .await
+            .expect("group created");
+        let billing = InMemoryBilling::new(groups.shared());
+
+        let balance = billing
+            .credit_tenant(tenant, "tg-user", 100)
+            .await
+            .expect("tenant credited");
+        assert_eq!(balance, 100);
+
+        let group_balance = billing
+            .transfer_to_group(tenant, group_id, 60)
+            .await
+            .expect("transfer succeeds");
+        assert_eq!(group_balance, 60);
+
+        let group_balance = billing
+            .get_group_balance(group_id)
+            .await
+            .expect("balance query succeeds");
+        assert_eq!(group_balance, 60);
+    }
+
+    #[tokio::test]
+    async fn billing_rejects_overdraft() {
+        let tenant = TenantId(ulid::Ulid::new());
+        let groups = InMemoryGroups::new();
+        let group_id = groups
+            .create_group(tenant, "tg-group")
+            .await
+            .expect("group created");
+        let billing = InMemoryBilling::new(groups.shared());
+
+        billing
+            .credit_tenant(tenant, "tg-user", 40)
+            .await
+            .expect("tenant credited");
+
+        let err = billing
+            .transfer_to_group(tenant, group_id, 60)
+            .await
+            .expect_err("overdraft rejected");
+
         assert!(matches!(err, StorageError::PreconditionFailed(_)));
     }
 }

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::storage::{
-    BanIndex, EventReader, EventWriter, GiftCardStore, GroupMetadataStore, KeyBlobStore,
-    PendingMemberStore, RingView, RingWriter, TenantTokenStore, VoteKeyImageIndex,
+    BanIndex, BillingStore, EventReader, EventWriter, GiftCardStore, GroupMetadataStore,
+    KeyBlobStore, PendingMemberStore, RingView, RingWriter, TenantTokenStore, VoteKeyImageIndex,
 };
 
 /// Thin convenience wrapper to inject storage capabilities as a single handle.
@@ -16,6 +16,7 @@ pub struct StorageFacade {
     pub ring_writer: Arc<dyn RingWriter + Send + Sync>,
     pub ban_index: Arc<dyn BanIndex + Send + Sync>,
     pub vote_key_images: Arc<dyn VoteKeyImageIndex + Send + Sync>,
+    pub billing: Arc<dyn BillingStore + Send + Sync>,
     pub gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
     pub groups: Arc<dyn GroupMetadataStore + Send + Sync>,
     pub pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
@@ -32,6 +33,7 @@ impl StorageFacade {
         ring_writer: Arc<dyn RingWriter + Send + Sync>,
         ban_index: Arc<dyn BanIndex + Send + Sync>,
         vote_key_images: Arc<dyn VoteKeyImageIndex + Send + Sync>,
+        billing: Arc<dyn BillingStore + Send + Sync>,
         gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
         groups: Arc<dyn GroupMetadataStore + Send + Sync>,
         pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
@@ -45,6 +47,7 @@ impl StorageFacade {
             ring_writer,
             ban_index,
             vote_key_images,
+            billing,
             gift_cards,
             groups,
             pending_members,

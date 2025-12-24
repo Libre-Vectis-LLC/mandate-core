@@ -15,6 +15,10 @@ Mandate core provides audit-first primitives (hashing, signing, key derivation, 
 - Single-writer append per tenant; deterministic keyset pagination for readers. No optimistic tokens are needed because the writer is serialized; readers stream in order.
 - Rings are reconstructed from deltas via shortest-path replay; storage traits stay zero-copy (`Arc<[u8]>`).
 
+## Billing Semantics
+- Tenants hold a spendable balance in nanos; gift card redemption credits that balance.
+- Group budgets are funded by tenant transfers; `BillingStore` debits the tenant and credits the group in one transaction, rejecting overdrafts.
+
 ## Ban & Anti-Replay Indices
 - `BanIndex` answers whether a key image is banned for a specific operation (`PostMessage`, `CreatePoll`, `CastVote`) based on `BanScope`.
 - `VoteKeyImageIndex` tracks `(tenant, group_id, poll_id, key_image)` reuse to prevent double voting; writers should update it atomically with event append.

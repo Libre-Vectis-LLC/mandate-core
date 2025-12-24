@@ -85,6 +85,10 @@ pub enum NotFound {
         tenant: TenantId,
         group_id: GroupId,
     },
+    #[error("tenant {tenant:?}")]
+    Tenant { tenant: TenantId },
+    #[error("group {group_id:?}")]
+    Group { group_id: GroupId },
     #[error("tail for tenant {tenant:?} group {group_id:?}")]
     Tail { tenant: TenantId, group_id: GroupId },
     #[error("ring {hash:?} for tenant {tenant:?} group {group_id:?}")]
@@ -250,6 +254,30 @@ pub trait VoteKeyImageIndex {
         poll_id: &str,
         key_image: &KeyImage,
     ) -> Result<bool, StorageError>;
+}
+
+#[async_trait]
+pub trait BillingStore {
+    /// Credit a tenant balance by `amount_nanos`, creating the tenant if needed.
+    /// Returns the updated tenant balance.
+    async fn credit_tenant(
+        &self,
+        tenant: TenantId,
+        owner_tg_user_id: &str,
+        amount_nanos: u64,
+    ) -> Result<i64, StorageError>;
+
+    /// Transfer funds from tenant balance to the group's budget.
+    /// Returns the updated group balance.
+    async fn transfer_to_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        amount_nanos: u64,
+    ) -> Result<i64, StorageError>;
+
+    /// Returns the group's current budget balance.
+    async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError>;
 }
 
 #[derive(Clone, Debug)]

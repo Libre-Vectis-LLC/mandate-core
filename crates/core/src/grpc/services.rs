@@ -532,10 +532,17 @@ impl AuthService for AuthServiceImpl {
         // MVP: In-memory tenant creation. Real impl would look up by TG ID.
         let tenant_id = crate::ids::TenantId(ulid::Ulid::new());
 
-        let _card = self
+        let card = self
             .store
             .gift_cards
             .redeem(&body.code, tenant_id)
+            .await
+            .map_err(to_status)?;
+
+        let new_balance = self
+            .store
+            .billing
+            .credit_tenant(tenant_id, &body.tg_user_id, card.amount_nanos)
             .await
             .map_err(to_status)?;
 
@@ -550,7 +557,7 @@ impl AuthService for AuthServiceImpl {
 
         Ok(Response::new(RedeemGiftCardResponse {
             tenant_id: tenant_id.0.to_string(),
-            new_balance_nanos: 1000, // Mock balance
+            new_balance_nanos: new_balance,
             api_token: token_str,
         }))
     }
@@ -574,19 +581,48 @@ impl BillingService for BillingServiceImpl {
         &self,
         request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
-        let _body = request.into_inner();
-        // Mock success for MVP.
+        let body = request.into_inner();
+        let tenant_id = TenantId(
+            crate::proto::parse_ulid(&body.tenant_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+        if body.amount_nanos <= 0 {
+            return Err(RpcError::InvalidArgument("amount_nanos must be positive".into()).into());
+        }
+        let amount = u64::try_from(body.amount_nanos)
+            .map_err(|_| RpcError::InvalidArgument("amount_nanos too large".into()))?;
+        let balance = self
+            .store
+            .billing
+            .transfer_to_group(tenant_id, group_id, amount)
+            .await
+            .map_err(to_status)?;
         Ok(Response::new(TransferToGroupResponse {
-            balance_after_nanos: 900,
+            balance_after_nanos: balance,
         }))
     }
 
     async fn get_group_balance(
         &self,
-        _request: Request<GetGroupBalanceRequest>,
+        request: Request<GetGroupBalanceRequest>,
     ) -> Result<Response<GetGroupBalanceResponse>, Status> {
+        let body = request.into_inner();
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
+        );
+        let balance = self
+            .store
+            .billing
+            .get_group_balance(group_id)
+            .await
+            .map_err(to_status)?;
         Ok(Response::new(GetGroupBalanceResponse {
-            balance_nanos: 100,
+            balance_nanos: balance,
         }))
     }
 }

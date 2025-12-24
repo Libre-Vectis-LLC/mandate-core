@@ -4,8 +4,9 @@ use crate::grpc::services::{
     MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
 };
 use crate::grpc::types::{
-    InMemoryBanIndex, InMemoryEvents, InMemoryGiftCards, InMemoryGroups, InMemoryKeyBlobs,
-    InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens, InMemoryVoteKeyImages,
+    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryGroups,
+    InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens,
+    InMemoryVoteKeyImages,
 };
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
@@ -54,6 +55,7 @@ impl CoreServices {
         let rings = Arc::new(InMemoryRings::new());
         let gift_cards = Arc::new(InMemoryGiftCards::new());
         let groups = Arc::new(InMemoryGroups::new());
+        let billing = Arc::new(InMemoryBilling::new(groups.shared()));
         let pending_members = Arc::new(InMemoryPendingMembers::new());
         let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
@@ -66,6 +68,7 @@ impl CoreServices {
             rings,         // writer
             ban_index,
             vote_key_images,
+            billing,
             gift_cards,
             groups,
             pending_members,
