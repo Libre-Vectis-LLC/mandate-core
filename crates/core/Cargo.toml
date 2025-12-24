@@ -1,40 +1,40 @@
 [package]
 name = "mandate-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-indexmap = { version = "2.0", features = ["serde"] }
-thiserror = "1.0"
-anyhow = "1.0"
-async-trait = "0.1"
-ulid = { version = "1.1", features = ["serde"] }
-hex = "0.4"
-base64 = "0.22"
-age = { git = "https://github.com/RyderFreeman4Logos/rage", branch = "feat/identity-from-bytes" }
-curve25519-dalek = { version = "4.1", features = ["serde"] }
-nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "c2909de2baab5a5fad0c8cc97655d95187eeb0fe" }
-sha3 = "0.10"
-rand = "0.8"
-bip39 = { version = "2.0", features = ["rand"] }
-hkdf = "0.12"
-hmac = "0.12"
-zeroize = "1"
-subtle = "2.5"
-mandate-proto = { path = "../mandate-proto" }
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+ulid.workspace = true
+hex.workspace = true
+base64.workspace = true
+age.workspace = true
+curve25519-dalek.workspace = true
+nazgul.workspace = true
+sha3.workspace = true
+rand.workspace = true
+bip39.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+mandate-proto.workspace = true
 
 [dev-dependencies]
-proptest = { version = "1", default-features = false, features = ["std"] }
+proptest.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tonic = { version = "0.12", default-features = false, features = ["prost"] }
-tonic-web = "0.12"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-tokio-stream = "0.1"
-futures-util = "0.3"
+tonic = { workspace = true, features = ["transport"] }
+tonic-web.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
 parking_lot = "0.12"

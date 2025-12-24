@@ -1,15 +1,15 @@
 [package]
 name = "mandate-proto"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }
-prost = "0.13"
+tonic.workspace = true
+prost.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tonic = { version = "0.12", default-features = false, features = ["codegen", "prost", "transport"] }
+tonic = { workspace = true, features = ["transport"] }
 
 [build-dependencies]
-tonic-build = "0.12"
-protoc-bin-vendored = "3.0"
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true
