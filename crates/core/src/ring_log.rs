@@ -12,6 +12,10 @@ use nazgul::ring::Ring;
 use nazgul::traits::LocalByteConvertible;
 use std::collections::HashMap;
 
+/// Maximum number of entries allowed in a ring delta log.
+/// Protects against DoS via unbounded memory allocation.
+const MAX_ENTRIES: usize = 100_000;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RingDelta {
     Add(MasterPublicKey),
@@ -26,6 +30,8 @@ pub enum RingLogError {
     AnchorNotFound,
     #[error("invalid master public key bytes")]
     InvalidKey,
+    #[error("ring delta log capacity exceeded")]
+    LogCapacityExceeded,
 }
 
 /// Append-only log of ring deltas.
@@ -57,6 +63,9 @@ impl RingDeltaLog {
         ring: &mut Ring,
         delta: RingDelta,
     ) -> Result<(RingHash, usize), RingLogError> {
+        if self.entries.len() >= MAX_ENTRIES {
+            return Err(RingLogError::LogCapacityExceeded);
+        }
         apply_delta(ring, &delta)?;
         let hash = ring_hash_sha3_256(ring);
         let idx = self.entries.len();
