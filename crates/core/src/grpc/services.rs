@@ -21,6 +21,7 @@ use mandate_proto::mandate::v1::{
     TransferToGroupRequest, TransferToGroupResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use nazgul::traits::LocalByteConvertible;
+use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -546,8 +547,10 @@ impl AuthService for AuthServiceImpl {
             .await
             .map_err(to_status)?;
 
-        // Issue a token.
-        let token_str = format!("token-{}", ulid::Ulid::new());
+        // Issue a cryptographically secure token.
+        // Use 32 random bytes (256 bits) to prevent token prediction/brute-force.
+        let token_bytes: [u8; 32] = rand::thread_rng().gen();
+        let token_str = format!("token-{}", hex::encode(token_bytes));
         let token = crate::ids::TenantToken::from(token_str.clone());
         self.store
             .tenant_tokens
