@@ -3,18 +3,50 @@ package mandate.v1;
 
 import "error.proto";
 
-// Bot-facing onboarding/auth helpers (token issuance / gift card redemption).
+// AuthService provides bot-facing authentication and onboarding helpers.
+//
+// ## Authentication
+// Requires `x-bot-secret` header. Exposed on internal gRPC listener.
+//
+// ## Use Cases
+// - Gift card redemption for tenant onboarding
+// - Future: OAuth flows, API key rotation, etc.
 service AuthService {
+  // RedeemGiftCard exchanges a gift card code for tenant credentials.
+  //
+  // If the Telegram user doesn't have a tenant account, one is created.
+  // The gift card amount is added to the tenant's balance atomically.
+  //
+  // ## Idempotency
+  // Each gift card code can only be redeemed once. Duplicate attempts
+  // return ALREADY_EXISTS error.
+  //
+  // ## Errors
+  // - NOT_FOUND: gift card code doesn't exist
+  // - ALREADY_EXISTS: code was already redeemed
+  // - INTERNAL: database error
   rpc RedeemGiftCard (RedeemGiftCardRequest) returns (RedeemGiftCardResponse);
 }
 
+// Request to redeem a gift card.
 message RedeemGiftCardRequest {
+  // Telegram user ID (numeric string). Used to lookup or create tenant.
   string tg_user_id = 1;
+
+  // Gift card code in format `MANDATE-GIFT-XXXX`.
   string code = 2;
 }
 
+// Response after successful gift card redemption.
 message RedeemGiftCardResponse {
-  string tenant_id = 1; // ULID
+  // Tenant ID (ULID format). May be newly created or existing.
+  string tenant_id = 1;
+
+  // Updated tenant balance after adding gift card amount.
   int64 new_balance_nanos = 3;
-  string api_token = 4; // token for edge/server auth
+
+  // API token for authenticating with Edge/Server.
+  // Format: `token-<64 hex chars>` (256-bit entropy).
+  // Client should securely store this token.
+  string api_token = 4;
 }

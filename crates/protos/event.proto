@@ -4,34 +4,93 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
+// EventService handles the append-only event log for group coordination.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener (Edge-cacheable for reads).
+//
+// ## Event Model
+// Events are cryptographically signed and stored in canonical byte format.
+// Each event receives a monotonically increasing sequence number within its group.
+// The event log is append-only and immutable once committed.
+//
+// ## Use Cases
+// - Clients push signed coordination events (votes, proposals, etc.)
+// - Clients sync event history via paginated streaming
 service EventService {
-  // Push a signed event to the server (bytes are canonical, include signature).
+  // PushEvent appends a signed event to the group's event log.
+  //
+  // The event_bytes must be in canonical format with embedded signature.
+  // Server validates signature, assigns sequence number, and returns confirmation.
+  //
+  // ## Idempotency
+  // Events are deduplicated by content hash. Pushing the same event twice
+  // returns the existing event's metadata without creating a duplicate.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: malformed event_bytes or invalid signature
+  // - PERMISSION_DENIED: signer not authorized for this group
+  // - INTERNAL: storage write failed
   rpc PushEvent (PushEventRequest) returns (PushEventResponse);
 
-  // Fetch a single page of events for a group, starting after an exclusive sequence.
-  // The server sends one response then closes the stream; an empty batch means no new events.
+  // StreamEvents fetches a page of events for a group starting after a sequence.
+  //
+  // Returns a stream that sends one response containing a batch of events,
+  // then closes. An empty batch indicates no new events after the given sequence.
+  // Clients should poll periodically or use the sequence number for resumption.
+  //
+  // ## Pagination
+  // Use `start_sequence_no = -1` to begin from the first event.
+  // The response includes sequence numbers for each event to enable resumption.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - INVALID_ARGUMENT: limit exceeds server maximum
   rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
 }
 
+// Request to push a signed event.
 message PushEventRequest {
+  // Canonical event bytes including embedded ring signature.
+  // Format: [event_header | event_payload | signature]
   bytes event_bytes = 1;
 }
 
+// Response after successful event push.
 message PushEventResponse {
+  // Server-assigned event ID (ULID format, globally unique).
   Ulid event_ulid = 1;
+
+  // SHA3-256 hash of the canonical event bytes.
   Hash32 event_hash = 2;
+
+  // Monotonically increasing sequence number within the group.
+  // Used for ordering and resumption during streaming.
   int64 sequence_no = 3;
 }
 
+// Request to stream events from a group.
 message StreamEventsRequest {
-  string group_id = 1;       // ULID
-  int64 start_sequence_no = 2; // exclusive (start > this); use -1 to start from beginning
-  uint32 limit = 3;            // server clamps to configured max
+  // Group ID (ULID format) to stream events from.
+  string group_id = 1;
+
+  // Exclusive lower bound: returns events with sequence_no > start_sequence_no.
+  // Use -1 to start from the beginning of the event log.
+  int64 start_sequence_no = 2;
+
+  // Maximum number of events per response batch.
+  // Server clamps to configured maximum (typically 100-1000).
+  uint32 limit = 3;
 }
 
+// Response containing a batch of events.
 message StreamEventsResponse {
-  repeated bytes event_bytes = 1; // batch to reduce per-message overhead
-  // Storage-assigned sequence numbers aligned with event_bytes to allow clients
-  // to resume with start_sequence_no.
+  // Batch of canonical event bytes (same format as PushEventRequest).
+  // Batching reduces per-message RPC overhead for bulk syncs.
+  repeated bytes event_bytes = 1;
+
+  // Sequence numbers aligned 1:1 with event_bytes.
+  // Clients should track the highest sequence for resumption.
   repeated int64 sequence_nos = 2;
 }

@@ -4,40 +4,109 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
+// MemberService handles the group membership onboarding workflow.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener.
+//
+// ## Membership Flow
+// 1. User initiates join via Telegram bot command
+// 2. Bot calls SubmitPendingMember with user's cryptographic keys
+// 3. Owner/Audit bot calls ListPendingMembers to review requests
+// 4. Owner approves by adding member to ring (via RingService)
+// 5. Owner uploads encrypted key blob (via StorageService)
+//
+// ## Use Cases
+// - Bot submits join requests from Telegram users
+// - Owner client reviews pending members before approval
 service MemberService {
-  // Bot submits a pending member's public keys.
+  // SubmitPendingMember registers a user's intent to join a group.
+  //
+  // The member remains in "pending" state until the group owner approves
+  // by adding them to the ring and uploading their key blob.
+  //
+  // ## Idempotency
+  // Submitting the same tg_user_id + group_id combination again is idempotent;
+  // the existing pending_id is returned without creating a duplicate.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - INVALID_ARGUMENT: malformed public key bytes
+  // - INTERNAL: database error
   rpc SubmitPendingMember (SubmitPendingMemberRequest) returns (SubmitPendingMemberResponse);
 
-  // Owner/Audit bot lists pending members for approval.
+  // ListPendingMembers retrieves pending membership requests for review.
+  //
+  // Returns a paginated list of users awaiting owner approval.
+  // Owner client uses this to display pending requests and approve/reject.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
   rpc ListPendingMembers (ListPendingMembersRequest) returns (ListPendingMembersResponse);
 }
 
+// Request to submit a pending member.
 message SubmitPendingMemberRequest {
-  string group_id = 1; // ULID
+  // Group ID (ULID format) to join.
+  string group_id = 1;
+
+  // Telegram user ID (numeric string from Telegram API).
   string tg_user_id = 2;
+
+  // Member's Nazgul master public key for ring signatures (32 bytes).
+  // Used for anonymous voting and event signing.
   NazgulMasterPublicKey nazgul_pub = 3;
+
+  // Member's Rage (X25519) public key for encryption (32 bytes).
+  // Used to encrypt the shared key blob for this member.
   RagePublicKey rage_pub = 4;
 }
 
+// Response after submitting a pending member.
 message SubmitPendingMemberResponse {
+  // Server-assigned pending member ID (ULID format).
+  // Used for tracking approval status.
   string pending_id = 1;
 }
 
+// Request to list pending members.
 message ListPendingMembersRequest {
-  string group_id = 1; // ULID
+  // Group ID (ULID format) to query.
+  string group_id = 1;
+
+  // Maximum number of pending members to return (server may cap this).
   uint32 limit = 2;
+
+  // Pagination cursor from previous response.
+  // Pass empty/null for first page.
   PageToken page_token = 3;
 }
 
+// Pending member awaiting owner approval.
 message PendingMember {
+  // Pending member ID (ULID format).
   string pending_id = 1;
+
+  // Telegram user ID (numeric string).
   string tg_user_id = 2;
+
+  // Member's Nazgul master public key (32 bytes).
   NazgulMasterPublicKey nazgul_pub = 3;
+
+  // Member's Rage public key (32 bytes).
   RagePublicKey rage_pub = 4;
+
+  // Unix timestamp in milliseconds when the request was submitted.
   int64 submitted_at_ms = 5;
 }
 
+// Response containing pending members.
 message ListPendingMembersResponse {
+  // List of pending members in submission order.
   repeated PendingMember members = 1;
+
+  // Pagination cursor for next page.
+  // Empty if no more pages.
   PageToken next_page_token = 2;
 }

@@ -4,34 +4,97 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
+// GroupService manages group lifecycle and ownership configuration.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener.
+//
+// ## Authorization
+// - CreateGroup: Caller becomes the owning tenant
+// - SetOwnerPublicKey: Only the owning tenant can set/update
+// - GetGroup: Any authenticated caller can read
+//
+// ## Use Cases
+// - Bot creates a group when adding Mandate to a Telegram chat
+// - Owner client sets their cryptographic identity for signing
+// - Clients fetch group metadata for display or validation
 service GroupService {
+  // CreateGroup provisions a new Mandate group linked to a Telegram chat.
+  //
+  // The caller's tenant becomes the group owner with exclusive write access.
+  // Groups are identified by ULID and linked to Telegram via tg_group_id.
+  //
+  // ## Errors
+  // - ALREADY_EXISTS: group with this tg_group_id already exists
+  // - NOT_FOUND: tenant_id doesn't exist
+  // - INTERNAL: database error
   rpc CreateGroup (CreateGroupRequest) returns (CreateGroupResponse);
+
+  // SetOwnerPublicKey configures the owner's signing key for the group.
+  //
+  // This key is used to verify owner-signed events and approve new members.
+  // Must be called before members can join or events can be pushed.
+  //
+  // ## Authorization
+  // Only the tenant that created the group can call this.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - PERMISSION_DENIED: caller is not the group owner
+  // - INVALID_ARGUMENT: malformed public key bytes
   rpc SetOwnerPublicKey (SetOwnerPublicKeyRequest) returns (SetOwnerPublicKeyResponse);
+
+  // GetGroup retrieves metadata for a group.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
   rpc GetGroup (GetGroupRequest) returns (GetGroupResponse);
 }
 
+// Request to create a new group.
 message CreateGroupRequest {
-  string tenant_id = 1;   // ULID of tenant
-  string tg_group_id = 2; // Telegram group id (string)
+  // Tenant ID (ULID format) that will own this group.
+  string tenant_id = 1;
+
+  // Telegram group/chat ID (numeric string from Telegram API).
+  // Used to link Mandate group to Telegram chat for bot interactions.
+  string tg_group_id = 2;
 }
 
+// Response after successful group creation.
 message CreateGroupResponse {
-  string group_id = 1; // ULID
+  // Newly created group ID (ULID format).
+  string group_id = 1;
 }
 
+// Request to set or update the owner's public key.
 message SetOwnerPublicKeyRequest {
-  string group_id = 1; // ULID
+  // Group ID (ULID format) to configure.
+  string group_id = 1;
+
+  // Owner's Nazgul master public key (ristretto point, 32 bytes).
+  // Used for verifying owner signatures on events and member approvals.
   NazgulMasterPublicKey owner_pubkey = 2;
 }
 
+// Empty response indicating success.
 message SetOwnerPublicKeyResponse {}
 
+// Request to fetch group metadata.
 message GetGroupRequest {
+  // Group ID (ULID format) to query.
   string group_id = 1;
 }
 
+// Response containing group metadata.
 message GetGroupResponse {
+  // Group ID (ULID format).
   string group_id = 1;
+
+  // Owning tenant ID (ULID format).
   string tenant_id = 2;
+
+  // Owner's Nazgul master public key (may be empty if not yet set).
   NazgulMasterPublicKey owner_pubkey = 3;
 }

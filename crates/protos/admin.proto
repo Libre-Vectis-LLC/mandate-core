@@ -3,18 +3,45 @@ package mandate.v1;
 
 import "error.proto";
 
-// Operations-only RPC surface (internal).
+// AdminService provides operations-only RPCs for system administrators.
+//
+// ## Authentication
+// Requires `x-bot-secret` header matching the server's configured secret.
+// This service is exposed only on the internal gRPC listener (e.g., 127.0.0.1:50052).
+//
+// ## Use Cases
+// - Issuing gift cards for tenant onboarding
+// - Future: system-wide configuration, metrics, etc.
 service AdminService {
-  // Issue a gift card code for tenant bootstrap.
+  // IssueGiftCard creates a new gift card code that can be redeemed by tenants.
+  //
+  // The generated code follows the format `MANDATE-GIFT-XXXX` and can be
+  // redeemed exactly once via AuthService/RedeemGiftCard.
+  //
+  // ## Authorization
+  // Only callable by operators with bot-secret access.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: amount_nanos is zero or negative
+  // - INTERNAL: database error during code generation
   rpc IssueGiftCard (IssueGiftCardRequest) returns (IssueGiftCardResponse);
 }
 
+// Request to issue a new gift card.
 message IssueGiftCardRequest {
-  uint64 amount_nanos = 1; // e.g., in smallest unit
+  // Amount in nanoUnits (1 unit = 1,000,000,000 nanos).
+  // Example: 20_000_000_000 = 20 units.
+  uint64 amount_nanos = 1;
+
+  // Human-readable reason for issuance (audit trail).
+  // Example: "Exile HK Parliament grant"
   string reason = 2;
 }
 
+// Response containing the generated gift card code.
 message IssueGiftCardResponse {
+  // The gift card code in format `MANDATE-GIFT-XXXX`.
+  // This code should be securely transmitted to the recipient.
   string code = 1;
 }
 

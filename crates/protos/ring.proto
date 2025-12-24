@@ -4,36 +4,101 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
+// RingService manages the cryptographic membership ring for anonymous signing.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener (Edge-cacheable for reads).
+//
+// ## Ring Model
+// The ring is an ordered set of Nazgul public keys representing group members.
+// Ring membership determines who can produce valid ring signatures for events.
+// The ring state is tracked via a hash-linked delta log for efficient sync.
+//
+// ## Delta Log
+// Instead of transmitting full ring state, clients sync via deltas (add/remove ops).
+// Each delta produces a new ring hash; clients can resume sync from any known hash.
+// This enables efficient incremental updates even for large groups.
+//
+// ## Use Cases
+// - Clients fetch current ring to verify signatures
+// - Owner adds/removes members by pushing deltas (separate internal API)
+// - Clients sync ring state via streaming for offline verification
 service RingService {
-  // Get the current head of the ring log (latest hash + member count).
+  // GetRingHead retrieves the current ring state summary.
+  //
+  // Returns the latest ring hash, member count, and full member list.
+  // Clients use this for initial sync or to verify their local ring state.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
   rpc GetRingHead (GetRingHeadRequest) returns (GetRingHeadResponse);
 
-  // Stream ring deltas after an optional anchor hash (inclusive/exclusive decided by after_hash semantics).
+  // StreamRing fetches ring deltas for incremental synchronization.
+  //
+  // Starting from an optional anchor hash, returns batches of deltas
+  // that can be applied to reconstruct ring state. Empty response
+  // indicates the client is fully synchronized.
+  //
+  // ## Pagination
+  // Use empty after_ring_hash to stream from genesis (empty ring).
+  // The response includes next_ring_hash for resumption.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - INVALID_ARGUMENT: after_ring_hash is not a known ring state
   rpc StreamRing (StreamRingRequest) returns (stream StreamRingResponse);
 }
 
+// Request to get current ring head.
 message GetRingHeadRequest {
-  string group_id = 1; // ULID
-}
-
-message GetRingHeadResponse {
-  bytes ring_hash = 1; // 32 bytes
-  uint32 member_count = 2;
-  repeated bytes members = 3; // List of 32-byte NazgulMasterPublicKey
-}
-
-message StreamRingRequest {
+  // Group ID (ULID format) to query.
   string group_id = 1;
-  bytes after_ring_hash = 2; // optional; if empty, stream from genesis
-  uint32 limit = 3;          // server-chosen cap per response
 }
 
+// Response containing current ring state.
+message GetRingHeadResponse {
+  // SHA3-256 hash of the current ring state (32 bytes).
+  // Used as anchor for delta streaming and signature verification.
+  bytes ring_hash = 1;
+
+  // Current number of members in the ring.
+  uint32 member_count = 2;
+
+  // Full list of member public keys (each 32 bytes).
+  // Order is deterministic and affects ring signature verification.
+  repeated bytes members = 3;
+}
+
+// Request to stream ring deltas.
+message StreamRingRequest {
+  // Group ID (ULID format) to stream.
+  string group_id = 1;
+
+  // Optional anchor hash (32 bytes) to resume from.
+  // Empty means start from genesis (empty ring).
+  bytes after_ring_hash = 2;
+
+  // Maximum entries per response (server may cap this).
+  uint32 limit = 3;
+}
+
+// A single ring state transition with its resulting hash.
 message RingDeltaEntry {
-  bytes ring_hash = 1;     // resulting ring hash after applying deltas
-  repeated bytes deltas = 2; // opaque encoded RingDelta list (server-defined format)
+  // Ring hash after applying all deltas in this entry (32 bytes).
+  bytes ring_hash = 1;
+
+  // Opaque encoded delta operations (add/remove member).
+  // Format: internal to mandate-core RingDelta serialization.
+  repeated bytes deltas = 2;
 }
 
+// Response containing ring delta entries.
 message StreamRingResponse {
+  // Batch of delta entries in chronological order.
   repeated RingDeltaEntry entries = 1;
-  bytes next_ring_hash = 2; // optional cursor
+
+  // Cursor for next page (32-byte ring hash).
+  // Empty if fully synchronized.
+  bytes next_ring_hash = 2;
 }

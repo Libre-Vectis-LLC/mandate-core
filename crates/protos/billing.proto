@@ -4,25 +4,65 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
+// BillingService manages tenant-to-group fund transfers and balance queries.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener.
+//
+// ## Use Cases
+// - Transfer credits from tenant account to group budget
+// - Query group balance for display or pre-flight checks
 service BillingService {
+  // TransferToGroup moves funds from tenant balance to a group's budget.
+  //
+  // The transfer is atomic: either the full amount moves or nothing does.
+  // Uses SERIALIZABLE isolation to prevent race conditions on concurrent transfers.
+  //
+  // ## Authorization
+  // Caller must own the tenant account being debited.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: amount_nanos is zero or negative
+  // - FAILED_PRECONDITION: insufficient tenant balance
+  // - NOT_FOUND: tenant_id or group_id doesn't exist
+  // - INTERNAL: database transaction failed
   rpc TransferToGroup (TransferToGroupRequest) returns (TransferToGroupResponse);
+
+  // GetGroupBalance retrieves the current credit balance for a group.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
   rpc GetGroupBalance (GetGroupBalanceRequest) returns (GetGroupBalanceResponse);
 }
 
+// Request to transfer funds from tenant to group.
 message TransferToGroupRequest {
+  // Tenant ID (ULID format) whose balance will be debited.
   string tenant_id = 1;
+
+  // Target group ID (ULID format) to receive the funds.
   string group_id = 2;
+
+  // Amount to transfer in nanoUnits (1 unit = 1,000,000,000 nanos).
+  // Must be positive; zero or negative values return INVALID_ARGUMENT.
   int64 amount_nanos = 3;
 }
 
+// Response after successful transfer.
 message TransferToGroupResponse {
+  // Updated group balance after adding the transferred amount.
   int64 balance_after_nanos = 1;
 }
 
+// Request to query a group's current balance.
 message GetGroupBalanceRequest {
-  string group_id = 1; // ULID
+  // Group ID (ULID format) to query.
+  string group_id = 1;
 }
 
+// Response containing the group's balance.
 message GetGroupBalanceResponse {
+  // Current group balance in nanoUnits.
   int64 balance_nanos = 1;
 }

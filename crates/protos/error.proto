@@ -1,30 +1,81 @@
 syntax = "proto3";
 package mandate.v1;
 
-// Shared error model (google.rpc style, simplified).
+// Shared error model for Mandate gRPC services.
+//
+// Follows google.rpc patterns with simplifications for our use case.
+// All services return errors using gRPC status codes with ErrorDetail
+// attached in the trailing metadata when additional context is available.
 
+// Standard error codes aligned with gRPC status codes.
+//
+// Usage patterns:
+// - INVALID_ARGUMENT: malformed request (wrong format, missing required fields)
+// - NOT_FOUND: requested resource doesn't exist
+// - ALREADY_EXISTS: create operation for existing resource
+// - PERMISSION_DENIED: authenticated but not authorized
+// - UNAUTHENTICATED: missing or invalid credentials
+// - RESOURCE_EXHAUSTED: rate limit hit or quota exceeded
+// - FAILED_PRECONDITION: operation rejected due to system state (e.g., insufficient balance)
+// - CONFLICT: concurrent modification conflict
+// - ABORTED: operation aborted (usually retriable)
+// - INTERNAL: server bug or unexpected error
+// - UNAVAILABLE: service temporarily unavailable (retry with backoff)
 enum ErrorCode {
+  // Default value, should not be used.
   ERROR_CODE_UNSPECIFIED = 0;
+
+  // Request arguments are invalid or malformed.
   INVALID_ARGUMENT = 1;
+
+  // Requested resource (group, tenant, member, etc.) not found.
   NOT_FOUND = 2;
+
+  // Resource already exists (e.g., duplicate gift card redemption).
   ALREADY_EXISTS = 3;
+
+  // Caller lacks permission for the requested operation.
   PERMISSION_DENIED = 4;
+
+  // Request lacks valid authentication credentials.
   UNAUTHENTICATED = 5;
+
+  // Rate limit exceeded or resource quota exhausted.
   RESOURCE_EXHAUSTED = 6;
+
+  // Operation cannot proceed due to current state (e.g., insufficient balance).
   FAILED_PRECONDITION = 7;
+
+  // Concurrent modification conflict (e.g., optimistic locking failure).
   CONFLICT = 8;
+
+  // Operation aborted, typically retriable.
   ABORTED = 9;
+
+  // Internal server error (bug or unexpected failure).
   INTERNAL = 10;
+
+  // Service temporarily unavailable, retry with exponential backoff.
   UNAVAILABLE = 11;
 }
 
+// Describes a validation error for a specific field.
 message FieldViolation {
+  // Field path in dot notation (e.g., "request.amount_nanos").
   string field = 1;
+
+  // Human-readable description of the violation.
   string description = 2;
 }
 
+// Structured error detail attached to gRPC error responses.
 message ErrorDetail {
+  // Machine-readable error code for programmatic handling.
   ErrorCode code = 1;
+
+  // Human-readable error message for logging and debugging.
   string message = 2;
+
+  // List of field-level validation errors (for INVALID_ARGUMENT).
   repeated FieldViolation field_violations = 3;
 }

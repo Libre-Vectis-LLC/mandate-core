@@ -4,33 +4,92 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
-// Blob I/O hot path (Edge-cached). Blobs are indexed by the member's Rage public key.
+// StorageService manages encrypted key blobs for group members.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener (heavily Edge-cached for reads).
+//
+// ## Key Blob Model
+// Each member receives an encrypted "bucket" containing the group's shared
+// cryptographic material (K_shared). The blob is encrypted to the member's
+// Rage (X25519) public key, ensuring only they can decrypt it.
+//
+// ## Hot Path
+// DownloadMyKeyBlob is the most frequently called RPC (once per session per member).
+// Edge caching by rage_pub hash is critical for performance at scale.
+//
+// ## Use Cases
+// - Owner uploads key blobs after approving new members
+// - Member downloads their blob to derive session keys
 service StorageService {
-  // Owner/Audit bot uploads key blobs for approved members (one bucket per person).
+  // UploadKeyBlobs stores encrypted key material for one or more members.
+  //
+  // The owner generates key blobs by encrypting K_shared to each member's
+  // Rage public key using age/rage encryption.
+  //
+  // ## Authorization
+  // Only the group owner can upload blobs.
+  //
+  // ## Atomicity
+  // All blobs in a single request are stored atomically.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - PERMISSION_DENIED: caller is not the group owner
+  // - INVALID_ARGUMENT: empty blob list or malformed public keys
   rpc UploadKeyBlobs (UploadKeyBlobsRequest) returns (UploadKeyBlobsResponse);
 
-  // Member fetches their own key blob by providing their Rage public key.
+  // DownloadMyKeyBlob retrieves a member's encrypted key blob.
+  //
+  // Members identify themselves by their Rage public key.
+  // The blob can only be decrypted by the corresponding private key.
+  //
+  // ## Caching
+  // This endpoint is aggressively cached at the Edge layer.
+  // Cache key: SHA3(group_id || rage_pub).
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id or rage_pub not found (member not yet approved)
   rpc DownloadMyKeyBlob (DownloadMyKeyBlobRequest) returns (DownloadMyKeyBlobResponse);
 }
 
+// An encrypted key blob for a specific member.
 message KeyBlob {
+  // Member's Rage (X25519) public key (32 bytes).
+  // Used as the lookup key and encryption recipient.
   RagePublicKey rage_pub = 1;
-  bytes blob = 2; // age/rage-encrypted bucket containing K_shared
+
+  // Age/Rage-encrypted ciphertext containing K_shared and group metadata.
+  // Only decryptable by the holder of the corresponding private key.
+  bytes blob = 2;
 }
 
+// Request to upload key blobs.
 message UploadKeyBlobsRequest {
-  string group_id = 1; // ULID
+  // Group ID (ULID format) to upload blobs for.
+  string group_id = 1;
+
+  // List of key blobs to store (one per member).
+  // Existing blobs for the same rage_pub are overwritten.
   repeated KeyBlob blobs = 2;
 }
 
+// Empty response indicating successful upload.
 message UploadKeyBlobsResponse {}
 
+// Request to download a member's key blob.
 message DownloadMyKeyBlobRequest {
-  string group_id = 1; // ULID
+  // Group ID (ULID format) to download from.
+  string group_id = 1;
+
+  // Member's Rage public key (32 bytes) identifying the blob to fetch.
   RagePublicKey rage_pub = 2;
 }
 
+// Response containing the encrypted key blob.
 message DownloadMyKeyBlobResponse {
+  // Age/Rage-encrypted blob (same as uploaded via UploadKeyBlobs).
   bytes blob = 1;
 }
 
