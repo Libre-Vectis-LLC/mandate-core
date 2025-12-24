@@ -13,6 +13,10 @@ pub const API_TOKEN_METADATA_KEY: &str = "x-api-token";
 /// Metadata key for internal bot authentication.
 pub const BOT_SECRET_METADATA_KEY: &str = "x-bot-secret";
 
+/// Metadata key for tenant context on internal requests.
+/// Required for internal services to specify which tenant they're operating on behalf of.
+pub const TENANT_ID_METADATA_KEY: &str = "x-tenant-id";
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProtoConvertError {
     #[error("invalid ulid string: {0}")]

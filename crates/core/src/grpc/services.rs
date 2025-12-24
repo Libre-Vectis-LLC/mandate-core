@@ -644,16 +644,28 @@ impl GroupService for GroupServiceImpl {
         &self,
         request: Request<CreateGroupRequest>,
     ) -> Result<Response<CreateGroupResponse>, Status> {
+        // Extract authenticated tenant from interceptor
+        let authenticated_tenant = request
+            .extensions()
+            .get::<TenantId>()
+            .cloned()
+            .ok_or_else(|| RpcError::Unauthenticated("missing tenant context".into()))?;
+
         let body = request.into_inner();
-        let tenant_id = TenantId(
+        let requested_tenant = TenantId(
             crate::proto::parse_ulid(&body.tenant_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
+        // Authorization check: verify authenticated tenant matches requested tenant
+        if authenticated_tenant != requested_tenant {
+            return Err(RpcError::PermissionDenied("not authorized for this tenant".into()).into());
+        }
+
         let group_id = self
             .store
             .groups
-            .create_group(tenant_id, &body.tg_group_id)
+            .create_group(authenticated_tenant, &body.tg_group_id)
             .await
             .map_err(to_status)?;
 
@@ -666,18 +678,32 @@ impl GroupService for GroupServiceImpl {
         &self,
         request: Request<SetOwnerPublicKeyRequest>,
     ) -> Result<Response<SetOwnerPublicKeyResponse>, Status> {
+        // Extract authenticated tenant from interceptor
+        let authenticated_tenant = request
+            .extensions()
+            .get::<TenantId>()
+            .cloned()
+            .ok_or_else(|| RpcError::Unauthenticated("missing tenant context".into()))?;
+
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        let (tenant, _) = self
+        let (group_tenant, _) = self
             .store
             .groups
             .get_group(group_id)
             .await
             .map_err(to_status)?;
+
+        // Authorization check: verify authenticated tenant owns the group
+        if authenticated_tenant != group_tenant {
+            return Err(RpcError::PermissionDenied("not authorized for this group".into()).into());
+        }
+
+        let tenant = group_tenant;
 
         let owner_pubkey = body
             .owner_pubkey
