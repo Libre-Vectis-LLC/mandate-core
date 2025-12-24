@@ -22,6 +22,7 @@ bip39 = { version = "2.0", features = ["rand"] }
 hkdf = "0.12"
 hmac = "0.12"
 zeroize = "1"
+subtle = "2.5"
 mandate-proto = { path = "../mandate-proto" }
 
 [dev-dependencies]

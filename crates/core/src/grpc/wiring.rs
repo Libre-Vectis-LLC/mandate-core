@@ -1,4 +1,4 @@
-use crate::grpc::interceptor::{require_api_token, require_bot_secret};
+use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};
 use crate::grpc::services::{
     AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, GroupServiceImpl,
     MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
@@ -8,6 +8,7 @@ use crate::grpc::types::{
     InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens,
     InMemoryVoteKeyImages,
 };
+use crate::ids::BotSecret;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
@@ -128,12 +129,13 @@ pub fn run_internal_server(
     billing: BillingServiceImpl,
     group: GroupServiceImpl,
     member: MemberServiceImpl,
-    _bot_secret: &str, // Injected via env/config usually, but interceptor uses env var directly in current impl
+    bot_secret: BotSecret,
     addr: SocketAddr,
 ) -> impl std::future::Future<Output = Result<(), tonic::transport::Error>> {
     let max_bytes = grpc_max_message_bytes();
+    let interceptor = make_bot_secret_interceptor(bot_secret);
     Server::builder()
-        .layer(tonic::service::interceptor(require_bot_secret))
+        .layer(tonic::service::interceptor(interceptor))
         .accept_http1(true)
         .add_service(tonic_web::enable(
             AdminServiceServer::new(admin)

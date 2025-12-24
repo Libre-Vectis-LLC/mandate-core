@@ -1,6 +1,7 @@
 use crate::ids::{BotSecret, TenantToken};
 use crate::proto::{API_TOKEN_METADATA_KEY, BOT_SECRET_METADATA_KEY};
 use crate::rpc::RpcError;
+use subtle::ConstantTimeEq;
 use tonic::{Request, Status};
 
 /// Enforce presence of `x-api-token` and attach a `TenantToken` to request extensions.
@@ -27,26 +28,57 @@ pub fn require_api_token(mut req: Request<()>) -> Result<Request<()>, Status> {
     Ok(req)
 }
 
+/// Extract bot secret from request metadata.
+#[allow(clippy::result_large_err)]
+fn extract_bot_secret(req: &Request<()>) -> Result<BotSecret, Status> {
+    let secret = req
+        .metadata()
+        .get(BOT_SECRET_METADATA_KEY)
+        .ok_or_else(|| RpcError::Unauthenticated("missing bot secret".into()))?
+        .to_str()
+        .map_err(|_| RpcError::Unauthenticated("bad secret encoding".into()))?;
+
+    if secret.is_empty() {
+        return Err(RpcError::Unauthenticated("empty bot secret".into()).into());
+    }
+
+    Ok(BotSecret::from(secret))
+}
+
 /// Enforce presence of `x-bot-secret` and attach a `BotSecret` to request extensions.
+///
+/// **Warning:** This function only checks presence, not correctness.
+/// Use `make_bot_secret_interceptor` for production deployments.
 #[allow(clippy::result_large_err)]
 pub fn require_bot_secret(mut req: Request<()>) -> Result<Request<()>, Status> {
-    let secret = {
-        let secret = req
-            .metadata()
-            .get(BOT_SECRET_METADATA_KEY)
-            .ok_or_else(|| RpcError::Unauthenticated("missing bot secret".into()))?
-            .to_str()
-            .map_err(|_| RpcError::Unauthenticated("bad secret encoding".into()))?;
-
-        if secret.is_empty() {
-            return Err(RpcError::Unauthenticated("empty bot secret".into()).into());
-        }
-
-        BotSecret::from(secret)
-    };
-
+    let secret = extract_bot_secret(&req)?;
     req.extensions_mut().insert(secret);
     Ok(req)
+}
+
+/// Create an interceptor that validates the bot secret using constant-time comparison.
+///
+/// This is the secure version that should be used in production.
+pub fn make_bot_secret_interceptor(
+    expected: BotSecret,
+) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone + Send + Sync + 'static {
+    move |mut req: Request<()>| {
+        let provided = extract_bot_secret(&req)?;
+
+        // Constant-time comparison to prevent timing attacks
+        let expected_bytes = expected.as_bytes();
+        let provided_bytes = provided.as_bytes();
+
+        // Length check must be done first; ct_eq requires same-length slices
+        if expected_bytes.len() != provided_bytes.len()
+            || !bool::from(expected_bytes.ct_eq(provided_bytes))
+        {
+            return Err(RpcError::Unauthenticated("invalid bot secret".into()).into());
+        }
+
+        req.extensions_mut().insert(provided);
+        Ok(req)
+    }
 }
 
 #[cfg(test)]
@@ -109,5 +141,50 @@ mod tests {
             .cloned()
             .expect("bot secret extension");
         assert_eq!(stored.as_str(), "secret-abc");
+    }
+
+    #[test]
+    fn validated_interceptor_accepts_correct_secret() {
+        let expected = BotSecret::from("correct-secret");
+        let interceptor = make_bot_secret_interceptor(expected);
+
+        let mut req = Request::new(());
+        req.metadata_mut().insert(
+            BOT_SECRET_METADATA_KEY,
+            "correct-secret".parse().expect("metadata value"),
+        );
+
+        let req = interceptor(req).expect("correct secret must pass");
+        let stored = req
+            .extensions()
+            .get::<BotSecret>()
+            .cloned()
+            .expect("bot secret extension");
+        assert_eq!(stored.as_str(), "correct-secret");
+    }
+
+    #[test]
+    fn validated_interceptor_rejects_wrong_secret() {
+        let expected = BotSecret::from("correct-secret");
+        let interceptor = make_bot_secret_interceptor(expected);
+
+        let mut req = Request::new(());
+        req.metadata_mut().insert(
+            BOT_SECRET_METADATA_KEY,
+            "wrong-secret".parse().expect("metadata value"),
+        );
+
+        let err = interceptor(req).expect_err("wrong secret must fail");
+        assert_eq!(err.code(), Code::Unauthenticated);
+    }
+
+    #[test]
+    fn validated_interceptor_rejects_missing_secret() {
+        let expected = BotSecret::from("correct-secret");
+        let interceptor = make_bot_secret_interceptor(expected);
+
+        let req = Request::new(());
+        let err = interceptor(req).expect_err("missing secret must fail");
+        assert_eq!(err.code(), Code::Unauthenticated);
     }
 }
