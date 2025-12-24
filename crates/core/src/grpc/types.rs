@@ -1,10 +1,11 @@
-use crate::event::Event;
+use crate::event::{BanScope, Event};
 use crate::hashing::event_hash_sha3_256;
 use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, TenantId, TenantToken};
 use crate::storage::{
-    BanIndex, EventBytes, EventReader, EventRecord, EventStore, EventWriter, GiftCard,
-    GiftCardStore, GroupMetadataStore, KeyBlobStore, NotFound, PendingMember, PendingMemberStore,
-    RingView, RingWriter, StorageError, TenantTokenError, TenantTokenStore,
+    BanIndex, BannedOperation, EventBytes, EventReader, EventRecord, EventStore, EventWriter,
+    GiftCard, GiftCardStore, GroupMetadataStore, KeyBlobStore, NotFound, PendingMember,
+    PendingMemberStore, RingView, RingWriter, StorageError, TenantTokenError, TenantTokenStore,
+    VoteKeyImageIndex,
 };
 use crate::{
     ids::{RingHash, TenantId as Tenant},
@@ -12,7 +13,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use nazgul::ring::Ring;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
@@ -46,17 +47,43 @@ impl TenantTokenStore for InMemoryTenantTokens {
 }
 
 type InMemoryEventMap = HashMap<(TenantId, GroupId), Vec<EventRecord>>;
+type BanKey = (TenantId, GroupId, [u8; 32]);
+type BanScopeSet = HashSet<BanScope>;
+type BanMap = HashMap<BanKey, BanScopeSet>;
+type VoteKey = (TenantId, GroupId, String, [u8; 32]);
+type VoteKeySet = HashSet<VoteKey>;
 
-#[derive(Clone, Default)]
+fn key_image_bytes(key_image: &KeyImage) -> [u8; 32] {
+    *key_image.compress().as_bytes()
+}
+
+fn ban_scopes_for_operation(operation: BannedOperation) -> &'static [BanScope] {
+    match operation {
+        BannedOperation::PostMessage | BannedOperation::CreatePoll => {
+            // BanPost covers content creation (messages + polls).
+            &[BanScope::BanPost, BanScope::BanAll]
+        }
+        BannedOperation::CastVote => &[BanScope::BanVote, BanScope::BanAll],
+    }
+}
+
+#[derive(Clone)]
 pub struct InMemoryEvents {
     // Keyed by (TenantId, GroupId) for isolation
     events: Arc<Mutex<InMemoryEventMap>>,
+    ban_index: Arc<InMemoryBanIndex>,
+    vote_key_images: Arc<InMemoryVoteKeyImages>,
 }
 
 impl InMemoryEvents {
-    pub fn new() -> Self {
+    pub fn new(
+        ban_index: Arc<InMemoryBanIndex>,
+        vote_key_images: Arc<InMemoryVoteKeyImages>,
+    ) -> Self {
         Self {
             events: Arc::new(Mutex::new(HashMap::new())),
+            ban_index,
+            vote_key_images,
         }
     }
 
@@ -80,9 +107,47 @@ impl EventWriter for InMemoryEvents {
         let hash = event_hash_sha3_256(&event)
             .map_err(|e| StorageError::Backend(format!("hash event: {e}")))?;
         let id = EventId(hash.0);
+        self.apply_indexes(tenant, group_id, &event, id)?;
         let seq = entry.len() as i64;
         entry.push((id, event_bytes, seq));
         Ok((id, seq))
+    }
+}
+
+impl InMemoryEvents {
+    fn apply_indexes(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        event: &Event,
+        event_id: EventId,
+    ) -> Result<(), StorageError> {
+        match &event.event_type {
+            crate::event::EventType::BanCreate(ban) => {
+                if event.signature.is_none() {
+                    return Err(StorageError::PreconditionFailed("missing signature".into()));
+                }
+                self.ban_index
+                    .record_ban(tenant, group_id, ban.target, ban.scope, event_id)?;
+            }
+            crate::event::EventType::BanRevoke(revoke) => {
+                self.ban_index.revoke_ban(revoke.ban_event_id)?;
+            }
+            crate::event::EventType::VoteCast(vote) => {
+                let sig = event
+                    .signature
+                    .as_ref()
+                    .ok_or_else(|| StorageError::PreconditionFailed("missing signature".into()))?;
+                self.vote_key_images.record_vote(
+                    tenant,
+                    group_id,
+                    &vote.poll_id,
+                    sig.key_image(),
+                )?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 
@@ -351,6 +416,166 @@ impl BanIndex for NoopBanIndex {
         _tenant: TenantId,
         _group_id: GroupId,
         _key_image: &KeyImage,
+        _operation: BannedOperation,
+    ) -> Result<bool, StorageError> {
+        Ok(false)
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct InMemoryBanIndex {
+    bans: Arc<Mutex<BanMap>>,
+    ban_events: Arc<Mutex<HashMap<EventId, BanRecord>>>,
+}
+
+#[derive(Clone)]
+struct BanRecord {
+    tenant: TenantId,
+    group_id: GroupId,
+    key_image: [u8; 32],
+    scope: BanScope,
+}
+
+impl InMemoryBanIndex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_ban(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        key_image: KeyImage,
+        scope: BanScope,
+        ban_event_id: EventId,
+    ) -> Result<(), StorageError> {
+        let key_image = key_image_bytes(&key_image);
+        let mut ban_events = self.ban_events.lock().expect("poison-free");
+        if ban_events.contains_key(&ban_event_id) {
+            return Err(StorageError::PreconditionFailed(
+                "ban already recorded".into(),
+            ));
+        }
+        ban_events.insert(
+            ban_event_id,
+            BanRecord {
+                tenant,
+                group_id,
+                key_image,
+                scope,
+            },
+        );
+
+        let mut bans = self.bans.lock().expect("poison-free");
+        let entry = bans.entry((tenant, group_id, key_image)).or_default();
+        if !entry.insert(scope) {
+            return Err(StorageError::PreconditionFailed(
+                "ban already recorded".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn revoke_ban(&self, ban_event_id: EventId) -> Result<(), StorageError> {
+        let mut ban_events = self.ban_events.lock().expect("poison-free");
+        let record = ban_events
+            .remove(&ban_event_id)
+            .ok_or_else(|| StorageError::PreconditionFailed("unknown ban event".into()))?;
+
+        let mut bans = self.bans.lock().expect("poison-free");
+        if let Some(scopes) = bans.get_mut(&(record.tenant, record.group_id, record.key_image)) {
+            scopes.remove(&record.scope);
+            if scopes.is_empty() {
+                bans.remove(&(record.tenant, record.group_id, record.key_image));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl BanIndex for InMemoryBanIndex {
+    async fn is_banned(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        key_image: &KeyImage,
+        operation: BannedOperation,
+    ) -> Result<bool, StorageError> {
+        let key_image = key_image_bytes(key_image);
+        let bans = self.bans.lock().expect("poison-free");
+        let Some(scopes) = bans.get(&(tenant, group_id, key_image)) else {
+            return Ok(false);
+        };
+        let blocked = ban_scopes_for_operation(operation)
+            .iter()
+            .any(|scope| scopes.contains(scope));
+        Ok(blocked)
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct InMemoryVoteKeyImages {
+    used: Arc<Mutex<VoteKeySet>>,
+}
+
+impl InMemoryVoteKeyImages {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_vote(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
+        key_image: KeyImage,
+    ) -> Result<(), StorageError> {
+        let key = (
+            tenant,
+            group_id,
+            poll_id.to_string(),
+            key_image_bytes(&key_image),
+        );
+        let mut used = self.used.lock().expect("poison-free");
+        if !used.insert(key) {
+            return Err(StorageError::PreconditionFailed("vote already cast".into()));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl VoteKeyImageIndex for InMemoryVoteKeyImages {
+    async fn is_used(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
+        key_image: &KeyImage,
+    ) -> Result<bool, StorageError> {
+        let key = (
+            tenant,
+            group_id,
+            poll_id.to_string(),
+            key_image_bytes(key_image),
+        );
+        let used = self.used.lock().expect("poison-free");
+        Ok(used.contains(&key))
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct NoopVoteKeyImages;
+
+#[async_trait]
+impl VoteKeyImageIndex for NoopVoteKeyImages {
+    async fn is_used(
+        &self,
+        _tenant: TenantId,
+        _group_id: GroupId,
+        _poll_id: &str,
+        _key_image: &KeyImage,
     ) -> Result<bool, StorageError> {
         Ok(false)
     }
@@ -497,6 +722,7 @@ mod tests {
     use crate::ids::MasterPublicKey;
     use crate::key_manager::KeyManager;
     use crate::test_utils::TEST_MNEMONIC;
+    use curve25519_dalek::ristretto::RistrettoPoint;
     use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
 
@@ -574,5 +800,74 @@ mod tests {
             .ring_by_hash(tenant, g2, &h)
             .await
             .expect("ring exists for g2 after append");
+    }
+
+    #[tokio::test]
+    async fn ban_index_respects_scope_and_revoke() {
+        let ban_index = InMemoryBanIndex::new();
+        let tenant = TenantId(ulid::Ulid::new());
+        let group = GroupId(ulid::Ulid::new());
+        let key_image = RistrettoPoint::default();
+        let ban_event_id = EventId([42u8; 32]);
+
+        ban_index
+            .record_ban(
+                tenant,
+                group,
+                key_image.clone(),
+                BanScope::BanVote,
+                ban_event_id,
+            )
+            .expect("ban recorded");
+
+        let banned_vote = ban_index
+            .is_banned(tenant, group, &key_image, BannedOperation::CastVote)
+            .await
+            .expect("ban check");
+        assert!(banned_vote);
+
+        let banned_post = ban_index
+            .is_banned(tenant, group, &key_image, BannedOperation::PostMessage)
+            .await
+            .expect("ban check");
+        assert!(!banned_post);
+
+        ban_index.revoke_ban(ban_event_id).expect("ban revoked");
+
+        let banned_after = ban_index
+            .is_banned(tenant, group, &key_image, BannedOperation::CastVote)
+            .await
+            .expect("ban check");
+        assert!(!banned_after);
+    }
+
+    #[tokio::test]
+    async fn vote_key_images_block_duplicates() {
+        let vote_index = InMemoryVoteKeyImages::new();
+        let tenant = TenantId(ulid::Ulid::new());
+        let group = GroupId(ulid::Ulid::new());
+        let key_image = RistrettoPoint::default();
+        let poll_id = "poll-1";
+
+        let used = vote_index
+            .is_used(tenant, group, poll_id, &key_image)
+            .await
+            .expect("check");
+        assert!(!used);
+
+        vote_index
+            .record_vote(tenant, group, poll_id, key_image.clone())
+            .expect("record vote");
+
+        let used = vote_index
+            .is_used(tenant, group, poll_id, &key_image)
+            .await
+            .expect("check");
+        assert!(used);
+
+        let err = vote_index
+            .record_vote(tenant, group, poll_id, key_image)
+            .expect_err("duplicate vote");
+        assert!(matches!(err, StorageError::PreconditionFailed(_)));
     }
 }

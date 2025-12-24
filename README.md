@@ -15,6 +15,10 @@ Mandate core provides audit-first primitives (hashing, signing, key derivation, 
 - Single-writer append per tenant; deterministic keyset pagination for readers. No optimistic tokens are needed because the writer is serialized; readers stream in order.
 - Rings are reconstructed from deltas via shortest-path replay; storage traits stay zero-copy (`Arc<[u8]>`).
 
+## Ban & Anti-Replay Indices
+- `BanIndex` answers whether a key image is banned for a specific operation (`PostMessage`, `CreatePoll`, `CastVote`) based on `BanScope`.
+- `VoteKeyImageIndex` tracks `(tenant, group_id, poll_id, key_image)` reuse to prevent double voting; writers should update it atomically with event append.
+
 ## Multi-Group Invariants
 - The external API boundary is `(tenant token, group_id)`: every RPC that reads or mutates group state must take a `group_id` and must never mix state across groups.
 - Rings are per group. Two groups may have identical membership sets (and therefore the same ring hash), but they are still distinct groups.

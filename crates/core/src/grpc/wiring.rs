@@ -4,8 +4,8 @@ use crate::grpc::services::{
     MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
 };
 use crate::grpc::types::{
-    InMemoryEvents, InMemoryGiftCards, InMemoryGroups, InMemoryKeyBlobs, InMemoryPendingMembers,
-    InMemoryRings, InMemoryTenantTokens, NoopBanIndex,
+    InMemoryBanIndex, InMemoryEvents, InMemoryGiftCards, InMemoryGroups, InMemoryKeyBlobs,
+    InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens, InMemoryVoteKeyImages,
 };
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
@@ -44,10 +44,14 @@ pub struct CoreServices {
 impl CoreServices {
     pub fn new_in_memory() -> Self {
         let tenant_tokens = Arc::new(InMemoryTenantTokens::new());
-        let events = Arc::new(InMemoryEvents::new());
+        let ban_index = Arc::new(InMemoryBanIndex::new());
+        let vote_key_images = Arc::new(InMemoryVoteKeyImages::new());
+        let events = Arc::new(InMemoryEvents::new(
+            ban_index.clone(),
+            vote_key_images.clone(),
+        ));
         let key_blobs = Arc::new(InMemoryKeyBlobs::new());
         let rings = Arc::new(InMemoryRings::new());
-        let ban_index = Arc::new(NoopBanIndex);
         let gift_cards = Arc::new(InMemoryGiftCards::new());
         let groups = Arc::new(InMemoryGroups::new());
         let pending_members = Arc::new(InMemoryPendingMembers::new());
@@ -61,6 +65,7 @@ impl CoreServices {
             rings.clone(), // view
             rings,         // writer
             ban_index,
+            vote_key_images,
             gift_cards,
             groups,
             pending_members,

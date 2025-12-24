@@ -5,7 +5,7 @@ use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
-use crate::storage::{RingView, TenantTokenError, TenantTokenStore};
+use crate::storage::{BannedOperation, RingView, TenantTokenError, TenantTokenStore};
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminService, auth_service_server::AuthService,
     billing_service_server::BillingService, event_service_server::EventService,
@@ -52,6 +52,15 @@ fn keyblobs_max_count() -> usize {
 
 fn keyblobs_max_blob_bytes() -> usize {
     env_usize("MANDATE_GRPC_KEYBLOBS_MAX_BLOB_BYTES", 64 * 1024)
+}
+
+fn banned_operation_for_event(event_type: &crate::event::EventType) -> Option<BannedOperation> {
+    match event_type {
+        crate::event::EventType::MessageCreate(_) => Some(BannedOperation::PostMessage),
+        crate::event::EventType::PollCreate(_) => Some(BannedOperation::CreatePoll),
+        crate::event::EventType::VoteCast(_) => Some(BannedOperation::CastVote),
+        _ => None,
+    }
 }
 
 fn clamp_events_limit(client_limit: u32) -> usize {
@@ -174,92 +183,99 @@ impl EventService for EventServiceImpl {
             Err(e) => return Err(to_status(e)),
         }
 
-        // 2. Check Ban Index
-        if let Some(sig) = &event.signature {
-            let key_image = sig.key_image();
+        let sig = event
+            .signature
+            .as_ref()
+            .ok_or_else(|| RpcError::Unauthenticated("missing signature".into()))?;
+        let key_image = sig.key_image();
+
+        // 2. Cheap checks (anti-replay, bans)
+        if let crate::event::EventType::VoteCast(vote) = &event.event_type {
+            let used = self
+                .store
+                .vote_key_images
+                .is_used(tenant, event.group_id, &vote.poll_id, &key_image)
+                .await
+                .map_err(to_status)?;
+            if used {
+                return Err(RpcError::FailedPrecondition("vote already cast".into()).into());
+            }
+        }
+
+        if let Some(operation) = banned_operation_for_event(&event.event_type) {
             let banned = self
                 .store
                 .ban_index
-                .is_banned(tenant, event.group_id, &key_image)
+                .is_banned(tenant, event.group_id, &key_image, operation)
                 .await
                 .map_err(to_status)?;
             if banned {
-                return Err(
-                    RpcError::FailedPrecondition("double spend: key image banned".into()).into(),
-                );
+                return Err(RpcError::FailedPrecondition("key image banned".into()).into());
             }
         }
 
         // 3. Verify Signature
         // Load ring if needed (Compact signature)
-        let external_ring = if let Some(sig) = &event.signature {
-            match sig.mode() {
-                crate::crypto::signature::StorageMode::Compact => {
-                    // Extract ring hash from event body.
-                    // We need to inspect event_type to get ring_hash.
-                    // This is slightly brittle if event structure changes, but for now:
-                    let ring_hash = match &event.event_type {
-                        crate::event::EventType::PollCreate(p) => p.ring_hash,
-                        crate::event::EventType::VoteCast(v) => v.ring_hash,
-                        crate::event::EventType::MessageCreate(m) => m.ring_hash,
-                        crate::event::EventType::RingUpdate(r) => r.ring_hash,
-                        crate::event::EventType::BanCreate(_b) => {
-                            // BanCreate doesn't have ring_hash in struct?
-                            // Let's check struct definition.
-                            // It seems BanCreate/BanRevoke/ProofOfInnocence might miss it in my memory model.
-                            // Assume all authenticated events have it or we fail.
-                            // Actually, if BanCreate is signed by admin (owner), does it use ring?
-                            // Yes, owner is in ring.
-                            // If field is missing, we can't verify compact sig.
-                            return Err(RpcError::InvalidArgument(
-                                "event type missing ring_hash for compact sig".into(),
-                            )
-                            .into());
-                        }
-                        _ => {
-                            return Err(RpcError::InvalidArgument(
-                                "event type missing ring_hash for compact sig".into(),
-                            )
-                            .into())
-                        }
-                    };
+        let external_ring = match sig.mode() {
+            crate::crypto::signature::StorageMode::Compact => {
+                // Extract ring hash from event body.
+                // We need to inspect event_type to get ring_hash.
+                // This is slightly brittle if event structure changes, but for now:
+                let ring_hash = match &event.event_type {
+                    crate::event::EventType::PollCreate(p) => p.ring_hash,
+                    crate::event::EventType::VoteCast(v) => v.ring_hash,
+                    crate::event::EventType::MessageCreate(m) => m.ring_hash,
+                    crate::event::EventType::RingUpdate(r) => r.ring_hash,
+                    crate::event::EventType::BanCreate(_b) => {
+                        // BanCreate doesn't have ring_hash in struct?
+                        // Let's check struct definition.
+                        // It seems BanCreate/BanRevoke/ProofOfInnocence might miss it in my memory model.
+                        // Assume all authenticated events have it or we fail.
+                        // Actually, if BanCreate is signed by admin (owner), does it use ring?
+                        // Yes, owner is in ring.
+                        // If field is missing, we can't verify compact sig.
+                        return Err(RpcError::InvalidArgument(
+                            "event type missing ring_hash for compact sig".into(),
+                        )
+                        .into());
+                    }
+                    _ => {
+                        return Err(RpcError::InvalidArgument(
+                            "event type missing ring_hash for compact sig".into(),
+                        )
+                        .into())
+                    }
+                };
 
-                    Some(
-                        self.store
-                            .ring_view
-                            .ring_by_hash(tenant, event.group_id, &ring_hash)
-                            .await
-                            .map_err(to_status)?,
-                    )
-                }
-                crate::crypto::signature::StorageMode::Archival => None,
+                Some(
+                    self.store
+                        .ring_view
+                        .ring_by_hash(tenant, event.group_id, &ring_hash)
+                        .await
+                        .map_err(to_status)?,
+                )
             }
-        } else {
-            // No signature? Allowed only for special unsigned events?
-            // Current protocol requires signatures for everything pushed by clients.
-            return Err(RpcError::Unauthenticated("missing signature".into()).into());
+            crate::crypto::signature::StorageMode::Archival => None,
         };
 
-        if let Some(sig) = &event.signature {
-            let signed_msg = event
-                .to_signing_bytes()
-                .map_err(|e| RpcError::Internal(format!("canonical serialization failed: {e}")))?;
+        let signed_msg = event
+            .to_signing_bytes()
+            .map_err(|e| RpcError::Internal(format!("canonical serialization failed: {e}")))?;
 
-            let item = crate::crypto::verifier::SignatureItem {
-                signature: sig.clone(),
-                message: signed_msg,
-                weight: 1,
-                external_ring,
-            };
+        let item = crate::crypto::verifier::SignatureItem {
+            signature: sig.clone(),
+            message: signed_msg,
+            weight: 1,
+            external_ring,
+        };
 
-            let results = self
-                .verifier
-                .verify_batch(&[item])
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            if !results[0] {
-                return Err(RpcError::Unauthenticated("invalid signature".into()).into());
-            }
+        let results = self
+            .verifier
+            .verify_batch(&[item])
+            .await
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        if !results[0] {
+            return Err(RpcError::Unauthenticated("invalid signature".into()).into());
         }
 
         // 4. Commit

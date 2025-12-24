@@ -142,7 +142,7 @@ pub struct BanCreate {
     pub scope: BanScope,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum BanScope {
     BanPost,
     BanVote,

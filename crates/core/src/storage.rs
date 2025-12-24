@@ -215,14 +215,39 @@ pub trait RingWriter {
     ) -> Result<RingHash, StorageError>;
 }
 
+/// Operation categories enforced by ban scopes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BannedOperation {
+    /// Message creation and other content posts.
+    PostMessage,
+    /// Vote casting within a poll.
+    CastVote,
+    /// Poll creation (treated as a content post for bans).
+    CreatePoll,
+}
+
 /// Optional ban index for fast key-image checks.
 #[async_trait]
 pub trait BanIndex {
-    /// Return whether `key_image` is currently banned for `group_id`.
+    /// Return whether `key_image` is currently banned for `group_id` and operation.
     async fn is_banned(
         &self,
         tenant: TenantId,
         group_id: GroupId,
+        key_image: &KeyImage,
+        operation: BannedOperation,
+    ) -> Result<bool, StorageError>;
+}
+
+/// Index to prevent vote key-image reuse within a poll.
+#[async_trait]
+pub trait VoteKeyImageIndex {
+    /// Return whether `key_image` has already been used for `poll_id`.
+    async fn is_used(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
         key_image: &KeyImage,
     ) -> Result<bool, StorageError>;
 }
