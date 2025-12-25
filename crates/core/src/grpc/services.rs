@@ -227,25 +227,9 @@ impl EventService for EventServiceImpl {
                     crate::event::EventType::VoteCast(v) => v.ring_hash,
                     crate::event::EventType::MessageCreate(m) => m.ring_hash,
                     crate::event::EventType::RingUpdate(r) => r.ring_hash,
-                    crate::event::EventType::BanCreate(_b) => {
-                        // BanCreate doesn't have ring_hash in struct?
-                        // Let's check struct definition.
-                        // It seems BanCreate/BanRevoke/ProofOfInnocence might miss it in my memory model.
-                        // Assume all authenticated events have it or we fail.
-                        // Actually, if BanCreate is signed by admin (owner), does it use ring?
-                        // Yes, owner is in ring.
-                        // If field is missing, we can't verify compact sig.
-                        return Err(RpcError::InvalidArgument(
-                            "event type missing ring_hash for compact sig".into(),
-                        )
-                        .into());
-                    }
-                    _ => {
-                        return Err(RpcError::InvalidArgument(
-                            "event type missing ring_hash for compact sig".into(),
-                        )
-                        .into())
-                    }
+                    crate::event::EventType::BanCreate(b) => b.ring_hash,
+                    crate::event::EventType::BanRevoke(b) => b.ring_hash,
+                    crate::event::EventType::ProofOfInnocence(p) => p.historical_ring_hash,
                 };
 
                 Some(

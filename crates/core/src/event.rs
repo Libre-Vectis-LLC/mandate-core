@@ -137,6 +137,7 @@ pub enum RingOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BanCreate {
     pub group_id: GroupId,
+    pub ring_hash: RingHash,
     pub target: KeyImage,
     pub reason: String,
     pub scope: BanScope,
@@ -152,6 +153,7 @@ pub enum BanScope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BanRevoke {
     pub group_id: GroupId,
+    pub ring_hash: RingHash,
     pub ban_event_id: EventId,
 }
 
