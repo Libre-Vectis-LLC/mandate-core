@@ -2,7 +2,7 @@ use crate::event::Event;
 use crate::ids::{GroupId, RingHash, TenantId};
 use crate::proto::ring_delta_to_bytes;
 use crate::proto::API_TOKEN_METADATA_KEY;
-use crate::ring_log::apply_delta;
+use crate::ring_log::{apply_delta, RingDelta};
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use crate::storage::{BannedOperation, RingView, TenantTokenError, TenantTokenStore};
@@ -277,6 +277,49 @@ impl EventService for EventServiceImpl {
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         if !results[0] {
             return Err(RpcError::Unauthenticated("invalid signature".into()).into());
+        }
+
+        if let crate::event::EventType::RingUpdate(update) = &event.event_type {
+            let current_ring = self
+                .store
+                .ring_view
+                .current_ring(tenant, event.group_id)
+                .await
+                .map_err(to_status)?;
+            let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
+            if current_hash != update.ring_hash {
+                return Err(RpcError::FailedPrecondition("ring hash mismatch".into()).into());
+            }
+
+            let mut validation_ring = (*current_ring).clone();
+            for operation in &update.operations {
+                let delta = match operation {
+                    crate::event::RingOperation::AddMember { public_key } => {
+                        RingDelta::Add(*public_key)
+                    }
+                    crate::event::RingOperation::RemoveMember { public_key } => {
+                        RingDelta::Remove(*public_key)
+                    }
+                };
+                apply_delta(&mut validation_ring, &delta)
+                    .map_err(|e| RpcError::FailedPrecondition(e.to_string()))?;
+            }
+
+            for operation in &update.operations {
+                let delta = match operation {
+                    crate::event::RingOperation::AddMember { public_key } => {
+                        RingDelta::Add(*public_key)
+                    }
+                    crate::event::RingOperation::RemoveMember { public_key } => {
+                        RingDelta::Remove(*public_key)
+                    }
+                };
+                self.store
+                    .ring_writer
+                    .append_delta(tenant, event.group_id, delta)
+                    .await
+                    .map_err(to_status)?;
+            }
         }
 
         // 4. Commit
