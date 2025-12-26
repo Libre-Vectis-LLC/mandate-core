@@ -8,7 +8,7 @@ use crate::grpc::types::{
     InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens,
     InMemoryVoteKeyImages,
 };
-use crate::ids::BotSecret;
+use crate::ids::{BotSecret, TenantId, TenantToken};
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
@@ -44,8 +44,20 @@ pub struct CoreServices {
 }
 
 impl CoreServices {
+    /// Create in-memory services with no pre-registered tokens.
     pub fn new_in_memory() -> Self {
+        Self::new_in_memory_with_seed(None)
+    }
+
+    /// Create in-memory services with an optional seed token.
+    ///
+    /// Useful for E2E testing where a pre-registered API token is needed
+    /// (e.g., for edge proxy authentication).
+    pub fn new_in_memory_with_seed(seed: Option<(TenantToken, TenantId)>) -> Self {
         let tenant_tokens = Arc::new(InMemoryTenantTokens::new());
+        if let Some((token, tenant)) = seed {
+            tenant_tokens.insert(token, tenant);
+        }
         let ban_index = Arc::new(InMemoryBanIndex::new());
         let vote_key_images = Arc::new(InMemoryVoteKeyImages::new());
         let pending_members = Arc::new(InMemoryPendingMembers::new());
