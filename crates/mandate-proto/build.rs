@@ -15,11 +15,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let grpc_client_feature = std::env::var("CARGO_FEATURE_GRPC_CLIENT").is_ok();
+
     let mut config = tonic_build::configure();
-    // Avoid generating transport-dependent clients/servers for wasm builds to keep
-    // mandate-core compilable on `wasm32-unknown-unknown`.
+
+    // For WASM builds:
+    // - Never generate servers (no server runtime on WASM)
+    // - Only generate clients if `grpc-client` feature is enabled
+    // - Disable transport code generation (no tonic::transport on WASM)
+    //
+    // For native builds:
+    // - Always generate both servers and clients with transport
     if target_arch == "wasm32" {
-        config = config.build_server(false).build_client(false);
+        config = config
+            .build_server(false)
+            .build_client(grpc_client_feature)
+            .build_transport(false); // Disable transport::Channel connect methods for WASM
     } else {
         config = config.build_server(true).build_client(true);
     }

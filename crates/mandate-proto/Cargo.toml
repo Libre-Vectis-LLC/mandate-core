@@ -3,6 +3,11 @@ name = "mandate-proto"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# Generate gRPC client stubs (for WASM clients using grpc-web)
+grpc-client = []
+
 [dependencies]
 tonic.workspace = true
 prost.workspace = true
