@@ -225,6 +225,30 @@ pub fn derive_poll_identity(shared_secret: &[u8; 32], poll_event_ulid: &EventUli
     id
 }
 
+/// Derive the raw 32-byte poll key bytes for external audit purposes.
+///
+/// This returns the same key material used by [`derive_poll_identity`], but as raw bytes
+/// instead of a RageIdentity. This allows auditors to decrypt a specific poll and its
+/// votes without needing K_shared (which would allow decryption of ALL group data).
+///
+/// # Security
+///
+/// The returned key should be treated as sensitive and zeroized after use.
+/// Consider using [`zeroize::Zeroize`] on the returned array when done.
+///
+/// # Example
+///
+/// ```ignore
+/// let k_poll = derive_poll_key_bytes(&k_shared, &poll_event_ulid);
+/// let k_poll_hex = hex::encode(&k_poll);
+/// // Share k_poll_hex with auditor
+/// k_poll.zeroize();
+/// ```
+pub fn derive_poll_key_bytes(shared_secret: &[u8; 32], poll_event_ulid: &EventUlid) -> [u8; 32] {
+    let info = info(LABEL_POLL_KEY, &[&poll_event_ulid.to_bytes()]);
+    KdfAlgorithm::Sha3_256.expand::<32>(shared_secret, &info)
+}
+
 /// Encrypt the group-shared secret for a specific recipient (one bucket per person).
 pub fn encrypt_shared_secret_for_recipient(
     shared_secret: &[u8; 32],
@@ -419,6 +443,23 @@ mod tests {
             k_poll.to_public().to_string(),
             vote_cast.to_public().to_string(),
             "PollCreate and VoteCast must reuse the same poll-scoped key"
+        );
+    }
+
+    #[test]
+    fn poll_key_bytes_matches_identity() {
+        let shared_secret = [9u8; 32];
+        let poll_ulid = eid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        // Derive using identity method
+        let k_poll_identity = derive_poll_identity(&shared_secret, &poll_ulid);
+        // Derive using raw bytes method
+        let k_poll_bytes = derive_poll_key_bytes(&shared_secret, &poll_ulid);
+        // Create identity from raw bytes
+        let k_poll_from_bytes = RageIdentity::from_secret_bytes(k_poll_bytes);
+        assert_eq!(
+            k_poll_identity.to_public().to_string(),
+            k_poll_from_bytes.to_public().to_string(),
+            "derive_poll_key_bytes must produce same key as derive_poll_identity"
         );
     }
 
