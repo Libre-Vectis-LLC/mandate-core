@@ -5,7 +5,7 @@ use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::{apply_delta, RingDelta};
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
-use crate::storage::{BannedOperation, RingView, TenantTokenError, TenantTokenStore};
+use crate::storage::{BannedOperation, TenantTokenError};
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminService, auth_service_server::AuthService,
     billing_service_server::BillingService, event_service_server::EventService,
@@ -119,14 +119,14 @@ fn to_status_token(err: TenantTokenError) -> Status {
 #[allow(clippy::result_large_err)]
 async fn extract_tenant_id<T>(
     req: &Request<T>,
-    tokens: &(impl TenantTokenStore + ?Sized),
+    store: &StorageFacade,
 ) -> Result<crate::ids::TenantId, Status> {
     if let Some(tenant) = req.extensions().get::<crate::ids::TenantId>() {
         return Ok(*tenant);
     }
 
     let token = extract_tenant_token(req)?;
-    tokens.resolve_tenant(&token).await.map_err(to_status_token)
+    store.resolve_tenant(&token).await.map_err(to_status_token)
 }
 
 /// Basic EventService stub wired to EventStore.
@@ -151,7 +151,7 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<PushEventRequest>,
     ) -> Result<Response<PushEventResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
         if event_bytes.len() > max_event_bytes() {
@@ -161,7 +161,7 @@ impl EventService for EventServiceImpl {
             .map_err(|e| RpcError::InvalidArgument(format!("invalid event payload: {e}")))?;
 
         // 1. Verify Chain Hash
-        match self.store.event_reader.tail(tenant, event.group_id).await {
+        match self.store.event_tail(tenant, event.group_id).await {
             Ok((tail_id, _, _)) => {
                 let tail_hash = crate::ids::ContentHash(tail_id.0);
                 if event.previous_event_hash.0 != tail_hash.0 {
@@ -194,8 +194,7 @@ impl EventService for EventServiceImpl {
         if let crate::event::EventType::VoteCast(vote) = &event.event_type {
             let used = self
                 .store
-                .vote_key_images
-                .is_used(tenant, event.group_id, &vote.poll_id, &key_image)
+                .is_vote_key_image_used(tenant, event.group_id, &vote.poll_id, &key_image)
                 .await
                 .map_err(to_status)?;
             if used {
@@ -206,7 +205,6 @@ impl EventService for EventServiceImpl {
         if let Some(operation) = banned_operation_for_event(&event.event_type) {
             let banned = self
                 .store
-                .ban_index
                 .is_banned(tenant, event.group_id, &key_image, operation)
                 .await
                 .map_err(to_status)?;
@@ -234,7 +232,6 @@ impl EventService for EventServiceImpl {
 
                 Some(
                     self.store
-                        .ring_view
                         .ring_by_hash(tenant, event.group_id, &ring_hash)
                         .await
                         .map_err(to_status)?,
@@ -266,7 +263,6 @@ impl EventService for EventServiceImpl {
         if let crate::event::EventType::RingUpdate(update) = &event.event_type {
             let current_ring = self
                 .store
-                .ring_view
                 .current_ring(tenant, event.group_id)
                 .await
                 .map_err(to_status)?;
@@ -299,8 +295,7 @@ impl EventService for EventServiceImpl {
                     }
                 };
                 self.store
-                    .ring_writer
-                    .append_delta(tenant, event.group_id, delta)
+                    .append_ring_delta(tenant, event.group_id, delta)
                     .await
                     .map_err(to_status)?;
             }
@@ -309,8 +304,7 @@ impl EventService for EventServiceImpl {
         // 4. Commit
         let id = self
             .store
-            .event_writer
-            .append(tenant, event.group_id, event_bytes.clone())
+            .append_event(tenant, event.group_id, event_bytes.clone())
             .await
             .map_err(to_status)?;
 
@@ -329,7 +323,7 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<StreamEventsRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -343,8 +337,7 @@ impl EventService for EventServiceImpl {
         let limit = clamp_events_limit(body.limit);
         let records = self
             .store
-            .event_reader
-            .stream_group(tenant, group_id, cursor, limit)
+            .stream_events(tenant, group_id, cursor, limit)
             .await
             .map_err(to_status)?;
 
@@ -378,7 +371,7 @@ impl RingService for RingServiceImpl {
         &self,
         request: Request<GetRingHeadRequest>,
     ) -> Result<Response<GetRingHeadResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let group = request.into_inner().group_id;
         let group_id = GroupId(
             crate::proto::parse_ulid(&group)
@@ -388,7 +381,6 @@ impl RingService for RingServiceImpl {
         // Current ring for the requested group.
         let ring = self
             .store
-            .ring_view
             .current_ring(tenant, group_id)
             .await
             .map_err(to_status)?;
@@ -411,7 +403,7 @@ impl RingService for RingServiceImpl {
         &self,
         request: Request<StreamRingRequest>,
     ) -> Result<Response<Self::StreamRingStream>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let req = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&req.group_id)
@@ -432,7 +424,6 @@ impl RingService for RingServiceImpl {
         // For now, stream a single batch from optional anchor to current ring head.
         let current_ring = self
             .store
-            .ring_view
             .current_ring(tenant, group_id)
             .await
             .map_err(to_status)?;
@@ -451,13 +442,12 @@ impl RingService for RingServiceImpl {
 
         let path = self
             .store
-            .ring_view
             .ring_delta_path(tenant, group_id, after_hash, current_hash)
             .await
             .map_err(to_status)?;
 
         let entries = encode_ring_delta_path(
-            &*self.store.ring_view,
+            &self.store,
             tenant,
             group_id,
             &path,
@@ -481,13 +471,13 @@ impl RingService for RingServiceImpl {
 
 #[allow(clippy::result_large_err)]
 async fn encode_ring_delta_path(
-    rings: &(impl RingView + ?Sized),
+    store: &StorageFacade,
     tenant: crate::ids::TenantId,
     group_id: GroupId,
     path: &crate::storage::RingDeltaPath,
     limit: usize,
 ) -> Result<Vec<mandate_proto::mandate::v1::RingDeltaEntry>, Status> {
-    let anchor = rings
+    let anchor = store
         .ring_by_hash(tenant, group_id, &path.from)
         .await
         .map_err(to_status)?;
@@ -531,8 +521,7 @@ impl AdminService for AdminServiceImpl {
         let body = request.into_inner();
         let card = self
             .store
-            .gift_cards
-            .issue(body.amount_nanos)
+            .issue_gift_card(body.amount_nanos)
             .await
             .map_err(to_status)?;
         Ok(Response::new(IssueGiftCardResponse { code: card.code }))
@@ -562,14 +551,12 @@ impl AuthService for AuthServiceImpl {
 
         let card = self
             .store
-            .gift_cards
-            .redeem(&body.code, tenant_id)
+            .redeem_gift_card(&body.code, tenant_id)
             .await
             .map_err(to_status)?;
 
         let new_balance = self
             .store
-            .billing
             .credit_tenant(tenant_id, &body.tg_user_id, card.amount_nanos)
             .await
             .map_err(to_status)?;
@@ -580,8 +567,7 @@ impl AuthService for AuthServiceImpl {
         let token_str = format!("token-{}", hex::encode(token_bytes));
         let token = crate::ids::TenantToken::from(token_str.clone());
         self.store
-            .tenant_tokens
-            .insert(&token, tenant_id)
+            .insert_tenant_token(&token, tenant_id)
             .await
             .map_err(to_status)?;
 
@@ -627,7 +613,6 @@ impl BillingService for BillingServiceImpl {
             .map_err(|_| RpcError::InvalidArgument("amount_nanos too large".into()))?;
         let balance = self
             .store
-            .billing
             .transfer_to_group(tenant_id, group_id, amount)
             .await
             .map_err(to_status)?;
@@ -647,7 +632,6 @@ impl BillingService for BillingServiceImpl {
         );
         let balance = self
             .store
-            .billing
             .get_group_balance(group_id)
             .await
             .map_err(to_status)?;
@@ -694,7 +678,6 @@ impl GroupService for GroupServiceImpl {
 
         let group_id = self
             .store
-            .groups
             .create_group(authenticated_tenant, &body.tg_group_id)
             .await
             .map_err(to_status)?;
@@ -721,12 +704,7 @@ impl GroupService for GroupServiceImpl {
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        let (group_tenant, _) = self
-            .store
-            .groups
-            .get_group(group_id)
-            .await
-            .map_err(to_status)?;
+        let (group_tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
 
         // Authorization check: verify authenticated tenant owns the group
         if authenticated_tenant != group_tenant {
@@ -742,7 +720,7 @@ impl GroupService for GroupServiceImpl {
         let owner_pubkey = crate::proto::nazgul_pub_from_proto(owner_pubkey)
             .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
 
-        match self.store.ring_view.current_ring(tenant, group_id).await {
+        match self.store.current_ring(tenant, group_id).await {
             Ok(ring) => {
                 let is_idempotent = ring.members().len() == 1
                     && ring
@@ -762,8 +740,7 @@ impl GroupService for GroupServiceImpl {
         }
 
         self.store
-            .ring_writer
-            .append_delta(
+            .append_ring_delta(
                 tenant,
                 group_id,
                 crate::ring_log::RingDelta::Add(owner_pubkey),
@@ -805,12 +782,7 @@ impl MemberService for MemberServiceImpl {
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        let (tenant, _) = self
-            .store
-            .groups
-            .get_group(group_id)
-            .await
-            .map_err(to_status)?;
+        let (tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
 
         let nazgul_pub = body
             .nazgul_pub
@@ -828,8 +800,7 @@ impl MemberService for MemberServiceImpl {
 
         let pending_id = self
             .store
-            .pending_members
-            .submit(tenant, group_id, &body.tg_user_id, nazgul_pub, rage_pub)
+            .submit_pending_member(tenant, group_id, &body.tg_user_id, nazgul_pub, rage_pub)
             .await
             .map_err(to_status)?;
 
@@ -840,27 +811,21 @@ impl MemberService for MemberServiceImpl {
         &self,
         request: Request<ListPendingMembersRequest>,
     ) -> Result<Response<ListPendingMembersResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
                 .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
         );
 
-        let (group_tenant, _) = self
-            .store
-            .groups
-            .get_group(group_id)
-            .await
-            .map_err(to_status)?;
+        let (group_tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
         if group_tenant != tenant {
             return Err(RpcError::NotFound("group not found".into()).into());
         }
 
         let (members, _next_page) = self
             .store
-            .pending_members
-            .list(tenant, group_id, clamp_events_limit(body.limit), None)
+            .list_pending_members(tenant, group_id, clamp_events_limit(body.limit), None)
             .await
             .map_err(to_status)?;
 
@@ -901,7 +866,7 @@ impl StorageService for StorageServiceImpl {
         &self,
         request: Request<UploadKeyBlobsRequest>,
     ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -928,8 +893,7 @@ impl StorageService for StorageServiceImpl {
         }
 
         self.store
-            .key_blobs
-            .put_many(tenant, group_id, entries)
+            .put_key_blobs(tenant, group_id, entries)
             .await
             .map_err(to_status)?;
         Ok(Response::new(UploadKeyBlobsResponse {}))
@@ -939,7 +903,7 @@ impl StorageService for StorageServiceImpl {
         &self,
         request: Request<DownloadMyKeyBlobRequest>,
     ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
-        let tenant = extract_tenant_id(&request, &*self.store.tenant_tokens).await?;
+        let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
         let group_id = GroupId(
             crate::proto::parse_ulid(&body.group_id)
@@ -954,8 +918,7 @@ impl StorageService for StorageServiceImpl {
 
         let blob = self
             .store
-            .key_blobs
-            .get_one(tenant, group_id, rage_pub)
+            .get_key_blob(tenant, group_id, rage_pub)
             .await
             .map_err(to_status)?;
 
