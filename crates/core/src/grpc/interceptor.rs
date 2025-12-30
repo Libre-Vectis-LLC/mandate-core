@@ -14,12 +14,22 @@ pub fn require_api_token(mut req: Request<()>) -> Result<Request<()>, Status> {
         let token = req
             .metadata()
             .get(API_TOKEN_METADATA_KEY)
-            .ok_or_else(|| RpcError::Unauthenticated("missing api token".into()))?
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "api_token",
+                reason: "missing".into(),
+            })?
             .to_str()
-            .map_err(|_| RpcError::Unauthenticated("bad token".into()))?;
+            .map_err(|_| RpcError::Unauthenticated {
+                credential: "api_token",
+                reason: "bad encoding".into(),
+            })?;
 
         if token.is_empty() {
-            return Err(RpcError::Unauthenticated("empty api token".into()).into());
+            return Err(RpcError::Unauthenticated {
+                credential: "api_token",
+                reason: "empty".into(),
+            }
+            .into());
         }
 
         TenantToken::from(token)
@@ -35,12 +45,22 @@ fn extract_bot_secret(req: &Request<()>) -> Result<BotSecret, Status> {
     let secret = req
         .metadata()
         .get(BOT_SECRET_METADATA_KEY)
-        .ok_or_else(|| RpcError::Unauthenticated("missing bot secret".into()))?
+        .ok_or_else(|| RpcError::Unauthenticated {
+            credential: "bot_secret",
+            reason: "missing".into(),
+        })?
         .to_str()
-        .map_err(|_| RpcError::Unauthenticated("bad secret encoding".into()))?;
+        .map_err(|_| RpcError::Unauthenticated {
+            credential: "bot_secret",
+            reason: "bad encoding".into(),
+        })?;
 
     if secret.is_empty() {
-        return Err(RpcError::Unauthenticated("empty bot secret".into()).into());
+        return Err(RpcError::Unauthenticated {
+            credential: "bot_secret",
+            reason: "empty".into(),
+        }
+        .into());
     }
 
     Ok(BotSecret::from(secret))
@@ -52,16 +72,28 @@ fn extract_tenant_id(req: &Request<()>) -> Result<TenantId, Status> {
     let tenant_str = req
         .metadata()
         .get(TENANT_ID_METADATA_KEY)
-        .ok_or_else(|| RpcError::Unauthenticated("missing tenant context".into()))?
+        .ok_or_else(|| RpcError::Unauthenticated {
+            credential: "tenant_id",
+            reason: "missing".into(),
+        })?
         .to_str()
-        .map_err(|_| RpcError::Unauthenticated("bad tenant id encoding".into()))?;
+        .map_err(|_| RpcError::Unauthenticated {
+            credential: "tenant_id",
+            reason: "bad encoding".into(),
+        })?;
 
     if tenant_str.is_empty() {
-        return Err(RpcError::Unauthenticated("empty tenant id".into()).into());
+        return Err(RpcError::Unauthenticated {
+            credential: "tenant_id",
+            reason: "empty".into(),
+        }
+        .into());
     }
 
-    let ulid = Ulid::from_string(tenant_str)
-        .map_err(|_| RpcError::InvalidArgument("invalid tenant id format".into()))?;
+    let ulid = Ulid::from_string(tenant_str).map_err(|_| RpcError::InvalidArgument {
+        field: "tenant_id",
+        reason: "invalid ULID format".into(),
+    })?;
 
     Ok(TenantId(ulid))
 }
@@ -104,7 +136,11 @@ pub fn make_bot_secret_interceptor(
         if expected_bytes.len() != provided_bytes.len()
             || !bool::from(expected_bytes.ct_eq(provided_bytes))
         {
-            return Err(RpcError::Unauthenticated("invalid bot secret".into()).into());
+            return Err(RpcError::Unauthenticated {
+                credential: "bot_secret",
+                reason: "invalid".into(),
+            }
+            .into());
         }
 
         req.extensions_mut().insert(provided);

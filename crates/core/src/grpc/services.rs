@@ -78,14 +78,26 @@ fn clamp_ring_limit(client_limit: u32) -> usize {
 
 fn to_status(err: crate::storage::StorageError) -> Status {
     match err {
-        crate::storage::StorageError::NotFound(_) => RpcError::NotFound(err.to_string()).into(),
-        crate::storage::StorageError::Backend(msg) => RpcError::Internal(msg).into(),
-        crate::storage::StorageError::AlreadyExists => {
-            RpcError::AlreadyExists("resource exists".into()).into()
+        crate::storage::StorageError::NotFound(not_found) => RpcError::NotFound {
+            resource: "storage_item",
+            id: not_found.to_string(),
         }
-        crate::storage::StorageError::PreconditionFailed(msg) => {
-            RpcError::FailedPrecondition(msg).into()
+        .into(),
+        crate::storage::StorageError::Backend(msg) => RpcError::Internal {
+            operation: "storage_backend",
+            details: msg,
         }
+        .into(),
+        crate::storage::StorageError::AlreadyExists => RpcError::AlreadyExists {
+            resource: "storage_item",
+            id: "duplicate".into(),
+        }
+        .into(),
+        crate::storage::StorageError::PreconditionFailed(msg) => RpcError::FailedPrecondition {
+            operation: "storage_operation",
+            reason: msg,
+        }
+        .into(),
     }
 }
 
@@ -98,12 +110,22 @@ fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, 
     let token = req
         .metadata()
         .get(API_TOKEN_METADATA_KEY)
-        .ok_or_else(|| RpcError::Unauthenticated("missing api token".into()))?
+        .ok_or_else(|| RpcError::Unauthenticated {
+            credential: "api_token",
+            reason: "missing".into(),
+        })?
         .to_str()
-        .map_err(|_| RpcError::Unauthenticated("bad token".into()))?;
+        .map_err(|_| RpcError::Unauthenticated {
+            credential: "api_token",
+            reason: "bad encoding".into(),
+        })?;
 
     if token.is_empty() {
-        return Err(RpcError::Unauthenticated("empty api token".into()).into());
+        return Err(RpcError::Unauthenticated {
+            credential: "api_token",
+            reason: "empty".into(),
+        }
+        .into());
     }
 
     Ok(crate::ids::TenantToken::from(token))
@@ -111,8 +133,16 @@ fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, 
 
 fn to_status_token(err: TenantTokenError) -> Status {
     match err {
-        TenantTokenError::Unknown => RpcError::Unauthenticated("unknown api token".into()).into(),
-        TenantTokenError::Backend(msg) => RpcError::Unavailable(msg).into(),
+        TenantTokenError::Unknown => RpcError::Unauthenticated {
+            credential: "api_token",
+            reason: "unknown token".into(),
+        }
+        .into(),
+        TenantTokenError::Backend(msg) => RpcError::Unavailable {
+            service: "token_validation",
+            reason: msg,
+        }
+        .into(),
     }
 }
 
@@ -155,39 +185,53 @@ impl EventService for EventServiceImpl {
         let body = request.into_inner();
         let event_bytes: crate::storage::EventBytes = body.event_bytes.into();
         if event_bytes.len() > max_event_bytes() {
-            return Err(RpcError::InvalidArgument("event_bytes too large".into()).into());
+            return Err(RpcError::InvalidArgument {
+                field: "event_bytes",
+                reason: format!("too large: {} > {}", event_bytes.len(), max_event_bytes()),
+            }
+            .into());
         }
-        let event: Event = serde_json::from_slice(&event_bytes)
-            .map_err(|e| RpcError::InvalidArgument(format!("invalid event payload: {e}")))?;
+        let event: Event = serde_json::from_slice(&event_bytes).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "event_bytes",
+                reason: format!("invalid JSON payload: {e}"),
+            }
+        })?;
 
         // 1. Verify Chain Hash
         match self.store.event_tail(tenant, event.group_id).await {
             Ok((tail_id, _, _)) => {
                 let tail_hash = crate::ids::ContentHash(tail_id.0);
                 if event.previous_event_hash.0 != tail_hash.0 {
-                    return Err(RpcError::FailedPrecondition(format!(
-                        "chain mismatch: expected prev={:?}, got {:?}",
-                        tail_hash, event.previous_event_hash
-                    ))
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "chain_verification",
+                        reason: format!(
+                            "hash mismatch: expected prev={:?}, got {:?}",
+                            tail_hash, event.previous_event_hash
+                        ),
+                    }
                     .into());
                 }
             }
             Err(crate::storage::StorageError::NotFound(_)) => {
                 // Genesis event must have zero prev hash
                 if event.previous_event_hash.0 != [0u8; 32] {
-                    return Err(RpcError::FailedPrecondition(
-                        "first event must have zero prev hash".into(),
-                    )
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "genesis_validation",
+                        reason: "first event must have zero prev hash".into(),
+                    }
                     .into());
                 }
             }
             Err(e) => return Err(to_status(e)),
         }
 
-        let sig = event
-            .signature
-            .as_ref()
-            .ok_or_else(|| RpcError::Unauthenticated("missing signature".into()))?;
+        let sig = event.signature.as_ref().ok_or_else(|| {
+            RpcError::Unauthenticated {
+                credential: "signature",
+                reason: "missing".into(),
+            }
+        })?;
         let key_image = sig.key_image();
 
         // 2. Cheap checks (anti-replay, bans)
@@ -198,7 +242,11 @@ impl EventService for EventServiceImpl {
                 .await
                 .map_err(to_status)?;
             if used {
-                return Err(RpcError::FailedPrecondition("vote already cast".into()).into());
+                return Err(RpcError::FailedPrecondition {
+                    operation: "vote_cast",
+                    reason: "duplicate key image (vote already cast)".into(),
+                }
+                .into());
             }
         }
 
@@ -209,7 +257,11 @@ impl EventService for EventServiceImpl {
                 .await
                 .map_err(to_status)?;
             if banned {
-                return Err(RpcError::FailedPrecondition("key image banned".into()).into());
+                return Err(RpcError::FailedPrecondition {
+                    operation: "banned_check",
+                    reason: format!("key image banned for {:?}", operation),
+                }
+                .into());
             }
         }
 
@@ -240,9 +292,12 @@ impl EventService for EventServiceImpl {
             crate::crypto::signature::StorageMode::Archival => None,
         };
 
-        let signed_msg = event
-            .to_signing_bytes()
-            .map_err(|e| RpcError::Internal(format!("canonical serialization failed: {e}")))?;
+        let signed_msg = event.to_signing_bytes().map_err(|e| {
+            RpcError::Internal {
+                operation: "event_serialization",
+                details: format!("canonical serialization failed: {e}"),
+            }
+        })?;
 
         let item = crate::crypto::verifier::SignatureItem {
             signature: sig.clone(),
@@ -255,9 +310,16 @@ impl EventService for EventServiceImpl {
             .verifier
             .verify_batch(&[item])
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(|e| RpcError::Internal {
+                operation: "signature_verification",
+                details: e.to_string(),
+            })?;
         if !results[0] {
-            return Err(RpcError::Unauthenticated("invalid signature".into()).into());
+            return Err(RpcError::Unauthenticated {
+                credential: "signature",
+                reason: "verification failed".into(),
+            }
+            .into());
         }
 
         if let crate::event::EventType::RingUpdate(update) = &event.event_type {
@@ -268,7 +330,11 @@ impl EventService for EventServiceImpl {
                 .map_err(to_status)?;
             let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
             if current_hash != update.ring_hash {
-                return Err(RpcError::FailedPrecondition("ring hash mismatch".into()).into());
+                return Err(RpcError::FailedPrecondition {
+                    operation: "ring_update",
+                    reason: "ring hash mismatch".into(),
+                }
+                .into());
             }
 
             let mut validation_ring = (*current_ring).clone();
@@ -281,8 +347,12 @@ impl EventService for EventServiceImpl {
                         RingDelta::Remove(*public_key)
                     }
                 };
-                apply_delta(&mut validation_ring, &delta)
-                    .map_err(|e| RpcError::FailedPrecondition(e.to_string()))?;
+                apply_delta(&mut validation_ring, &delta).map_err(|e| {
+                    RpcError::FailedPrecondition {
+                        operation: "ring_delta_validation",
+                        reason: e.to_string(),
+                    }
+                })?;
             }
 
             for operation in &update.operations {
@@ -325,10 +395,12 @@ impl EventService for EventServiceImpl {
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
         let cursor = if body.start_sequence_no < 0 {
             None
         } else {
@@ -373,10 +445,12 @@ impl RingService for RingServiceImpl {
     ) -> Result<Response<GetRingHeadResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let group = request.into_inner().group_id;
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&group)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&group).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
 
         // Current ring for the requested group.
         let ring = self
@@ -405,10 +479,12 @@ impl RingService for RingServiceImpl {
     ) -> Result<Response<Self::StreamRingStream>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let req = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&req.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&req.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
         let after_hash = if req.after_ring_hash.is_empty() {
             None
         } else {
@@ -416,7 +492,10 @@ impl RingService for RingServiceImpl {
                 crate::proto::hash32_to_ring_hash(&mandate_proto::mandate::v1::Hash32 {
                     value: req.after_ring_hash.clone(),
                 })
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?
+                .map_err(|e| RpcError::InvalidArgument {
+                    field: "after_ring_hash",
+                    reason: e.to_string(),
+                })?
                 .0,
             ))
         };
@@ -488,7 +567,10 @@ async fn encode_ring_delta_path(
         .iter()
         .take(limit)
         .map(|d| {
-            apply_delta(&mut ring, d).map_err(|e| RpcError::Internal(e.to_string()))?;
+            apply_delta(&mut ring, d).map_err(|e| RpcError::Internal {
+                operation: "ring_delta_application",
+                details: e.to_string(),
+            })?;
             Ok(ring_delta_to_bytes(d))
         })
         .collect::<Result<Vec<_>, Status>>()?;
@@ -624,19 +706,31 @@ impl BillingService for BillingServiceImpl {
         request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
         let body = request.into_inner();
-        let tenant_id = TenantId(
-            crate::proto::parse_ulid(&body.tenant_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let tenant_id = TenantId(crate::proto::parse_ulid(&body.tenant_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "tenant_id",
+                reason: e.to_string(),
+            }
+        })?);
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
         if body.amount_nanos <= 0 {
-            return Err(RpcError::InvalidArgument("amount_nanos must be positive".into()).into());
+            return Err(RpcError::InvalidArgument {
+                field: "amount_nanos",
+                reason: "must be positive".into(),
+            }
+            .into());
         }
-        let amount = u64::try_from(body.amount_nanos)
-            .map_err(|_| RpcError::InvalidArgument("amount_nanos too large".into()))?;
+        let amount = u64::try_from(body.amount_nanos).map_err(|_| {
+            RpcError::InvalidArgument {
+                field: "amount_nanos",
+                reason: "too large for u64".into(),
+            }
+        })?;
         let balance = self
             .store
             .transfer_to_group(tenant_id, group_id, amount)
@@ -652,10 +746,12 @@ impl BillingService for BillingServiceImpl {
         request: Request<GetGroupBalanceRequest>,
     ) -> Result<Response<GetGroupBalanceResponse>, Status> {
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
         let balance = self
             .store
             .get_group_balance(group_id)
@@ -689,17 +785,26 @@ impl GroupService for GroupServiceImpl {
             .extensions()
             .get::<TenantId>()
             .cloned()
-            .ok_or_else(|| RpcError::Unauthenticated("missing tenant context".into()))?;
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "tenant_context",
+                reason: "missing from request extensions".into(),
+            })?;
 
         let body = request.into_inner();
-        let requested_tenant = TenantId(
-            crate::proto::parse_ulid(&body.tenant_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let requested_tenant = TenantId(crate::proto::parse_ulid(&body.tenant_id).map_err(
+            |e| RpcError::InvalidArgument {
+                field: "tenant_id",
+                reason: e.to_string(),
+            },
+        )?);
 
         // Authorization check: verify authenticated tenant matches requested tenant
         if authenticated_tenant != requested_tenant {
-            return Err(RpcError::PermissionDenied("not authorized for this tenant".into()).into());
+            return Err(RpcError::PermissionDenied {
+                resource: "tenant",
+                reason: "not authorized for requested tenant".into(),
+            }
+            .into());
         }
 
         let group_id = self
@@ -722,29 +827,44 @@ impl GroupService for GroupServiceImpl {
             .extensions()
             .get::<TenantId>()
             .cloned()
-            .ok_or_else(|| RpcError::Unauthenticated("missing tenant context".into()))?;
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "tenant_context",
+                reason: "missing from request extensions".into(),
+            })?;
 
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
 
         let (group_tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
 
         // Authorization check: verify authenticated tenant owns the group
         if authenticated_tenant != group_tenant {
-            return Err(RpcError::PermissionDenied("not authorized for this group".into()).into());
+            return Err(RpcError::PermissionDenied {
+                resource: "group",
+                reason: "not authorized for requested group".into(),
+            }
+            .into());
         }
 
         let tenant = group_tenant;
 
-        let owner_pubkey = body
-            .owner_pubkey
-            .as_ref()
-            .ok_or_else(|| RpcError::InvalidArgument("missing owner_pubkey".into()))?;
-        let owner_pubkey = crate::proto::nazgul_pub_from_proto(owner_pubkey)
-            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+        let owner_pubkey = body.owner_pubkey.as_ref().ok_or_else(|| {
+            RpcError::InvalidArgument {
+                field: "owner_pubkey",
+                reason: "missing".into(),
+            }
+        })?;
+        let owner_pubkey = crate::proto::nazgul_pub_from_proto(owner_pubkey).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "owner_pubkey",
+                reason: e.to_string(),
+            }
+        })?;
 
         match self.store.current_ring(tenant, group_id).await {
             Ok(ring) => {
@@ -757,9 +877,11 @@ impl GroupService for GroupServiceImpl {
                     return Ok(Response::new(SetOwnerPublicKeyResponse {}));
                 }
 
-                return Err(
-                    RpcError::FailedPrecondition("group ring already initialized".into()).into(),
-                );
+                return Err(RpcError::FailedPrecondition {
+                    operation: "set_owner_public_key",
+                    reason: "group ring already initialized".into(),
+                }
+                .into());
             }
             Err(crate::storage::StorageError::NotFound(_)) => {}
             Err(err) => return Err(to_status(err)),
@@ -803,26 +925,40 @@ impl MemberService for MemberServiceImpl {
         request: Request<SubmitPendingMemberRequest>,
     ) -> Result<Response<SubmitPendingMemberResponse>, Status> {
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
 
         let (tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
 
-        let nazgul_pub = body
-            .nazgul_pub
-            .as_ref()
-            .ok_or_else(|| RpcError::InvalidArgument("missing nazgul_pub".into()))?;
-        let nazgul_pub = crate::proto::nazgul_pub_from_proto(nazgul_pub)
-            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+        let nazgul_pub = body.nazgul_pub.as_ref().ok_or_else(|| {
+            RpcError::InvalidArgument {
+                field: "nazgul_pub",
+                reason: "missing".into(),
+            }
+        })?;
+        let nazgul_pub = crate::proto::nazgul_pub_from_proto(nazgul_pub).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "nazgul_pub",
+                reason: e.to_string(),
+            }
+        })?;
 
-        let rage_pub = body
-            .rage_pub
-            .as_ref()
-            .ok_or_else(|| RpcError::InvalidArgument("missing rage_pub".into()))?;
-        let rage_pub = crate::proto::rage_pub_from_proto(rage_pub)
-            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+        let rage_pub = body.rage_pub.as_ref().ok_or_else(|| {
+            RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: "missing".into(),
+            }
+        })?;
+        let rage_pub = crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: e.to_string(),
+            }
+        })?;
 
         let pending_id = self
             .store
@@ -839,14 +975,20 @@ impl MemberService for MemberServiceImpl {
     ) -> Result<Response<ListPendingMembersResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
 
         let (group_tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
         if group_tenant != tenant {
-            return Err(RpcError::NotFound("group not found".into()).into());
+            return Err(RpcError::NotFound {
+                resource: "group",
+                id: format!("{}", group_id.0),
+            }
+            .into());
         }
 
         let (members, _next_page) = self
@@ -894,27 +1036,43 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
 
         if body.blobs.len() > keyblobs_max_count() {
-            return Err(RpcError::InvalidArgument("too many key blobs".into()).into());
+            return Err(RpcError::InvalidArgument {
+                field: "blobs",
+                reason: format!("too many ({} > {})", body.blobs.len(), keyblobs_max_count()),
+            }
+            .into());
         }
         let max_blob_bytes = keyblobs_max_blob_bytes();
         if body.blobs.iter().any(|b| b.blob.len() > max_blob_bytes) {
-            return Err(RpcError::InvalidArgument("key blob too large".into()).into());
+            return Err(RpcError::InvalidArgument {
+                field: "blobs",
+                reason: format!("blob too large (max {} bytes)", max_blob_bytes),
+            }
+            .into());
         }
 
         let mut entries = Vec::with_capacity(body.blobs.len());
         for blob in body.blobs {
-            let rage_pub = blob
-                .rage_pub
-                .as_ref()
-                .ok_or_else(|| RpcError::InvalidArgument("missing rage_pub".into()))?;
-            let rage_pub = crate::proto::rage_pub_from_proto(rage_pub)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+            let rage_pub = blob.rage_pub.as_ref().ok_or_else(|| {
+                RpcError::InvalidArgument {
+                    field: "rage_pub",
+                    reason: "missing in blob entry".into(),
+                }
+            })?;
+            let rage_pub = crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| {
+                RpcError::InvalidArgument {
+                    field: "rage_pub",
+                    reason: e.to_string(),
+                }
+            })?;
             entries.push((rage_pub, blob.blob.into()));
         }
 
@@ -931,16 +1089,24 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| RpcError::InvalidArgument(e.to_string()))?,
-        );
-        let rage_pub = body
-            .rage_pub
-            .as_ref()
-            .ok_or_else(|| RpcError::InvalidArgument("missing rage_pub".into()))?;
-        let rage_pub = crate::proto::rage_pub_from_proto(rage_pub)
-            .map_err(|e| RpcError::InvalidArgument(e.to_string()))?;
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+        let rage_pub = body.rage_pub.as_ref().ok_or_else(|| {
+            RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: "missing".into(),
+            }
+        })?;
+        let rage_pub = crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: e.to_string(),
+            }
+        })?;
 
         let blob = self
             .store
