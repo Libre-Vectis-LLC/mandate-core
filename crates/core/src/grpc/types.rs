@@ -15,7 +15,7 @@ mod tests {
     use crate::ids::{EventId, EventUlid, GroupId, MasterPublicKey, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::storage::{
-        BanIndex, BannedOperation, BillingStore, EventReader, EventWriter, GroupMetadataStore,
+        BanIndex, BannedOperation, BillingStore, EventWriter, GroupMetadataStore,
         PendingMemberStore, RingView, RingWriter, VoteKeyImageIndex,
     };
     use crate::test_utils::TEST_MNEMONIC;
