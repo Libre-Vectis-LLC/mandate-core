@@ -713,6 +713,7 @@ impl GroupMetadataStore for InMemoryGroups {
 pub struct InMemoryBilling {
     tenants: Arc<Mutex<TenantBalanceMap>>,
     groups: Arc<Mutex<GroupMap>>,
+    tg_user_to_tenant: Arc<Mutex<HashMap<String, TenantId>>>,
 }
 
 impl InMemoryBilling {
@@ -720,6 +721,7 @@ impl InMemoryBilling {
         Self {
             tenants: Arc::new(Mutex::new(HashMap::new())),
             groups,
+            tg_user_to_tenant: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -729,11 +731,17 @@ impl BillingStore for InMemoryBilling {
     async fn credit_tenant(
         &self,
         tenant: TenantId,
-        _owner_tg_user_id: &str,
+        owner_tg_user_id: &str,
         amount_nanos: u64,
     ) -> Result<i64, StorageError> {
         let delta = i64::try_from(amount_nanos)
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+
+        // Record tg_user_id -> tenant mapping
+        let mut tg_map = self.tg_user_to_tenant.lock();
+        tg_map.insert(owner_tg_user_id.to_string(), tenant);
+        drop(tg_map); // Release lock before acquiring tenants lock
+
         let mut map = self.tenants.lock();
         let balance = map.entry(tenant).or_insert(0);
         *balance = balance
@@ -783,6 +791,35 @@ impl BillingStore for InMemoryBilling {
             .get(&group_id)
             .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
         Ok(record.balance_nanos)
+    }
+
+    async fn resolve_telegram_user(
+        &self,
+        tg_user_id: &str,
+    ) -> Result<Option<(TenantId, GroupId)>, StorageError> {
+        // 1. Lookup tenant ID from tg_user_id
+        let tg_map = self.tg_user_to_tenant.lock();
+        let tenant_id = match tg_map.get(tg_user_id) {
+            Some(&id) => id,
+            None => return Ok(None),
+        };
+        drop(tg_map);
+
+        // 2. Find the first group owned by this tenant
+        // (In production, we might want to return the most recently created one)
+        let groups = self.groups.lock();
+        let group_id = groups.iter().find_map(|(gid, record)| {
+            if record.tenant == tenant_id {
+                Some(*gid)
+            } else {
+                None
+            }
+        });
+
+        match group_id {
+            Some(gid) => Ok(Some((tenant_id, gid))),
+            None => Ok(None),
+        }
     }
 }
 

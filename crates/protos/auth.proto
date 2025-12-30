@@ -26,6 +26,20 @@ service AuthService {
   // - ALREADY_EXISTS: code was already redeemed
   // - INTERNAL: database error
   rpc RedeemGiftCard (RedeemGiftCardRequest) returns (RedeemGiftCardResponse);
+
+  // ResolveTelegramUser maps a Telegram user ID to their tenant and group.
+  //
+  // This is used by bots to resolve user identity when they only have
+  // the Telegram user ID from a message context.
+  //
+  // ## Resolution Strategy
+  // 1. Lookup tenant via `owner_tg_user_id` in tenants table
+  // 2. Lookup associated group via pending_members or groups table
+  //
+  // ## Errors
+  // - NOT_FOUND: No tenant or group associated with this Telegram user
+  // - INTERNAL: database error
+  rpc ResolveTelegramUser (ResolveTelegramUserRequest) returns (ResolveTelegramUserResponse);
 }
 
 // Request to redeem a gift card.
@@ -49,4 +63,20 @@ message RedeemGiftCardResponse {
   // Format: `token-<64 hex chars>` (256-bit entropy).
   // Client should securely store this token.
   string api_token = 4;
+}
+
+// Request to resolve a Telegram user to tenant and group.
+message ResolveTelegramUserRequest {
+  // Telegram user ID (numeric string) to resolve.
+  string tg_user_id = 1;
+}
+
+// Response containing the tenant and group associated with a Telegram user.
+message ResolveTelegramUserResponse {
+  // Tenant ID (UUID format) that owns this Telegram user.
+  string tenant_id = 1;
+
+  // Group ID (ULID format) associated with this tenant.
+  // If the user belongs to multiple groups, returns the most recently created one.
+  string group_id = 2;
 }

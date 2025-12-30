@@ -577,6 +577,32 @@ impl AuthService for AuthServiceImpl {
             api_token: token_str,
         }))
     }
+
+    async fn resolve_telegram_user(
+        &self,
+        request: Request<mandate_proto::mandate::v1::ResolveTelegramUserRequest>,
+    ) -> Result<Response<mandate_proto::mandate::v1::ResolveTelegramUserResponse>, Status> {
+        let body = request.into_inner();
+
+        let result = self
+            .store
+            .resolve_telegram_user(&body.tg_user_id)
+            .await
+            .map_err(to_status)?;
+
+        match result {
+            Some((tenant_id, group_id)) => Ok(Response::new(
+                mandate_proto::mandate::v1::ResolveTelegramUserResponse {
+                    tenant_id: tenant_id.0.to_string(),
+                    group_id: group_id.0.to_string(),
+                },
+            )),
+            None => Err(Status::not_found(format!(
+                "No tenant or group found for Telegram user: {}",
+                body.tg_user_id
+            ))),
+        }
+    }
 }
 
 #[derive(Clone)]

@@ -251,6 +251,16 @@ impl StorageFacade {
         self.billing.get_group_balance(group_id).await
     }
 
+    /// Resolve a Telegram user ID to their associated tenant and group.
+    ///
+    /// Returns `None` if no tenant or group is found for this user.
+    pub async fn resolve_telegram_user(
+        &self,
+        tg_user_id: &str,
+    ) -> Result<Option<(TenantId, GroupId)>, StorageError> {
+        self.billing.resolve_telegram_user(tg_user_id).await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Group methods
     // ─────────────────────────────────────────────────────────────────────────

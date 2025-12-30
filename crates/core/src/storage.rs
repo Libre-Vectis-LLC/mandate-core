@@ -278,6 +278,18 @@ pub trait BillingStore {
 
     /// Returns the group's current budget balance.
     async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError>;
+
+    /// Resolve a Telegram user ID to their associated tenant and group.
+    ///
+    /// This looks up the tenant via `owner_tg_user_id`, then finds the
+    /// associated group. If the user owns multiple groups, returns the
+    /// most recently created one.
+    ///
+    /// Returns `None` if no tenant or group is found for this user.
+    async fn resolve_telegram_user(
+        &self,
+        tg_user_id: &str,
+    ) -> Result<Option<(TenantId, GroupId)>, StorageError>;
 }
 
 #[derive(Clone, Debug)]
