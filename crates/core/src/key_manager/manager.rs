@@ -329,15 +329,7 @@ pub fn decrypt_event_content(identity: &RageIdentity, payload: &[u8]) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ulid::Ulid;
-
-    fn gid(label: &str) -> GroupId {
-        GroupId(Ulid::from_string(label).expect("static ulid"))
-    }
-
-    fn eid(label: &str) -> EventUlid {
-        EventUlid(Ulid::from_string(label).expect("static ulid"))
-    }
+    use crate::test_utils::{event_ulid_from_str, group_id_from_str};
 
     #[test]
     fn test_mnemonic_roundtrip() {
@@ -366,8 +358,8 @@ mod tests {
     fn test_group_isolation() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let g1 = gid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-        let g2 = gid("01ARZ3NDEKTSV4RRFFQ69G5FAY");
+        let g1 = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let g2 = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAY");
         let r1 = RingHash([1u8; 32]);
         let r2 = RingHash([2u8; 32]);
 
@@ -393,7 +385,7 @@ mod tests {
     fn test_non_hardened_delegation_verification() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let group_id = gid("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
+        let group_id = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
 
         // Owner derives delegate private key
         let delegate_sk = km.derive_delegate_signing_key(&group_id);
@@ -414,7 +406,7 @@ mod tests {
     #[test]
     fn test_event_encryption_roundtrip_age() {
         let shared_secret = [42u8; 32];
-        let ulid = eid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let ulid = event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
         let event_id = derive_event_identity(&shared_secret, &ulid);
         let plaintext = b"Hello Age World";
@@ -428,15 +420,15 @@ mod tests {
     #[test]
     fn test_event_key_uniqueness() {
         let shared_secret = [42u8; 32];
-        let k1 = derive_event_identity(&shared_secret, &eid("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
-        let k2 = derive_event_identity(&shared_secret, &eid("01ARZ3NDEKTSV4RRFFQ69G5FAY"));
+        let k1 = derive_event_identity(&shared_secret, &event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+        let k2 = derive_event_identity(&shared_secret, &event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAY"));
         assert_ne!(k1.to_public().to_string(), k2.to_public().to_string());
     }
 
     #[test]
     fn poll_identity_reused_for_votes() {
         let shared_secret = [9u8; 32];
-        let poll_ulid = eid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let poll_ulid = event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let k_poll = derive_poll_identity(&shared_secret, &poll_ulid);
         let vote_cast = derive_poll_identity(&shared_secret, &poll_ulid);
         assert_eq!(
@@ -449,7 +441,7 @@ mod tests {
     #[test]
     fn poll_key_bytes_matches_identity() {
         let shared_secret = [9u8; 32];
-        let poll_ulid = eid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let poll_ulid = event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         // Derive using identity method
         let k_poll_identity = derive_poll_identity(&shared_secret, &poll_ulid);
         // Derive using raw bytes method
@@ -467,7 +459,7 @@ mod tests {
     fn public_derivation_matches_private_for_member_session() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let group = gid("01ARZ3NDEKTSV4RRFFQ69G5FB0");
+        let group = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB0");
         let ring = RingHash([7u8; 32]);
 
         let private = km.derive_member_session_key(&group, &ring);
@@ -486,7 +478,7 @@ mod tests {
     fn key_blob_roundtrip() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let shared = km.derive_group_shared_secret(&gid("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+        let shared = km.derive_group_shared_secret(&group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
 
         let recipient = km.derive_rage_identity().to_public();
         let blob = encrypt_shared_secret_for_recipient(&shared, &recipient).expect("encrypt");

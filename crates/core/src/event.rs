@@ -168,7 +168,7 @@ mod tests {
     use super::*;
     use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
     use crate::hashing::ring_hash_sha3_256;
-    use crate::ids::GroupId;
+    use crate::test_utils::test_group_id;
     use nazgul::keypair::KeyPair;
     use nazgul::ring::Ring;
     use rand::rngs::OsRng;
@@ -182,10 +182,6 @@ mod tests {
             .collect();
         members.push(*signer.public());
         (signer, Ring::new(members))
-    }
-
-    fn gid() -> GroupId {
-        GroupId(Ulid::from_string("01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("static ulid"))
     }
 
     #[test]
@@ -204,12 +200,12 @@ mod tests {
         let event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            group_id: gid(),
+            group_id: test_group_id(),
             sequence_no: Some(0),
             processed_at: 123,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: gid(),
+                group_id: test_group_id(),
                 ring_hash: ring_hash_sha3_256(&ring),
                 message_id: "m1".into(),
                 content: Ciphertext(b"hello".to_vec()),
@@ -227,7 +223,7 @@ mod tests {
     #[test]
     fn poll_hash_sorts_questions_and_options() {
         let poll_unsorted = Poll {
-            group_id: gid(),
+            group_id: test_group_id(),
             ring_hash: RingHash([1u8; 32]),
             poll_id: "poll".into(),
             created_at: 1,
@@ -273,7 +269,7 @@ mod tests {
     #[test]
     fn vote_hash_sorts_selections_and_option_ids() {
         let vote_unsorted = Vote {
-            group_id: gid(),
+            group_id: test_group_id(),
             ring_hash: RingHash([2u8; 32]),
             poll_id: "p".into(),
             poll_hash: ContentHash([3u8; 32]),
@@ -311,12 +307,12 @@ mod tests {
         let base_event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([8u8; 32]),
-            group_id: gid(),
+            group_id: test_group_id(),
             sequence_no: Some(1),
             processed_at: 10,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: gid(),
+                group_id: test_group_id(),
                 ring_hash: RingHash([7u8; 32]),
                 message_id: "m".into(),
                 content: Ciphertext(b"hi".to_vec()),
@@ -346,12 +342,12 @@ mod tests {
         let base_event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([9u8; 32]),
-            group_id: gid(),
+            group_id: test_group_id(),
             sequence_no: None,
             processed_at: 42,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: gid(),
+                group_id: test_group_id(),
                 ring_hash: RingHash([7u8; 32]),
                 message_id: "m".into(),
                 content: Ciphertext(b"hi".to_vec()),

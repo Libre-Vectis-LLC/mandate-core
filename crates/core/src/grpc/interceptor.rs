@@ -157,6 +157,7 @@ pub fn make_bot_secret_interceptor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TEST_TENANT_ID_STR;
     use tonic::Code;
 
     #[test]
@@ -227,9 +228,7 @@ mod tests {
         );
         req.metadata_mut().insert(
             TENANT_ID_METADATA_KEY,
-            "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-                .parse()
-                .expect("metadata value"),
+            TEST_TENANT_ID_STR.parse().expect("metadata value"),
         );
 
         let req = require_bot_secret(req).expect("valid secret and tenant");
@@ -245,7 +244,7 @@ mod tests {
             .get::<TenantId>()
             .cloned()
             .expect("tenant id extension");
-        assert_eq!(stored_tenant.0.to_string(), "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        assert_eq!(stored_tenant.0.to_string(), TEST_TENANT_ID_STR);
     }
 
     #[test]
@@ -260,9 +259,7 @@ mod tests {
         );
         req.metadata_mut().insert(
             TENANT_ID_METADATA_KEY,
-            "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-                .parse()
-                .expect("metadata value"),
+            TEST_TENANT_ID_STR.parse().expect("metadata value"),
         );
 
         let req = interceptor(req).expect("correct secret and tenant must pass");
@@ -279,7 +276,7 @@ mod tests {
             .get::<TenantId>()
             .cloned()
             .expect("tenant id extension");
-        assert_eq!(stored_tenant.0.to_string(), "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        assert_eq!(stored_tenant.0.to_string(), TEST_TENANT_ID_STR);
     }
 
     #[test]
@@ -294,9 +291,7 @@ mod tests {
         );
         req.metadata_mut().insert(
             TENANT_ID_METADATA_KEY,
-            "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-                .parse()
-                .expect("metadata value"),
+            TEST_TENANT_ID_STR.parse().expect("metadata value"),
         );
 
         let err = interceptor(req).expect_err("wrong secret must fail");

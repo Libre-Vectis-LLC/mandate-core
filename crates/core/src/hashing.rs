@@ -407,12 +407,12 @@ impl<'a> From<&'a VoteSelection> for CanonicalVoteSelection<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::test_group_id;
     use curve25519_dalek::ristretto::RistrettoPoint;
     use hex::encode;
     use proptest::prelude::*;
     use serde::Serialize;
     use sha3::Sha3_512;
-    use ulid::Ulid;
 
     fn point(label: &[u8]) -> RistrettoPoint {
         RistrettoPoint::hash_from_bytes::<Sha3_512>(label)
@@ -557,7 +557,7 @@ mod tests {
     impl PollFixture {
         fn poll() -> crate::event::Poll {
             crate::event::Poll {
-                group_id: gid(),
+                group_id: test_group_id(),
                 ring_hash: RingHash([0x11; 32]),
                 poll_id: "poll-1".into(),
                 created_at: 42,
@@ -588,9 +588,5 @@ mod tests {
                 ],
             }
         }
-    }
-
-    fn gid() -> GroupId {
-        GroupId(Ulid::from_string("01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("static ulid"))
     }
 }
