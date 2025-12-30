@@ -52,6 +52,24 @@ pub enum EventType {
     ProofOfInnocence(ProofOfInnocence),
 }
 
+impl EventType {
+    /// Returns the ring hash associated with this event type.
+    ///
+    /// For most event types, this is the `ring_hash` field.
+    /// For `ProofOfInnocence`, this returns `historical_ring_hash`.
+    pub fn ring_hash(&self) -> RingHash {
+        match self {
+            EventType::PollCreate(p) => p.ring_hash,
+            EventType::VoteCast(v) => v.ring_hash,
+            EventType::MessageCreate(m) => m.ring_hash,
+            EventType::RingUpdate(r) => r.ring_hash,
+            EventType::BanCreate(b) => b.ring_hash,
+            EventType::BanRevoke(b) => b.ring_hash,
+            EventType::ProofOfInnocence(p) => p.historical_ring_hash,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Poll {
     pub group_id: GroupId,
@@ -362,5 +380,71 @@ mod tests {
         let h_base = base_event.content_hash().expect("hash base");
         let h_seq = with_sequence.content_hash().expect("hash with sequence");
         assert_eq!(h_base, h_seq, "sequence_no must not affect content hash");
+    }
+
+    #[test]
+    fn event_type_ring_hash_extraction() {
+        let ring_hash = RingHash([42u8; 32]);
+        let historical_hash = RingHash([99u8; 32]);
+        let group = test_group_id();
+
+        // Test each event type returns correct ring_hash
+        let poll = EventType::PollCreate(Poll {
+            group_id: group,
+            ring_hash,
+            poll_id: "p1".into(),
+            questions: vec![],
+            created_at: 1,
+            instructions: None,
+        });
+        assert_eq!(poll.ring_hash(), ring_hash);
+
+        let vote = EventType::VoteCast(Vote {
+            group_id: group,
+            ring_hash,
+            poll_id: "p1".into(),
+            poll_hash: ContentHash([0u8; 32]),
+            selections: vec![],
+        });
+        assert_eq!(vote.ring_hash(), ring_hash);
+
+        let msg = EventType::MessageCreate(AnonymousMessage {
+            group_id: group,
+            ring_hash,
+            message_id: "m1".into(),
+            content: Ciphertext(b"test".to_vec()),
+            sent_at: 1,
+        });
+        assert_eq!(msg.ring_hash(), ring_hash);
+
+        let ring_update = EventType::RingUpdate(RingUpdate {
+            group_id: group,
+            ring_hash,
+            operations: vec![],
+        });
+        assert_eq!(ring_update.ring_hash(), ring_hash);
+
+        let ban_create = EventType::BanCreate(BanCreate {
+            group_id: group,
+            ring_hash,
+            target: KeyImage::default(),
+            reason: "test".into(),
+            scope: BanScope::BanAll,
+        });
+        assert_eq!(ban_create.ring_hash(), ring_hash);
+
+        let ban_revoke = EventType::BanRevoke(BanRevoke {
+            group_id: group,
+            ring_hash,
+            ban_event_id: EventId([0u8; 32]),
+        });
+        assert_eq!(ban_revoke.ring_hash(), ring_hash);
+
+        // ProofOfInnocence uses historical_ring_hash
+        let proof = EventType::ProofOfInnocence(ProofOfInnocence {
+            group_id: group,
+            historical_ring_hash: historical_hash,
+        });
+        assert_eq!(proof.ring_hash(), historical_hash);
     }
 }

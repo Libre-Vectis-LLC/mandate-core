@@ -12,21 +12,45 @@ pub enum RpcError {
     /// Resource already exists.
     AlreadyExists { resource: &'static str, id: String },
     /// Permission denied for resource.
-    PermissionDenied { resource: &'static str, reason: String },
+    PermissionDenied {
+        resource: &'static str,
+        reason: String,
+    },
     /// Authentication failed (missing/invalid credentials).
-    Unauthenticated { credential: &'static str, reason: String },
+    Unauthenticated {
+        credential: &'static str,
+        reason: String,
+    },
     /// Rate limit or quota exceeded.
-    ResourceExhausted { resource: &'static str, limit: String },
+    ResourceExhausted {
+        resource: &'static str,
+        limit: String,
+    },
     /// Business rule violation (chain mismatch, duplicate action, ban).
-    FailedPrecondition { operation: &'static str, reason: String },
+    FailedPrecondition {
+        operation: &'static str,
+        reason: String,
+    },
     /// Concurrent modification conflict.
-    Conflict { resource: &'static str, reason: String },
+    Conflict {
+        resource: &'static str,
+        reason: String,
+    },
     /// Operation aborted (transient).
-    Aborted { operation: &'static str, reason: String },
+    Aborted {
+        operation: &'static str,
+        reason: String,
+    },
     /// Internal server error.
-    Internal { operation: &'static str, details: String },
+    Internal {
+        operation: &'static str,
+        details: String,
+    },
     /// Service unavailable.
-    Unavailable { service: &'static str, reason: String },
+    Unavailable {
+        service: &'static str,
+        reason: String,
+    },
 }
 
 impl From<RpcError> for Status {
@@ -38,9 +62,10 @@ impl From<RpcError> for Status {
             RpcError::NotFound { resource, id } => {
                 Status::new(Code::NotFound, format!("{resource} not found: {id}"))
             }
-            RpcError::AlreadyExists { resource, id } => {
-                Status::new(Code::AlreadyExists, format!("{resource} already exists: {id}"))
-            }
+            RpcError::AlreadyExists { resource, id } => Status::new(
+                Code::AlreadyExists,
+                format!("{resource} already exists: {id}"),
+            ),
             RpcError::PermissionDenied { resource, reason } => {
                 Status::new(Code::PermissionDenied, format!("{resource}: {reason}"))
             }

@@ -1,6 +1,5 @@
 use crate::ids::{EventUlid, GroupId, RingHash};
 use age::x25519::Identity as RageIdentity;
-use anyhow::Result;
 use bip39::{Language, Mnemonic};
 use hkdf::Hkdf;
 use nazgul::keypair::KeyPair as NazgulKeyPair;
@@ -9,7 +8,32 @@ use nazgul::traits::Derivable;
 use rand::{CryptoRng, RngCore};
 use sha3::{Sha3_256, Sha3_512};
 use std::io::{Read, Write};
+use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[derive(Debug, Error)]
+pub enum KeyManagerError {
+    #[error("invalid mnemonic: {0}")]
+    InvalidMnemonic(String),
+
+    #[error("failed to generate mnemonic: {0}")]
+    MnemonicGeneration(String),
+
+    #[error("decryption failed: {0}")]
+    Decryption(String),
+
+    #[error("invalid key blob payload")]
+    InvalidKeyBlob,
+
+    #[error("encryption failed: {0}")]
+    Encryption(String),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("age decrypt error: {0}")]
+    AgeDecrypt(#[from] age::DecryptError),
+}
 
 const LABEL_IDENTITY: &[u8] = b"mandate-identity-v1";
 const LABEL_RAGE_MASTER: &[u8] = b"mandate-rage-master";
@@ -45,6 +69,8 @@ fn hkdf_sha3_256<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
 
     let hkdf = Hkdf::<Sha3_256>::new(None, ikm);
     let mut okm = [0u8; N];
+    // SAFETY: Const assertion above guarantees N <= 8160 (255 * 32).
+    // HKDF expand is infallible for valid output lengths.
     hkdf.expand(info, &mut okm)
         .expect("HKDF expand infallible for N <= 8160");
     okm
@@ -61,6 +87,8 @@ fn hkdf_sha3_512<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
 
     let hkdf = Hkdf::<Sha3_512>::new(None, ikm);
     let mut okm = [0u8; N];
+    // SAFETY: Const assertion above guarantees N <= 16320 (255 * 64).
+    // HKDF expand is infallible for valid output lengths.
     hkdf.expand(info, &mut okm)
         .expect("HKDF expand infallible for N <= 16320");
     okm
@@ -137,19 +165,21 @@ pub struct KeyManager {
 
 impl KeyManager {
     /// Create a new KeyManager from a BIP39 mnemonic phrase.
-    pub fn from_mnemonic(phrase: &str, passphrase: Option<&str>) -> Result<Self> {
+    pub fn from_mnemonic(phrase: &str, passphrase: Option<&str>) -> Result<Self, KeyManagerError> {
         // bip39 v2 uses parse or parse_in
         let mnemonic = Mnemonic::parse_in(Language::English, phrase)
-            .map_err(|e| anyhow::anyhow!("Invalid mnemonic: {:?}", e))?;
+            .map_err(|e| KeyManagerError::InvalidMnemonic(format!("{:?}", e)))?;
         let seed = mnemonic.to_seed(passphrase.unwrap_or(""));
         Ok(Self { master_seed: seed })
     }
 
     /// Generate a new random mnemonic and KeyManager.
-    pub fn new_random<R: RngCore + CryptoRng>(rng: &mut R) -> Result<(Self, String)> {
+    pub fn new_random<R: RngCore + CryptoRng>(
+        rng: &mut R,
+    ) -> Result<(Self, String), KeyManagerError> {
         // Generate 24 words (256 bits entropy)
         let mnemonic = Mnemonic::generate_in_with(rng, Language::English, 24)
-            .map_err(|e| anyhow::anyhow!("Failed to generate mnemonic: {:?}", e))?;
+            .map_err(|e| KeyManagerError::MnemonicGeneration(format!("{:?}", e)))?;
 
         let phrase = mnemonic.to_string();
         let seed = mnemonic.to_seed("");
@@ -253,7 +283,7 @@ pub fn derive_poll_key_bytes(shared_secret: &[u8; 32], poll_event_ulid: &EventUl
 pub fn encrypt_shared_secret_for_recipient(
     shared_secret: &[u8; 32],
     recipient: &age::x25519::Recipient,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, KeyManagerError> {
     let mut plaintext = Vec::with_capacity(KEY_BLOB_PREFIX.len() + shared_secret.len());
     plaintext.extend_from_slice(KEY_BLOB_PREFIX);
     plaintext.extend_from_slice(shared_secret);
@@ -273,17 +303,20 @@ pub fn encrypt_shared_secret_for_recipient(
 }
 
 /// Decrypt a shared-secret bucket; validates the prefix to prevent misuse.
-pub fn decrypt_shared_secret(identity: &RageIdentity, blob: &[u8]) -> Result<[u8; 32]> {
+pub fn decrypt_shared_secret(
+    identity: &RageIdentity,
+    blob: &[u8],
+) -> Result<[u8; 32], KeyManagerError> {
     let decryptor = age::Decryptor::new(blob)?;
     let mut reader = decryptor
         .decrypt(std::iter::once(identity as &dyn age::Identity))
-        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
+        .map_err(|e| KeyManagerError::Decryption(e.to_string()))?;
 
     let mut plaintext = Vec::new();
     reader.read_to_end(&mut plaintext)?;
 
     if plaintext.len() != KEY_BLOB_PREFIX.len() + 32 || !plaintext.starts_with(KEY_BLOB_PREFIX) {
-        return Err(anyhow::anyhow!("invalid key blob payload"));
+        return Err(KeyManagerError::InvalidKeyBlob);
     }
 
     let mut key = [0u8; 32];
@@ -293,7 +326,10 @@ pub fn decrypt_shared_secret(identity: &RageIdentity, blob: &[u8]) -> Result<[u8
 
 /// Encrypt event content using standard age encryption (X25519).
 /// Uses the event identity's public key as the recipient.
-pub fn encrypt_event_content(identity: &RageIdentity, plaintext: &[u8]) -> Result<Vec<u8>> {
+pub fn encrypt_event_content(
+    identity: &RageIdentity,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, KeyManagerError> {
     let recipient = identity.to_public();
     let recipients = [Box::new(recipient) as Box<dyn age::Recipient>];
 
@@ -313,12 +349,15 @@ pub fn encrypt_event_content(identity: &RageIdentity, plaintext: &[u8]) -> Resul
 
 /// Decrypt event content using standard age decryption.
 /// Uses the derived event identity to decrypt.
-pub fn decrypt_event_content(identity: &RageIdentity, payload: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt_event_content(
+    identity: &RageIdentity,
+    payload: &[u8],
+) -> Result<Vec<u8>, KeyManagerError> {
     let decryptor = age::Decryptor::new(payload)?;
 
     let mut reader = decryptor
         .decrypt(std::iter::once(identity as &dyn age::Identity))
-        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
+        .map_err(|e| KeyManagerError::Decryption(e.to_string()))?;
 
     let mut plaintext = Vec::new();
     reader.read_to_end(&mut plaintext)?;
@@ -420,8 +459,14 @@ mod tests {
     #[test]
     fn test_event_key_uniqueness() {
         let shared_secret = [42u8; 32];
-        let k1 = derive_event_identity(&shared_secret, &event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
-        let k2 = derive_event_identity(&shared_secret, &event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAY"));
+        let k1 = derive_event_identity(
+            &shared_secret,
+            &event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        );
+        let k2 = derive_event_identity(
+            &shared_secret,
+            &event_ulid_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        );
         assert_ne!(k1.to_public().to_string(), k2.to_public().to_string());
     }
 
@@ -478,7 +523,8 @@ mod tests {
     fn key_blob_roundtrip() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let shared = km.derive_group_shared_secret(&group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+        let shared =
+            km.derive_group_shared_secret(&group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
 
         let recipient = km.derive_rage_identity().to_public();
         let blob = encrypt_shared_secret_for_recipient(&shared, &recipient).expect("encrypt");
