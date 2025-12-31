@@ -1,12 +1,12 @@
+use crate::grpc::inmemory::{
+    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryGroups,
+    InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens,
+    InMemoryVoteKeyImages,
+};
 use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};
 use crate::grpc::services::{
     AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, GroupServiceImpl,
     MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
-};
-use crate::grpc::types::{
-    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryGroups,
-    InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens,
-    InMemoryVoteKeyImages,
 };
 use crate::ids::{BotSecret, TenantId, TenantToken};
 use crate::storage::facade::StorageFacade;
@@ -73,6 +73,7 @@ impl CoreServices {
         let billing = Arc::new(InMemoryBilling::new(groups.shared()));
         let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
+        #[allow(deprecated)]
         let facade = StorageFacade::new(
             tenant_tokens,
             events.clone(), // reader
