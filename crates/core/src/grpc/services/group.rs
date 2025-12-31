@@ -2,13 +2,13 @@
 
 use crate::ids::{GroupId, TenantId};
 use crate::ring_log::RingDelta;
-use nazgul::traits::LocalByteConvertible;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
     group_service_server::GroupService, CreateGroupRequest, CreateGroupResponse, GetGroupRequest,
     GetGroupResponse, SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
 };
+use nazgul::traits::LocalByteConvertible;
 use tonic::{Request, Response, Status};
 
 use super::to_status;

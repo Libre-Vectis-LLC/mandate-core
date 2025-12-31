@@ -6,17 +6,80 @@ use std::sync::Arc;
 
 pub use nazgul::ring::RingHash;
 
+/// Common trait for types wrapping a 32-byte hash.
+///
+/// This trait provides a uniform interface for types that represent cryptographic hashes,
+/// identifiers, or keys stored as 32-byte arrays.
+///
+/// # Design rationale
+///
+/// While the underlying types currently expose their inner arrays as public fields,
+/// this trait serves as:
+/// - A clear semantic marker for "this is a 32-byte hash type"
+/// - A foundation for future API evolution (if fields become private)
+/// - An interface for generic programming over hash types
+///
+/// # Examples
+///
+/// ```
+/// use mandate_core::ids::{Hash32, EventId};
+///
+/// fn print_hash<H: Hash32>(hash: &H) {
+///     println!("{:x?}", hash.as_bytes());
+/// }
+///
+/// let event_id = EventId::from_bytes([0u8; 32]);
+/// print_hash(&event_id);
+/// ```
+pub trait Hash32 {
+    /// Returns a reference to the inner 32-byte array.
+    fn as_bytes(&self) -> &[u8; 32];
+
+    /// Creates a new instance from a 32-byte array.
+    fn from_bytes(bytes: [u8; 32]) -> Self;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId(pub [u8; 32]);
 
+impl Hash32 for EventId {
+    fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContentHash(pub [u8; 32]);
+
+impl Hash32 for ContentHash {
+    fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
 
 /// Key image represented as an uncompressed Ristretto point (32 bytes compressed form).
 pub type KeyImage = RistrettoPoint;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MasterPublicKey(pub [u8; 32]);
+
+impl Hash32 for MasterPublicKey {
+    fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
 
 pub use ulid::Ulid;
 

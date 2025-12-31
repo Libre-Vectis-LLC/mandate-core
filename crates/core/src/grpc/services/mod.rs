@@ -93,9 +93,7 @@ pub(crate) fn to_status(err: crate::storage::StorageError) -> Status {
 }
 
 #[allow(clippy::result_large_err)]
-pub(crate) fn extract_tenant_token<T>(
-    req: &Request<T>,
-) -> Result<crate::ids::TenantToken, Status> {
+pub(crate) fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, Status> {
     if let Some(token) = req.extensions().get::<crate::ids::TenantToken>() {
         return Ok(token.clone());
     }
@@ -149,7 +147,10 @@ pub(crate) async fn extract_tenant_id<T>(
     }
 
     let token = extract_tenant_token(req)?;
-    let tenant_id: crate::ids::TenantId = store.resolve_tenant(&token).await.map_err(to_status_token)?;
+    let tenant_id: crate::ids::TenantId = store
+        .resolve_tenant(&token)
+        .await
+        .map_err(to_status_token)?;
     Ok(tenant_id)
 }
 
@@ -160,7 +161,9 @@ mod tests {
     use crate::ids::TenantId;
     use mandate_proto::mandate::v1::event_service_server::EventService;
     use mandate_proto::mandate::v1::storage_service_server::StorageService;
-    use mandate_proto::mandate::v1::{KeyBlob, PushEventRequest, RagePublicKey, UploadKeyBlobsRequest};
+    use mandate_proto::mandate::v1::{
+        KeyBlob, PushEventRequest, RagePublicKey, UploadKeyBlobsRequest,
+    };
     use tonic::Code;
 
     #[tokio::test]
