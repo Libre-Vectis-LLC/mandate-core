@@ -1,5 +1,5 @@
 use crate::event::Event;
-use crate::ids::{GroupId, RingHash, TenantId};
+use crate::ids::{GroupId, Nanos, RingHash, SequenceNo, TenantId};
 use crate::proto::ring_delta_to_bytes;
 use crate::proto::API_TOKEN_METADATA_KEY;
 use crate::ring_log::{apply_delta, RingDelta};
@@ -381,7 +381,7 @@ impl EventService for EventServiceImpl {
         Ok(Response::new(PushEventResponse {
             event_ulid: Some(event_ulid),
             event_hash: Some(event_hash),
-            sequence_no: id.1,
+            sequence_no: id.1.as_i64(),
         }))
     }
 
@@ -402,7 +402,7 @@ impl EventService for EventServiceImpl {
         let cursor = if body.start_sequence_no < 0 {
             None
         } else {
-            Some(body.start_sequence_no)
+            Some(SequenceNo::new(body.start_sequence_no))
         };
         let limit = clamp_events_limit(body.limit);
         let records = self
@@ -412,7 +412,7 @@ impl EventService for EventServiceImpl {
             .map_err(to_status)?;
 
         let (tx, rx) = mpsc::channel(1);
-        let sequence_nos: Vec<i64> = records.iter().map(|(_, _, seq)| *seq).collect();
+        let sequence_nos: Vec<i64> = records.iter().map(|(_, _, seq)| seq.as_i64()).collect();
         let _ = tx
             .send(Ok(StreamEventsResponse {
                 event_bytes: records.into_iter().map(|(_, b, _)| b.to_vec()).collect(),
@@ -602,7 +602,7 @@ impl AdminService for AdminServiceImpl {
         let body = request.into_inner();
         let card = self
             .store
-            .issue_gift_card(body.amount_nanos)
+            .issue_gift_card(Nanos::new(body.amount_nanos))
             .await
             .map_err(to_status)?;
         Ok(Response::new(IssueGiftCardResponse { code: card.code }))
@@ -638,7 +638,7 @@ impl AuthService for AuthServiceImpl {
 
         let new_balance = self
             .store
-            .credit_tenant(tenant_id, &body.tg_user_id, card.amount_nanos)
+            .credit_tenant(tenant_id, &body.tg_user_id, card.amount)
             .await
             .map_err(to_status)?;
 
@@ -654,7 +654,7 @@ impl AuthService for AuthServiceImpl {
 
         Ok(Response::new(RedeemGiftCardResponse {
             tenant_id: tenant_id.0.to_string(),
-            new_balance_nanos: new_balance,
+            new_balance_nanos: new_balance.as_u64() as i64,
             api_token: token_str,
         }))
     }
@@ -730,11 +730,11 @@ impl BillingService for BillingServiceImpl {
         })?;
         let balance = self
             .store
-            .transfer_to_group(tenant_id, group_id, amount)
+            .transfer_to_group(tenant_id, group_id, Nanos::new(amount))
             .await
             .map_err(to_status)?;
         Ok(Response::new(TransferToGroupResponse {
-            balance_after_nanos: balance,
+            balance_after_nanos: balance.as_u64() as i64,
         }))
     }
 
@@ -755,7 +755,7 @@ impl BillingService for BillingServiceImpl {
             .await
             .map_err(to_status)?;
         Ok(Response::new(GetGroupBalanceResponse {
-            balance_nanos: balance,
+            balance_nanos: balance.as_u64() as i64,
         }))
     }
 }

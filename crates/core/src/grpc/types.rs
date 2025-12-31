@@ -12,7 +12,7 @@ mod tests {
     use super::*;
     use crate::event::{Event, EventType, RingOperation, RingUpdate};
     use crate::hashing::ring_hash_sha3_256;
-    use crate::ids::{EventId, EventUlid, GroupId, MasterPublicKey, RingHash, TenantId};
+    use crate::ids::{EventId, EventUlid, GroupId, MasterPublicKey, Nanos, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::storage::{
         BanIndex, BannedOperation, BillingStore, EventWriter, GroupMetadataStore,
@@ -233,22 +233,22 @@ mod tests {
         let billing = InMemoryBilling::new(groups.shared());
 
         let balance = billing
-            .credit_tenant(tenant, "tg-user", 100)
+            .credit_tenant(tenant, "tg-user", Nanos::new(100))
             .await
             .expect("tenant credited");
-        assert_eq!(balance, 100);
+        assert_eq!(balance, Nanos::new(100));
 
         let group_balance = billing
-            .transfer_to_group(tenant, group_id, 60)
+            .transfer_to_group(tenant, group_id, Nanos::new(60))
             .await
             .expect("transfer succeeds");
-        assert_eq!(group_balance, 60);
+        assert_eq!(group_balance, Nanos::new(60));
 
         let group_balance = billing
             .get_group_balance(group_id)
             .await
             .expect("balance query succeeds");
-        assert_eq!(group_balance, 60);
+        assert_eq!(group_balance, Nanos::new(60));
     }
 
     #[tokio::test]
@@ -262,12 +262,12 @@ mod tests {
         let billing = InMemoryBilling::new(groups.shared());
 
         billing
-            .credit_tenant(tenant, "tg-user", 40)
+            .credit_tenant(tenant, "tg-user", Nanos::new(40))
             .await
             .expect("tenant credited");
 
         let err = billing
-            .transfer_to_group(tenant, group_id, 60)
+            .transfer_to_group(tenant, group_id, Nanos::new(60))
             .await
             .expect_err("overdraft rejected");
 

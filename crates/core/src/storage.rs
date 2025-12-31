@@ -7,7 +7,9 @@
 //! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, group_id, ring_hash)`,
 //!   `(master_pubkey, created_at)`, keyset pagination.
 
-use crate::ids::{EventId, GroupId, KeyImage, MasterPublicKey, RingHash, TenantId, TenantToken};
+use crate::ids::{
+    EventId, GroupId, KeyImage, MasterPublicKey, Nanos, RingHash, SequenceNo, TenantId, TenantToken,
+};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use async_trait::async_trait;
 use nazgul::ring::Ring;
@@ -17,8 +19,6 @@ pub mod facade;
 
 /// Canonical, signed event bytes (audit-preserving).
 pub type EventBytes = Arc<[u8]>;
-
-pub type SequenceNo = i64;
 
 /// Event identifier, canonical bytes, and sequence number.
 pub type EventRecord = (EventId, EventBytes, SequenceNo);
@@ -505,10 +505,10 @@ pub trait BillingStore {
     /// # Arguments
     /// * `tenant` - The tenant identifier
     /// * `owner_tg_user_id` - The Telegram user ID of the tenant owner
-    /// * `amount_nanos` - Amount to credit in nanocents (1 cent = 10^9 nanos)
+    /// * `amount` - Amount to credit
     ///
     /// # Returns
-    /// The updated tenant balance in nanocents after crediting.
+    /// The updated tenant balance after crediting.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
@@ -520,8 +520,8 @@ pub trait BillingStore {
         &self,
         tenant: TenantId,
         owner_tg_user_id: &str,
-        amount_nanos: u64,
-    ) -> Result<i64, StorageError>;
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError>;
 
     /// Transfer funds from tenant balance to a group's operational budget.
     ///
@@ -531,10 +531,10 @@ pub trait BillingStore {
     /// # Arguments
     /// * `tenant` - The tenant identifier
     /// * `group_id` - The group identifier
-    /// * `amount_nanos` - Amount to transfer in nanocents
+    /// * `amount` - Amount to transfer
     ///
     /// # Returns
-    /// The updated group balance in nanocents after the transfer.
+    /// The updated group balance after the transfer.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
@@ -547,8 +547,8 @@ pub trait BillingStore {
         &self,
         tenant: TenantId,
         group_id: GroupId,
-        amount_nanos: u64,
-    ) -> Result<i64, StorageError>;
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError>;
 
     /// Retrieve the current operational budget balance for a group.
     ///
@@ -556,12 +556,12 @@ pub trait BillingStore {
     /// * `group_id` - The group identifier
     ///
     /// # Returns
-    /// The group's current balance in nanocents.
+    /// The group's current balance.
     ///
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError>;
+    async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError>;
 
     /// Resolve a Telegram user ID to their associated tenant and group.
     ///
@@ -586,7 +586,7 @@ pub trait BillingStore {
 #[derive(Clone, Debug)]
 pub struct GiftCard {
     pub code: String,
-    pub amount_nanos: u64,
+    pub amount: Nanos,
     pub used_by: Option<TenantId>,
 }
 
@@ -598,10 +598,10 @@ pub trait GiftCardStore {
     /// The card is initially unassigned (`used_by = None`).
     ///
     /// # Arguments
-    /// * `amount_nanos` - The gift card value in nanocents
+    /// * `amount` - The gift card value
     ///
     /// # Returns
-    /// A `GiftCard` with a unique `code` and the specified `amount_nanos`.
+    /// A `GiftCard` with a unique `code` and the specified `amount`.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
@@ -609,7 +609,7 @@ pub trait GiftCardStore {
     /// # Invariants
     /// * Generated codes are globally unique
     /// * Cards are initially unassigned
-    async fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError>;
+    async fn issue(&self, amount: Nanos) -> Result<GiftCard, StorageError>;
 
     /// Redeem a gift card for a tenant, crediting their balance.
     ///

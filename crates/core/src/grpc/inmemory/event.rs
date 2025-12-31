@@ -1,7 +1,7 @@
 /// In-memory event storage and streaming.
 use crate::event::{Event, EventType};
 use crate::hashing::event_hash_sha3_256;
-use crate::ids::{EventId, GroupId, TenantId};
+use crate::ids::{EventId, GroupId, SequenceNo, TenantId};
 use crate::storage::{
     EventBytes, EventReader, EventRecord, EventStore, EventWriter, NotFound, StorageError,
 };
@@ -94,7 +94,7 @@ impl EventWriter for InMemoryEvents {
         tenant: TenantId,
         group_id: GroupId,
         event_bytes: EventBytes,
-    ) -> Result<(EventId, i64), StorageError> {
+    ) -> Result<(EventId, SequenceNo), StorageError> {
         let mut inner = self.inner();
         let entry = inner.entry((tenant, group_id)).or_default();
         let event: Event = serde_json::from_slice(&event_bytes)
@@ -103,7 +103,7 @@ impl EventWriter for InMemoryEvents {
             .map_err(|e| StorageError::Backend(format!("hash event: {e}")))?;
         let id = EventId(hash.0);
         self.apply_indexes(tenant, group_id, &event, id)?;
-        let seq = entry.len() as i64;
+        let seq = SequenceNo::new(entry.len() as i64);
         entry.push((id, event_bytes, seq));
         Ok((id, seq))
     }
@@ -115,7 +115,7 @@ impl EventReader for InMemoryEvents {
         &self,
         tenant: TenantId,
         group_id: GroupId,
-        after: Option<i64>,
+        after: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
         let inner = self.inner();
@@ -124,8 +124,8 @@ impl EventReader for InMemoryEvents {
         };
         let start = match after {
             None => 0,
-            Some(seq) if seq < 0 => 0,
-            Some(seq) => match seq.checked_add(1) {
+            Some(seq) if seq.as_i64() < 0 => 0,
+            Some(seq) => match seq.as_i64().checked_add(1) {
                 Some(next) => usize::try_from(next).unwrap_or(events.len()),
                 None => events.len(),
             },

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ids::{GroupId, KeyImage, MasterPublicKey, RingHash, TenantId, TenantToken};
+use crate::ids::{GroupId, KeyImage, MasterPublicKey, Nanos, RingHash, TenantId, TenantToken};
 use crate::ring_log::RingDelta;
 use crate::storage::{
     BanIndex, BannedOperation, BillingStore, EventBytes, EventReader, EventRecord, EventWriter,
@@ -381,8 +381,8 @@ impl StorageFacade {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Issue a new gift card.
-    pub async fn issue_gift_card(&self, amount_nanos: u64) -> Result<GiftCard, StorageError> {
-        self.gift_cards.issue(amount_nanos).await
+    pub async fn issue_gift_card(&self, amount: Nanos) -> Result<GiftCard, StorageError> {
+        self.gift_cards.issue(amount).await
     }
 
     /// Redeem a gift card for a tenant.
@@ -403,10 +403,10 @@ impl StorageFacade {
         &self,
         tenant: TenantId,
         owner_tg_user_id: &str,
-        amount_nanos: u64,
-    ) -> Result<i64, StorageError> {
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
         self.billing
-            .credit_tenant(tenant, owner_tg_user_id, amount_nanos)
+            .credit_tenant(tenant, owner_tg_user_id, amount)
             .await
     }
 
@@ -415,15 +415,15 @@ impl StorageFacade {
         &self,
         tenant: TenantId,
         group_id: GroupId,
-        amount_nanos: u64,
-    ) -> Result<i64, StorageError> {
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
         self.billing
-            .transfer_to_group(tenant, group_id, amount_nanos)
+            .transfer_to_group(tenant, group_id, amount)
             .await
     }
 
     /// Get a group's current budget balance.
-    pub async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError> {
+    pub async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError> {
         self.billing.get_group_balance(group_id).await
     }
 

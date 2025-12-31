@@ -192,3 +192,62 @@ impl FromStr for GroupId {
         Ok(Self(Ulid::from_string(s)?))
     }
 }
+
+/// Monetary amount in nanocents (1 cent = 10^9 nanos).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Nanos(pub u64);
+
+impl Nanos {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+
+    pub fn checked_add(self, other: Self) -> Option<Self> {
+        self.0.checked_add(other.0).map(Self)
+    }
+
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        self.0.checked_sub(other.0).map(Self)
+    }
+}
+
+impl fmt::Display for Nanos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Monotonically increasing sequence number for event ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SequenceNo(pub i64);
+
+impl SequenceNo {
+    /// Genesis sequence number (before first event).
+    pub const GENESIS: Self = Self(-1);
+
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    pub const fn as_i64(self) -> i64 {
+        self.0
+    }
+
+    pub fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+impl fmt::Display for SequenceNo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}

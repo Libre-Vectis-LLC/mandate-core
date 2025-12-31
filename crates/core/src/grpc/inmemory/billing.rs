@@ -1,5 +1,5 @@
 /// In-memory billing store and gift card management.
-use crate::ids::{GroupId, TenantId};
+use crate::ids::{GroupId, Nanos, TenantId};
 use crate::storage::{BillingStore, GiftCard, GiftCardStore, NotFound, StorageError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -23,12 +23,12 @@ impl InMemoryGiftCards {
 
 #[async_trait]
 impl GiftCardStore for InMemoryGiftCards {
-    async fn issue(&self, amount_nanos: u64) -> Result<GiftCard, StorageError> {
+    async fn issue(&self, amount: Nanos) -> Result<GiftCard, StorageError> {
         let mut map = self.cards.lock();
         let code = format!("GIFT-{}", ulid::Ulid::new());
         let card = GiftCard {
             code: code.clone(),
-            amount_nanos,
+            amount,
             used_by: None,
         };
         map.insert(code, card.clone());
@@ -74,9 +74,9 @@ impl BillingStore for InMemoryBilling {
         &self,
         tenant: TenantId,
         owner_tg_user_id: &str,
-        amount_nanos: u64,
-    ) -> Result<i64, StorageError> {
-        let delta = i64::try_from(amount_nanos)
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
+        let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
         // Record tg_user_id -> tenant mapping
@@ -89,16 +89,16 @@ impl BillingStore for InMemoryBilling {
         *balance = balance
             .checked_add(delta)
             .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
-        Ok(*balance)
+        Ok(Nanos::new(*balance as u64))
     }
 
     async fn transfer_to_group(
         &self,
         tenant: TenantId,
         group_id: GroupId,
-        amount_nanos: u64,
-    ) -> Result<i64, StorageError> {
-        let delta = i64::try_from(amount_nanos)
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
+        let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
         let mut tenants = self.tenants.lock();
         let tenant_balance = tenants.entry(tenant).or_insert(0);
@@ -124,15 +124,15 @@ impl BillingStore for InMemoryBilling {
             .checked_add(delta)
             .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
 
-        Ok(record.balance_nanos)
+        Ok(Nanos::new(record.balance_nanos as u64))
     }
 
-    async fn get_group_balance(&self, group_id: GroupId) -> Result<i64, StorageError> {
+    async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError> {
         let groups = self.groups.lock();
         let record = groups
             .get(&group_id)
             .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
-        Ok(record.balance_nanos)
+        Ok(Nanos::new(record.balance_nanos as u64))
     }
 
     async fn resolve_telegram_user(

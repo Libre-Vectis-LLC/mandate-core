@@ -160,13 +160,15 @@ impl DigestAlgorithm for Sha3_512Digest {
 /// Serialize to canonical JSON (sorted keys, no whitespace) for stable hashing.
 pub fn canonical_json(value: &impl Serialize) -> Result<Vec<u8>, CanonicalHashError> {
     let mut v = serde_json::to_value(value)?;
-    normalize_value(&mut v);
+    canonicalize_json_value(&mut v);
     let mut buf = Vec::new();
     serde_json::to_writer(&mut buf, &v)?;
     Ok(buf)
 }
 
-fn normalize_value(value: &mut Value) {
+/// Recursively canonicalize a JSON value by sorting object keys.
+/// Arrays preserve their original order (semantically significant).
+fn canonicalize_json_value(value: &mut Value) {
     match value {
         Value::Object(map) => {
             let mut entries: Vec<(String, Value)> =
@@ -174,13 +176,13 @@ fn normalize_value(value: &mut Value) {
             entries.sort_by(|a, b| a.0.cmp(&b.0));
             map.clear();
             for (k, mut v) in entries {
-                normalize_value(&mut v);
+                canonicalize_json_value(&mut v);
                 map.insert(k, v);
             }
         }
         Value::Array(items) => {
             for v in items.iter_mut() {
-                normalize_value(v);
+                canonicalize_json_value(v);
             }
         }
         _ => {}
