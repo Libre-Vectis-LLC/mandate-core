@@ -1,0 +1,116 @@
+//! StorageService gRPC implementation.
+
+use crate::ids::GroupId;
+use crate::rpc::RpcError;
+use crate::storage::facade::StorageFacade;
+use mandate_proto::mandate::v1::{
+    storage_service_server::StorageService, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse,
+    UploadKeyBlobsRequest, UploadKeyBlobsResponse,
+};
+use tonic::{Request, Response, Status};
+
+use super::{extract_tenant_id, keyblobs_max_blob_bytes, keyblobs_max_count, to_status};
+
+#[derive(Clone)]
+pub struct StorageServiceImpl {
+    store: StorageFacade,
+}
+
+impl StorageServiceImpl {
+    pub fn new(store: StorageFacade) -> Self {
+        Self { store }
+    }
+}
+
+#[tonic::async_trait]
+impl StorageService for StorageServiceImpl {
+    async fn upload_key_blobs(
+        &self,
+        request: Request<UploadKeyBlobsRequest>,
+    ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+
+        if body.blobs.len() > keyblobs_max_count() {
+            return Err(RpcError::InvalidArgument {
+                field: "blobs",
+                reason: format!("too many ({} > {})", body.blobs.len(), keyblobs_max_count()),
+            }
+            .into());
+        }
+        let max_blob_bytes = keyblobs_max_blob_bytes();
+        if body.blobs.iter().any(|b| b.blob.len() > max_blob_bytes) {
+            return Err(RpcError::InvalidArgument {
+                field: "blobs",
+                reason: format!("blob too large (max {} bytes)", max_blob_bytes),
+            }
+            .into());
+        }
+
+        let mut entries = Vec::with_capacity(body.blobs.len());
+        for blob in body.blobs {
+            let rage_pub = blob
+                .rage_pub
+                .as_ref()
+                .ok_or_else(|| RpcError::InvalidArgument {
+                    field: "rage_pub",
+                    reason: "missing in blob entry".into(),
+                })?;
+            let rage_pub = crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| {
+                RpcError::InvalidArgument {
+                    field: "rage_pub",
+                    reason: e.to_string(),
+                }
+            })?;
+            entries.push((rage_pub, blob.blob.into()));
+        }
+
+        self.store
+            .put_key_blobs(tenant, group_id, entries)
+            .await
+            .map_err(to_status)?;
+        Ok(Response::new(UploadKeyBlobsResponse {}))
+    }
+
+    async fn download_my_key_blob(
+        &self,
+        request: Request<DownloadMyKeyBlobRequest>,
+    ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+        let rage_pub = body
+            .rage_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: "missing".into(),
+            })?;
+        let rage_pub =
+            crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: e.to_string(),
+            })?;
+
+        let blob = self
+            .store
+            .get_key_blob(tenant, group_id, rage_pub)
+            .await
+            .map_err(to_status)?;
+
+        Ok(Response::new(DownloadMyKeyBlobResponse {
+            blob: blob.to_vec(),
+        }))
+    }
+}
