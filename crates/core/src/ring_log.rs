@@ -224,8 +224,7 @@ impl RingDeltaLog {
             }
         }
 
-        let (a_idx, t_idx, _) =
-            best.expect("non-empty anchor/target positions guaranteed by index lookups");
+        let (a_idx, t_idx, _) = best.ok_or(RingLogError::AnchorNotFound)?;
 
         Ok((ring, (a_idx, t_idx, anchored)))
     }
