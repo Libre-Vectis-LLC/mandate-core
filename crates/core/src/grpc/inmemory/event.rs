@@ -103,7 +103,10 @@ impl EventWriter for InMemoryEvents {
             .map_err(|e| StorageError::Backend(format!("hash event: {e}")))?;
         let id = EventId(hash.0);
         self.apply_indexes(tenant, group_id, &event, id)?;
-        let seq = SequenceNo::new(entry.len() as i64);
+        let seq = SequenceNo::new(
+            i64::try_from(entry.len())
+                .map_err(|_| StorageError::Backend("sequence number overflow".into()))?,
+        );
         entry.push((id, event_bytes, seq));
         Ok((id, seq))
     }
