@@ -209,6 +209,7 @@ impl StorageFacade {
     }
 
     /// Direct constructor (prefer `StorageFacade::builder()` for readability).
+    #[deprecated(since = "0.2.0", note = "Use StorageFacadeBuilder instead for clearer construction")]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tenant_tokens: Arc<dyn TenantTokenStore + Send + Sync>,

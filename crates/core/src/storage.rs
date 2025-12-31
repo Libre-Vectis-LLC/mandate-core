@@ -37,11 +37,11 @@ pub struct RingDeltaPath {
 impl RingDeltaPath {
     /// Replay the delta path onto an anchor ring, returning the final ring.
     /// Caller supplies the anchor ring whose hash must equal `from`.
-    pub fn apply(self, mut ring: Ring) -> Result<Ring, RingLogError> {
+    pub fn apply(self, mut anchor_ring: Ring) -> Result<Ring, RingLogError> {
         for delta in &self.deltas {
-            apply_delta(&mut ring, delta)?;
+            apply_delta(&mut anchor_ring, delta)?;
         }
-        Ok(ring)
+        Ok(anchor_ring)
     }
 }
 
