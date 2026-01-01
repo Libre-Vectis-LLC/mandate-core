@@ -107,8 +107,10 @@ impl PowDifficultyCalculator {
     /// ```text
     /// verify_cycles = verification_model.verification_cost_function(ring_size, message_bytes)
     /// target_cycles = verify_cycles × cost_multiplier
-    /// required_proofs = max(target_cycles / pow_cycles_per_proof, min_proofs)
+    /// required_proofs = max(ceil(target_cycles / pow_cycles_per_proof), min_proofs)
     /// ```
+    ///
+    /// Note: Uses ceiling division to ensure POW cost always meets or exceeds target.
     ///
     /// # Parameters
     ///
@@ -158,9 +160,11 @@ impl PowDifficultyCalculator {
         // Target: POW computation cost ≥ verification cost × multiplier
         let target_cycles = (verify_cycles as f64 * cost_multiplier) as u64;
 
-        // Calculate required proof count
-        let required_proofs =
-            (target_cycles / self.pow_cycles_per_proof).max(self.min_proofs as u64) as usize;
+        // Calculate required proof count using ceiling division
+        // to ensure POW cost >= verification cost × multiplier
+        let required_proofs = target_cycles
+            .div_ceil(self.pow_cycles_per_proof)
+            .max(self.min_proofs as u64) as usize;
 
         PowParams {
             bits: self.fixed_bits,
@@ -238,8 +242,8 @@ mod tests {
 
         // verify_cycles = 12.5*1024 + 77750*16 + 8000 = 1264800
         // target = 1264800 * 3 = 3794400
-        // required = 3794400 / 50000 = 75.888 → rounds to 75
-        assert_eq!(params.required_proofs, 75);
+        // required = ceil(3794400 / 50000) = ceil(75.888) = 76
+        assert_eq!(params.required_proofs, 76);
         assert_eq!(params.bits, 7);
     }
 
@@ -253,8 +257,8 @@ mod tests {
 
         // verify_cycles = 12.5*2048 + 77750*128 + 8000 = 25600 + 9958000 + 8000 = 9985600
         // target = 9985600 * 3 = 29956800
-        // required = 29956800 / 50000 = 599.136 → truncates to 599 (integer division)
-        assert_eq!(params.required_proofs, 599);
+        // required = ceil(29956800 / 50000) = ceil(599.136) = 600
+        assert_eq!(params.required_proofs, 600);
     }
 
     #[test]
@@ -270,10 +274,11 @@ mod tests {
         let params_6x = calc.calculate_pow_params(ring_size, msg_bytes, 6.0);
         let params_12x = calc.calculate_pow_params(ring_size, msg_bytes, 12.0);
 
-        // Proofs should double each time (exponential escalation)
-        assert_eq!(params_3x.required_proofs, 75);
-        assert_eq!(params_6x.required_proofs, 151);
-        assert_eq!(params_12x.required_proofs, 303);
+        // Proofs should approximately double each time (exponential escalation)
+        // Using ceiling division: 3794400/50000=76, 7588800/50000=152, 15177600/50000=304
+        assert_eq!(params_3x.required_proofs, 76);
+        assert_eq!(params_6x.required_proofs, 152);
+        assert_eq!(params_12x.required_proofs, 304);
     }
 
     #[test]
@@ -289,9 +294,11 @@ mod tests {
         let params_5x = calc.calculate_pow_params(ring_size, msg_bytes, 5.0);
 
         // Linear escalation: +1x each time
-        assert_eq!(params_3x.required_proofs, 75);
-        assert_eq!(params_4x.required_proofs, 101);
-        assert_eq!(params_5x.required_proofs, 126);
+        // verify_cycles = 1264800, using ceiling division
+        // 3x: ceil(3794400/50000)=76, 4x: ceil(5059200/50000)=102, 5x: ceil(6324000/50000)=127
+        assert_eq!(params_3x.required_proofs, 76);
+        assert_eq!(params_4x.required_proofs, 102);
+        assert_eq!(params_5x.required_proofs, 127);
     }
 
     #[test]
