@@ -15,6 +15,7 @@
 //!   via `cargo check --target wasm32-unknown-unknown`. gRPC surface is host-only.
 //! - Pluggability: digest trait leaves room for future BLAKE3 swap without API breakage.
 //!
+pub mod billing;
 pub mod crypto;
 pub mod event;
 pub mod hashing;
