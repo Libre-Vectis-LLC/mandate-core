@@ -1,6 +1,7 @@
 use crate::ids::{BotSecret, TenantId, TenantToken};
 use crate::proto::{API_TOKEN_METADATA_KEY, BOT_SECRET_METADATA_KEY, TENANT_ID_METADATA_KEY};
 use crate::rpc::RpcError;
+use sha3::{Digest, Sha3_256};
 use subtle::ConstantTimeEq;
 use tonic::{Request, Status};
 use ulid::Ulid;
@@ -116,6 +117,14 @@ pub fn require_bot_secret(mut req: Request<()>) -> Result<Request<()>, Status> {
     Ok(req)
 }
 
+/// Hash a secret using SHA3-256 to normalize length before constant-time comparison.
+/// This prevents timing attacks based on length differences.
+fn hash_for_comparison(secret: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha3_256::new();
+    hasher.update(secret);
+    hasher.finalize().into()
+}
+
 /// Create an interceptor that validates the bot secret using constant-time comparison
 /// and extracts tenant context from request metadata if present.
 ///
@@ -128,14 +137,12 @@ pub fn make_bot_secret_interceptor(
     move |mut req: Request<()>| {
         let provided = extract_bot_secret(&req)?;
 
-        // Constant-time comparison to prevent timing attacks
-        let expected_bytes = expected.as_bytes();
-        let provided_bytes = provided.as_bytes();
+        // Hash both secrets to normalize length and prevent timing attacks
+        let expected_hash = hash_for_comparison(expected.as_bytes());
+        let provided_hash = hash_for_comparison(provided.as_bytes());
 
-        // Length check must be done first; ct_eq requires same-length slices
-        if expected_bytes.len() != provided_bytes.len()
-            || !bool::from(expected_bytes.ct_eq(provided_bytes))
-        {
+        // Constant-time comparison on fixed-length hashes
+        if !bool::from(expected_hash.ct_eq(&provided_hash)) {
             return Err(RpcError::Unauthenticated {
                 credential: "bot_secret",
                 reason: "invalid".into(),
