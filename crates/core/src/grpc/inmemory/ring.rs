@@ -91,30 +91,48 @@ impl RingView for InMemoryRings {
             group_id,
         }))?;
 
-        let deltas = state
-            .log
-            .delta_path(ring_hash_current.as_ref(), &ring_hash_target)
-            .map_err(|e| match e {
-                RingLogError::TargetNotFound => StorageError::NotFound(NotFound::Ring {
-                    hash: ring_hash_target,
-                    tenant,
-                    group_id,
-                }),
-                RingLogError::AnchorNotFound => StorageError::NotFound(NotFound::Ring {
-                    hash: ring_hash_current.unwrap_or(ring_hash_target),
-                    tenant,
-                    group_id,
-                }),
-                other => StorageError::Backend(other.to_string()),
-            })?;
-
-        let from = ring_hash_current.unwrap_or_else(|| {
-            state
+        let (from, deltas) = if let Some(anchor) = ring_hash_current {
+            let deltas = state
+                .log
+                .delta_path(Some(&anchor), &ring_hash_target)
+                .map_err(|e| match e {
+                    RingLogError::TargetNotFound => StorageError::NotFound(NotFound::Ring {
+                        hash: ring_hash_target,
+                        tenant,
+                        group_id,
+                    }),
+                    RingLogError::AnchorNotFound => StorageError::NotFound(NotFound::Ring {
+                        hash: anchor,
+                        tenant,
+                        group_id,
+                    }),
+                    other => StorageError::Backend(other.to_string()),
+                })?;
+            (anchor, deltas)
+        } else {
+            let anchor = state
                 .log
                 .genesis_hash()
                 .cloned()
-                .unwrap_or(state.current_hash)
-        });
+                .unwrap_or(state.current_hash);
+            let deltas = state
+                .log
+                .delta_path(None, &ring_hash_target)
+                .map_err(|e| match e {
+                    RingLogError::TargetNotFound => StorageError::NotFound(NotFound::Ring {
+                        hash: ring_hash_target,
+                        tenant,
+                        group_id,
+                    }),
+                    RingLogError::AnchorNotFound => StorageError::NotFound(NotFound::Ring {
+                        hash: anchor,
+                        tenant,
+                        group_id,
+                    }),
+                    other => StorageError::Backend(other.to_string()),
+                })?;
+            (anchor, deltas)
+        };
 
         Ok(crate::storage::RingDeltaPath {
             from,

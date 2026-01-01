@@ -26,6 +26,9 @@ impl RingLogCache {
                 .stream_ring(group_id, cursor.clone(), limit)
                 .await
                 .context("stream_ring failed")?;
+            if response.entries.is_empty() {
+                break;
+            }
             for entry in response.entries {
                 Self::apply_entry(&mut log, &mut ring, &mut cache, entry)?;
             }

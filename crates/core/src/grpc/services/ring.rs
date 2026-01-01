@@ -9,6 +9,7 @@ use mandate_proto::mandate::v1::{
     ring_service_server::RingService, GetRingHeadRequest, GetRingHeadResponse, StreamRingRequest,
     StreamRingResponse,
 };
+use nazgul::ring::Ring;
 use nazgul::traits::LocalByteConvertible;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -117,11 +118,18 @@ impl RingService for RingServiceImpl {
             .await
             .map_err(to_status)?;
 
+        let anchor_override = if after_hash.is_none() {
+            Some(Ring::new(Vec::new()))
+        } else {
+            None
+        };
+
         let entries = encode_ring_delta_path(
             &self.store,
             tenant,
             group_id,
             &path,
+            anchor_override,
             clamp_ring_limit(req.limit),
         )
         .await?;
@@ -146,13 +154,19 @@ async fn encode_ring_delta_path(
     tenant: crate::ids::TenantId,
     group_id: GroupId,
     path: &crate::storage::RingDeltaPath,
+    anchor_override: Option<Ring>,
     limit: usize,
 ) -> Result<Vec<mandate_proto::mandate::v1::RingDeltaEntry>, Status> {
-    let anchor = store
-        .ring_by_hash(tenant, group_id, &path.from)
-        .await
-        .map_err(to_status)?;
-    let mut ring = (*anchor).clone();
+    let mut ring = match anchor_override {
+        Some(anchor) => anchor,
+        None => {
+            let anchor = store
+                .ring_by_hash(tenant, group_id, &path.from)
+                .await
+                .map_err(to_status)?;
+            (*anchor).clone()
+        }
+    };
 
     let deltas_bytes = path
         .deltas

@@ -93,11 +93,13 @@ pub fn content_hash_ciphertext(ciphertext: &Ciphertext) -> ContentHash {
     ContentHash(sha3_256_bytes(&ciphertext.0).into_inner())
 }
 
-/// Derive a deterministic ring hash using nazgul's consensus hash with SHA3-256.
+/// Derive a deterministic ring hash using nazgul's consensus hash with SHA3-512.
 /// The underlying `Ring` already sorts members, so the result is order-invariant.
+///
+/// This matches the hash stored by ContextualBLSAG compact signatures
+/// (Sha3_512 consensus hash truncated to 32 bytes).
 pub fn ring_hash_sha3_256(ring: &Ring) -> RingHash {
-    let bytes: [u8; 32] = ring.consensus_hash::<Sha3_256>().into();
-    RingHash(bytes)
+    RingHash::from_output::<Sha3_512>(ring.consensus_hash::<Sha3_512>())
 }
 
 /// Domain prefixes for hashing distinct mandate payloads.
@@ -539,7 +541,7 @@ mod tests {
         let h = ring_hash_sha3_256(&ring);
         assert_eq!(
             encode(h.0),
-            "5fa7ac38764b3f2222db3881b8272804fefaed7dca731d49f0e70d9f5ed792b5"
+            "fce2d27f03c9b5f108778fa8e670de601324d877ec33086e5dec76c718986f96"
         );
     }
 
