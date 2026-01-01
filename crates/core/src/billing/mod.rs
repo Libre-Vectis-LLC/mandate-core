@@ -33,6 +33,7 @@ mod difficulty;
 mod metering;
 mod pow_state;
 mod pricing;
+mod storage;
 mod tenant_tier;
 mod types;
 
@@ -43,6 +44,7 @@ pub use difficulty::PowDifficultyCalculator;
 pub use metering::{MeteringError, UsageEvent};
 pub use pow_state::{EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy};
 pub use pricing::{ProviderPricing, ServiceTier};
+pub use storage::{GroupStorageStatus, GroupStorageUsage};
 pub use tenant_tier::{
     has_priority_over, tenant_tier_level, TenantTier, TIER_FREE, TIER_MAX_MIN, TIER_PAID_MAX,
     TIER_PAID_MIN, TIER_PRO_MAX, TIER_PRO_MIN,
