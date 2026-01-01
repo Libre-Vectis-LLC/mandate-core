@@ -75,7 +75,9 @@ impl Add for AbstractResourceUnits {
 /// let from_dollars = Nanos::from_dollars(3.50);
 /// assert_eq!(from_dollars.to_dollars(), 3.50);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Nanos(i64);
 
 impl Nanos {
@@ -188,6 +190,123 @@ impl Mul<u32> for Nanos {
     }
 }
 
+/// Entity that holds a balance.
+///
+/// Balances can be held by tenants (account-level) or groups (project-level).
+/// Groups must transfer funds from their tenant before performing operations.
+///
+/// # Examples
+///
+/// ```
+/// use mandate_core::billing::BalanceHolder;
+///
+/// let tenant = BalanceHolder::Tenant("tenant_123".to_string());
+/// let group = BalanceHolder::Group("group_abc".to_string());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum BalanceHolder {
+    /// Tenant account balance.
+    Tenant(String),
+    /// Group project balance.
+    Group(String),
+}
+
+impl BalanceHolder {
+    /// Returns true if this is a tenant balance holder.
+    pub fn is_tenant(&self) -> bool {
+        matches!(self, BalanceHolder::Tenant(_))
+    }
+
+    /// Returns true if this is a group balance holder.
+    pub fn is_group(&self) -> bool {
+        matches!(self, BalanceHolder::Group(_))
+    }
+
+    /// Returns the ID as a string reference.
+    pub fn id(&self) -> &str {
+        match self {
+            BalanceHolder::Tenant(id) | BalanceHolder::Group(id) => id,
+        }
+    }
+}
+
+/// Receipt for balance transfers (for audit trail).
+///
+/// Every balance transfer generates a receipt for accountability and debugging.
+///
+/// # Examples
+///
+/// ```
+/// use mandate_core::billing::{TransferReceipt, BalanceHolder, Nanos};
+///
+/// let receipt = TransferReceipt {
+///     transfer_id: "uuid-1234".to_string(),
+///     from: BalanceHolder::Tenant("tenant_1".to_string()),
+///     to: BalanceHolder::Group("group_a".to_string()),
+///     amount: Nanos::from_dollars(10.0),
+///     timestamp_ms: 1609459200000,
+///     reason: Some("Initial funding".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransferReceipt {
+    /// Unique transfer identifier (UUID).
+    pub transfer_id: String,
+    /// Source of funds.
+    pub from: BalanceHolder,
+    /// Destination of funds.
+    pub to: BalanceHolder,
+    /// Amount transferred.
+    pub amount: Nanos,
+    /// Timestamp in milliseconds since Unix epoch.
+    pub timestamp_ms: u64,
+    /// Optional reason for the transfer.
+    pub reason: Option<String>,
+}
+
+/// Errors that can occur during balance transfers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferError {
+    /// Insufficient balance for the transfer.
+    InsufficientBalance {
+        /// Amount required for the transfer.
+        required: Nanos,
+        /// Amount currently available.
+        available: Nanos,
+    },
+    /// Group is not owned by the tenant attempting the transfer.
+    GroupNotOwned(String),
+    /// Invalid amount (e.g., zero or negative).
+    InvalidAmount(String),
+    /// Database error during transfer.
+    Database(String),
+}
+
+impl std::fmt::Display for TransferError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransferError::InsufficientBalance {
+                required,
+                available,
+            } => {
+                write!(
+                    f,
+                    "insufficient balance: required ${:.9}, available ${:.9}",
+                    required.to_dollars(),
+                    available.to_dollars()
+                )
+            }
+            TransferError::GroupNotOwned(group_id) => {
+                write!(f, "group {} not owned by tenant", group_id)
+            }
+            TransferError::InvalidAmount(msg) => write!(f, "invalid amount: {}", msg),
+            TransferError::Database(msg) => write!(f, "database error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for TransferError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +388,59 @@ mod tests {
         let b = Nanos::new(2_000_000_000);
         assert!(a < b);
         assert!(b > a);
+    }
+
+    #[test]
+    fn test_balance_holder_tenant() {
+        let holder = BalanceHolder::Tenant("tenant_123".to_string());
+        assert!(holder.is_tenant());
+        assert!(!holder.is_group());
+        assert_eq!(holder.id(), "tenant_123");
+    }
+
+    #[test]
+    fn test_balance_holder_group() {
+        let holder = BalanceHolder::Group("group_abc".to_string());
+        assert!(!holder.is_tenant());
+        assert!(holder.is_group());
+        assert_eq!(holder.id(), "group_abc");
+    }
+
+    #[test]
+    fn test_transfer_receipt_creation() {
+        let receipt = TransferReceipt {
+            transfer_id: "uuid-1234".to_string(),
+            from: BalanceHolder::Tenant("tenant_1".to_string()),
+            to: BalanceHolder::Group("group_a".to_string()),
+            amount: Nanos::from_dollars(10.0),
+            timestamp_ms: 1609459200000,
+            reason: Some("Initial funding".to_string()),
+        };
+
+        assert_eq!(receipt.transfer_id, "uuid-1234");
+        assert!(receipt.from.is_tenant());
+        assert!(receipt.to.is_group());
+        assert_eq!(receipt.amount.to_dollars(), 10.0);
+    }
+
+    #[test]
+    fn test_transfer_error_display() {
+        let err = TransferError::InsufficientBalance {
+            required: Nanos::from_dollars(100.0),
+            available: Nanos::from_dollars(50.0),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("insufficient balance"));
+        assert!(msg.contains("100"));
+        assert!(msg.contains("50"));
+
+        let err = TransferError::GroupNotOwned("group_123".to_string());
+        assert_eq!(format!("{}", err), "group group_123 not owned by tenant");
+
+        let err = TransferError::InvalidAmount("amount must be positive".to_string());
+        assert_eq!(
+            format!("{}", err),
+            "invalid amount: amount must be positive"
+        );
     }
 }
