@@ -28,9 +28,13 @@
 //! ```
 
 mod cost_models;
+mod difficulty;
+mod pow_state;
 mod pricing;
 mod types;
 
 pub use cost_models::{PowVerificationCostModel, VerificationCostModel};
+pub use difficulty::PowDifficultyCalculator;
+pub use pow_state::{EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy};
 pub use pricing::{ProviderPricing, ServiceTier};
 pub use types::{AbstractResourceUnits, Nanos};
