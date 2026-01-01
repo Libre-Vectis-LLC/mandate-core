@@ -39,6 +39,29 @@ impl ServiceTier {
             ServiceTier::Opus => "opus",
         }
     }
+
+    /// Get lower tiers for preemption (higher-tier users can use lower-tier workers).
+    ///
+    /// Returns tiers in descending priority order. Used by scheduler to allow
+    /// higher-tier tenants to preempt lower-tier workers when their preferred tier
+    /// is unavailable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mandate_core::billing::ServiceTier;
+    ///
+    /// assert_eq!(ServiceTier::Opus.lower_tiers(), vec![ServiceTier::Sonnet, ServiceTier::Haiku]);
+    /// assert_eq!(ServiceTier::Sonnet.lower_tiers(), vec![ServiceTier::Haiku]);
+    /// assert_eq!(ServiceTier::Haiku.lower_tiers(), vec![]);
+    /// ```
+    pub fn lower_tiers(&self) -> Vec<ServiceTier> {
+        match self {
+            ServiceTier::Opus => vec![ServiceTier::Sonnet, ServiceTier::Haiku],
+            ServiceTier::Sonnet => vec![ServiceTier::Haiku],
+            ServiceTier::Haiku => vec![],
+        }
+    }
 }
 
 impl FromStr for ServiceTier {
