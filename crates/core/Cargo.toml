@@ -38,3 +38,6 @@ tokio.workspace = true
 tokio-stream.workspace = true
 futures-util.workspace = true
 parking_lot = "0.12"
+rspow.workspace = true
+moka.workspace = true
+bincode = "1.3"

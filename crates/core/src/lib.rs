@@ -28,6 +28,9 @@ pub mod storage;
 pub mod grpc;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod pow;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub mod rpc;
 
 #[cfg(test)]
