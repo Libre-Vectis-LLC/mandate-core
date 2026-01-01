@@ -15,7 +15,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use super::{clamp_events_limit, extract_tenant_id, max_event_bytes, to_status};
+use super::{
+    clamp_events_limit, extract_tenant_id, max_event_bytes, max_poll_id_length, to_status,
+};
 
 fn banned_operation_for_event(event_type: &crate::event::EventType) -> Option<BannedOperation> {
     match event_type {
@@ -63,6 +65,39 @@ impl EventService for EventServiceImpl {
                 field: "event_bytes",
                 reason: format!("invalid JSON payload: {e}"),
             })?;
+
+        // Validate poll_id length for poll/vote events to prevent resource exhaustion
+        let max_id_len = max_poll_id_length();
+        match &event.event_type {
+            crate::event::EventType::PollCreate(poll) => {
+                if poll.poll_id.len() > max_id_len {
+                    return Err(RpcError::InvalidArgument {
+                        field: "poll_id",
+                        reason: format!("too long: {} > {}", poll.poll_id.len(), max_id_len),
+                    }
+                    .into());
+                }
+                for q in &poll.questions {
+                    if q.question_id.len() > max_id_len {
+                        return Err(RpcError::InvalidArgument {
+                            field: "question_id",
+                            reason: format!("too long: {} > {}", q.question_id.len(), max_id_len),
+                        }
+                        .into());
+                    }
+                }
+            }
+            crate::event::EventType::VoteCast(vote) => {
+                if vote.poll_id.len() > max_id_len {
+                    return Err(RpcError::InvalidArgument {
+                        field: "poll_id",
+                        reason: format!("too long: {} > {}", vote.poll_id.len(), max_id_len),
+                    }
+                    .into());
+                }
+            }
+            _ => {}
+        }
 
         // 1. Verify Chain Hash
         match self.store.event_tail(tenant, event.group_id).await {

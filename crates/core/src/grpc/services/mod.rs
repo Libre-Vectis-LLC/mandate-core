@@ -55,6 +55,11 @@ pub(crate) fn keyblobs_max_blob_bytes() -> usize {
     env_usize("MANDATE_GRPC_KEYBLOBS_MAX_BLOB_BYTES", 64 * 1024)
 }
 
+/// Maximum allowed length for poll_id and question_id fields (256 bytes).
+pub(crate) fn max_poll_id_length() -> usize {
+    env_usize("MANDATE_GRPC_MAX_POLL_ID_LENGTH", 256)
+}
+
 pub(crate) fn clamp_events_limit(client_limit: u32) -> usize {
     let max_limit = env_usize("MANDATE_GRPC_EVENTS_MAX_LIMIT", 100);
     let default_limit = env_usize("MANDATE_GRPC_EVENTS_DEFAULT_LIMIT", 50).min(max_limit);
@@ -229,5 +234,49 @@ mod tests {
             .await
             .expect_err("reject");
         assert_eq!(err.code(), Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn push_event_rejects_oversized_poll_id() {
+        use crate::crypto::ciphertext::Ciphertext;
+        use crate::event::{Event, EventType, Poll, PollQuestion, PollQuestionKind};
+        use crate::ids::{EventId, EventUlid, GroupId, RingHash, Ulid};
+
+        let services = CoreServices::new_in_memory().expect("in-memory services");
+        let tenant = TenantId(ulid::Ulid::new());
+
+        // Create a poll event with an oversized poll_id
+        let oversized_poll_id = "x".repeat(max_poll_id_length() + 1);
+        let poll = Poll {
+            group_id: GroupId(Ulid::new()),
+            ring_hash: RingHash([0u8; 32]),
+            poll_id: oversized_poll_id,
+            questions: vec![PollQuestion {
+                question_id: "q1".into(),
+                title: Ciphertext(b"test".to_vec()),
+                kind: PollQuestionKind::FillInTheBlank,
+            }],
+            created_at: 123,
+            instructions: None,
+        };
+
+        let event = Event {
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([0u8; 32]),
+            group_id: poll.group_id,
+            sequence_no: None,
+            processed_at: 123,
+            serialization_version: 1,
+            event_type: EventType::PollCreate(poll),
+            signature: None,
+        };
+
+        let event_bytes = serde_json::to_vec(&event).expect("serialize");
+        let mut req = Request::new(PushEventRequest { event_bytes });
+        req.extensions_mut().insert(tenant);
+
+        let err = services.event.push_event(req).await.expect_err("reject");
+        assert_eq!(err.code(), Code::InvalidArgument);
+        assert!(err.message().contains("poll_id"));
     }
 }
