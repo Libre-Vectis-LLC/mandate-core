@@ -15,7 +15,7 @@ use std::str::FromStr;
 ///
 /// let tier = ServiceTier::Sonnet;  // Balanced performance
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ServiceTier {
     /// Low-cost tier: old devices, solar-powered, Termux.
     /// Cost-sensitive, latency-insensitive.
@@ -109,7 +109,7 @@ impl FromStr for ServiceTier {
 /// let cost = pricing.calculate_cost(&aru);
 /// let charge = pricing.calculate_charge(&aru, 20);  // 20× safety margin
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderPricing {
     /// Provider unique identifier (e.g., "aws-us-east-1").
     pub provider_id: String,
