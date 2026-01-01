@@ -495,6 +495,68 @@ pub trait VoteKeyImageIndex {
     ) -> Result<bool, StorageError>;
 }
 
+/// Index mapping poll IDs to the ring hash at poll creation time.
+///
+/// This index is used during vote verification to retrieve the exact ring
+/// that was in effect when the poll was created. Votes must be verified
+/// against this ring to ensure only eligible members (those present at
+/// poll creation) can vote.
+#[async_trait]
+pub trait PollRingHashIndex {
+    /// Store the ring hash for a newly created poll.
+    ///
+    /// This should be called atomically when a `PollCreate` event is appended
+    /// to the event log. The stored ring hash represents the membership snapshot
+    /// at poll creation time.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `group_id` - The group identifier
+    /// * `poll_id` - The poll identifier (unique within the group)
+    /// * `ring_hash` - The ring hash at poll creation time
+    ///
+    /// # Returns
+    /// `Ok(())` on successful storage.
+    ///
+    /// # Errors
+    /// * `StorageError::AlreadyExists` - When a mapping for this poll already exists
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Invariants
+    /// * Each poll has exactly one associated ring hash (immutable after creation)
+    /// * The ring hash is scoped per `(tenant, group_id, poll_id)` tuple
+    async fn store(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
+        ring_hash: RingHash,
+    ) -> Result<(), StorageError>;
+
+    /// Retrieve the ring hash for a poll.
+    ///
+    /// This is used during vote verification to get the ring against which
+    /// the vote's ring signature must be verified.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `group_id` - The group identifier
+    /// * `poll_id` - The poll identifier
+    ///
+    /// # Returns
+    /// The `RingHash` that was in effect when the poll was created.
+    ///
+    /// # Errors
+    /// * `StorageError::NotFound` - When the poll does not exist
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn get(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
+    ) -> Result<RingHash, StorageError>;
+}
+
 #[async_trait]
 pub trait BillingStore {
     /// Credit a tenant's balance, creating the tenant record if it does not exist.

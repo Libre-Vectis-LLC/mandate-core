@@ -366,6 +366,8 @@ struct CanonicalVote<'a> {
     ring_hash: RingHash,
     poll_id: &'a str,
     poll_hash: crate::ids::ContentHash,
+    /// The ring hash that was active when the poll was created.
+    poll_ring_hash: RingHash,
     selections: Vec<CanonicalVoteSelection<'a>>,
 }
 
@@ -384,6 +386,7 @@ impl<'a> From<&'a Vote> for CanonicalVote<'a> {
             ring_hash: v.ring_hash,
             poll_id: &v.poll_id,
             poll_hash: v.poll_hash,
+            poll_ring_hash: v.poll_ring_hash,
             selections,
         }
     }

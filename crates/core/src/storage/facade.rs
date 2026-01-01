@@ -5,8 +5,8 @@ use crate::ring_log::RingDelta;
 use crate::storage::{
     BanIndex, BannedOperation, BillingStore, EventBytes, EventReader, EventRecord, EventWriter,
     GiftCard, GiftCardStore, GroupMetadataStore, KeyBlobStore, PendingMember, PendingMemberStore,
-    RingDeltaPath, RingView, RingWriter, SequenceNo, StorageError, TenantTokenError,
-    TenantTokenStore, VoteKeyImageIndex,
+    PollRingHashIndex, RingDeltaPath, RingView, RingWriter, SequenceNo, StorageError,
+    TenantTokenError, TenantTokenStore, VoteKeyImageIndex,
 };
 use nazgul::ring::Ring;
 
@@ -24,6 +24,7 @@ pub struct StorageFacade {
     ring_writer: Arc<dyn RingWriter + Send + Sync>,
     ban_index: Arc<dyn BanIndex + Send + Sync>,
     vote_key_images: Arc<dyn VoteKeyImageIndex + Send + Sync>,
+    poll_ring_hashes: Arc<dyn PollRingHashIndex + Send + Sync>,
     billing: Arc<dyn BillingStore + Send + Sync>,
     gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
     groups: Arc<dyn GroupMetadataStore + Send + Sync>,
@@ -61,6 +62,7 @@ impl std::error::Error for StorageFacadeBuilderError {}
 ///     .key_blobs(blobs)
 ///     .ban_index(bans)
 ///     .vote_key_images(images)
+///     .poll_ring_hashes(poll_hashes)
 ///     .billing(billing)
 ///     .gift_cards(cards)
 ///     .groups(groups)
@@ -77,6 +79,7 @@ pub struct StorageFacadeBuilder {
     ring_writer: Option<Arc<dyn RingWriter + Send + Sync>>,
     ban_index: Option<Arc<dyn BanIndex + Send + Sync>>,
     vote_key_images: Option<Arc<dyn VoteKeyImageIndex + Send + Sync>>,
+    poll_ring_hashes: Option<Arc<dyn PollRingHashIndex + Send + Sync>>,
     billing: Option<Arc<dyn BillingStore + Send + Sync>>,
     gift_cards: Option<Arc<dyn GiftCardStore + Send + Sync>>,
     groups: Option<Arc<dyn GroupMetadataStore + Send + Sync>>,
@@ -135,6 +138,12 @@ impl StorageFacadeBuilder {
         self
     }
 
+    /// Set the poll ring hash index.
+    pub fn poll_ring_hashes(mut self, index: Arc<dyn PollRingHashIndex + Send + Sync>) -> Self {
+        self.poll_ring_hashes = Some(index);
+        self
+    }
+
     /// Set the billing store.
     pub fn billing(mut self, store: Arc<dyn BillingStore + Send + Sync>) -> Self {
         self.billing = Some(store);
@@ -186,6 +195,9 @@ impl StorageFacadeBuilder {
             vote_key_images: self.vote_key_images.ok_or(StorageFacadeBuilderError {
                 missing_field: "vote_key_images",
             })?,
+            poll_ring_hashes: self.poll_ring_hashes.ok_or(StorageFacadeBuilderError {
+                missing_field: "poll_ring_hashes",
+            })?,
             billing: self.billing.ok_or(StorageFacadeBuilderError {
                 missing_field: "billing",
             })?,
@@ -223,6 +235,7 @@ impl StorageFacade {
         ring_writer: Arc<dyn RingWriter + Send + Sync>,
         ban_index: Arc<dyn BanIndex + Send + Sync>,
         vote_key_images: Arc<dyn VoteKeyImageIndex + Send + Sync>,
+        poll_ring_hashes: Arc<dyn PollRingHashIndex + Send + Sync>,
         billing: Arc<dyn BillingStore + Send + Sync>,
         gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
         groups: Arc<dyn GroupMetadataStore + Send + Sync>,
@@ -237,6 +250,7 @@ impl StorageFacade {
             ring_writer,
             ban_index,
             vote_key_images,
+            poll_ring_hashes,
             billing,
             gift_cards,
             groups,
@@ -315,6 +329,39 @@ impl StorageFacade {
         self.vote_key_images
             .is_used(tenant, group_id, poll_id, key_image)
             .await
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Poll ring hash methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Store the ring hash for a newly created poll.
+    ///
+    /// This should be called when processing a `PollCreate` event to record
+    /// the ring that was in effect at poll creation time.
+    pub async fn store_poll_ring_hash(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
+        ring_hash: RingHash,
+    ) -> Result<(), StorageError> {
+        self.poll_ring_hashes
+            .store(tenant, group_id, poll_id, ring_hash)
+            .await
+    }
+
+    /// Retrieve the ring hash for a poll.
+    ///
+    /// This is used during vote verification to get the ring against which
+    /// the vote's ring signature must be verified.
+    pub async fn get_poll_ring_hash(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        poll_id: &str,
+    ) -> Result<RingHash, StorageError> {
+        self.poll_ring_hashes.get(tenant, group_id, poll_id).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────

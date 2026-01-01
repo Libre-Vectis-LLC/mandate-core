@@ -15,12 +15,14 @@
 /// - `group`: Group metadata
 /// - `ban`: Ban index for moderation
 /// - `vote`: Vote key image deduplication
+/// - `poll`: Poll ring hash index
 pub mod ban;
 pub mod billing;
 pub mod event;
 pub mod group;
 pub mod key_blob;
 pub mod member;
+pub mod poll;
 pub mod ring;
 pub mod tenant;
 pub mod vote;
@@ -32,6 +34,7 @@ pub use event::InMemoryEvents;
 pub use group::InMemoryGroups;
 pub use key_blob::InMemoryKeyBlobs;
 pub use member::InMemoryPendingMembers;
+pub use poll::{InMemoryPollRingHashes, NoopPollRingHashes};
 pub use ring::InMemoryRings;
 pub use tenant::InMemoryTenantTokens;
 pub use vote::{InMemoryVoteKeyImages, NoopVoteKeyImages};

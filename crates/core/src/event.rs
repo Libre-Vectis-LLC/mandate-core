@@ -106,6 +106,9 @@ pub struct Vote {
     pub ring_hash: RingHash,
     pub poll_id: String,
     pub poll_hash: ContentHash,
+    /// The ring hash that was active when the poll was created.
+    /// Used to validate that voters use the same ring as poll creation.
+    pub poll_ring_hash: RingHash,
     pub selections: Vec<VoteSelection>,
 }
 
@@ -291,6 +294,7 @@ mod tests {
             ring_hash: RingHash([2u8; 32]),
             poll_id: "p".into(),
             poll_hash: ContentHash([3u8; 32]),
+            poll_ring_hash: RingHash([2u8; 32]),
             selections: vec![
                 VoteSelection {
                     question_id: "q2".into(),
@@ -404,6 +408,7 @@ mod tests {
             ring_hash,
             poll_id: "p1".into(),
             poll_hash: ContentHash([0u8; 32]),
+            poll_ring_hash: ring_hash,
             selections: vec![],
         });
         assert_eq!(vote.ring_hash(), ring_hash);
