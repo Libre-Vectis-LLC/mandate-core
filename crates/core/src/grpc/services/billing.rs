@@ -58,8 +58,12 @@ impl BillingService for BillingServiceImpl {
             .transfer_to_group(tenant_id, group_id, Nanos::new(amount))
             .await
             .map_err(to_status)?;
+        let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
+            operation: "transfer_to_group",
+            details: "balance exceeds i64::MAX".into(),
+        })?;
         Ok(Response::new(TransferToGroupResponse {
-            balance_after_nanos: balance.as_u64() as i64,
+            balance_after_nanos: balance_i64,
         }))
     }
 
@@ -79,8 +83,12 @@ impl BillingService for BillingServiceImpl {
             .get_group_balance(group_id)
             .await
             .map_err(to_status)?;
+        let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
+            operation: "get_group_balance",
+            details: "balance exceeds i64::MAX".into(),
+        })?;
         Ok(Response::new(GetGroupBalanceResponse {
-            balance_nanos: balance.as_u64() as i64,
+            balance_nanos: balance_i64,
         }))
     }
 }

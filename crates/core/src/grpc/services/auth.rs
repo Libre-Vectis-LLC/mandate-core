@@ -53,9 +53,16 @@ impl AuthService for AuthServiceImpl {
             .await
             .map_err(to_status)?;
 
+        let balance_i64 =
+            new_balance
+                .try_as_i64()
+                .ok_or_else(|| crate::rpc::RpcError::Internal {
+                    operation: "redeem_gift_card",
+                    details: "balance exceeds i64::MAX".into(),
+                })?;
         Ok(Response::new(RedeemGiftCardResponse {
             tenant_id: tenant_id.0.to_string(),
-            new_balance_nanos: new_balance.as_u64() as i64,
+            new_balance_nanos: balance_i64,
             api_token: token_str,
         }))
     }

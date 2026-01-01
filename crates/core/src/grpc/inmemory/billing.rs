@@ -89,7 +89,9 @@ impl BillingStore for InMemoryBilling {
         *balance = balance
             .checked_add(delta)
             .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
-        Ok(Nanos::new(*balance as u64))
+        let balance_u64 = u64::try_from(*balance)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        Ok(Nanos::new(balance_u64))
     }
 
     async fn transfer_to_group(
@@ -124,7 +126,9 @@ impl BillingStore for InMemoryBilling {
             .checked_add(delta)
             .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
 
-        Ok(Nanos::new(record.balance_nanos as u64))
+        let balance_u64 = u64::try_from(record.balance_nanos)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        Ok(Nanos::new(balance_u64))
     }
 
     async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError> {
@@ -132,7 +136,9 @@ impl BillingStore for InMemoryBilling {
         let record = groups
             .get(&group_id)
             .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
-        Ok(Nanos::new(record.balance_nanos as u64))
+        let balance_u64 = u64::try_from(record.balance_nanos)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        Ok(Nanos::new(balance_u64))
     }
 
     async fn resolve_telegram_user(

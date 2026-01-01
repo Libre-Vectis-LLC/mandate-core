@@ -279,6 +279,11 @@ impl Nanos {
     pub fn checked_sub(self, other: Self) -> Option<Self> {
         self.0.checked_sub(other.0).map(Self)
     }
+
+    /// Convert to i64, returning None if the value exceeds i64::MAX.
+    pub fn try_as_i64(self) -> Option<i64> {
+        i64::try_from(self.0).ok()
+    }
 }
 
 impl fmt::Display for Nanos {
