@@ -9,7 +9,7 @@ use crate::grpc::services::{
     MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
 };
 use crate::ids::{BotSecret, TenantId, TenantToken};
-use crate::storage::facade::StorageFacade;
+use crate::storage::facade::{StorageFacade, StorageFacadeBuilderError};
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
     billing_service_server::BillingServiceServer, event_service_server::EventServiceServer,
@@ -45,7 +45,7 @@ pub struct CoreServices {
 
 impl CoreServices {
     /// Create in-memory services with no pre-registered tokens.
-    pub fn new_in_memory() -> Self {
+    pub fn new_in_memory() -> Result<Self, StorageFacadeBuilderError> {
         Self::new_in_memory_with_seed(None)
     }
 
@@ -53,7 +53,9 @@ impl CoreServices {
     ///
     /// Useful for E2E testing where a pre-registered API token is needed
     /// (e.g., for edge proxy authentication).
-    pub fn new_in_memory_with_seed(seed: Option<(TenantToken, TenantId)>) -> Self {
+    pub fn new_in_memory_with_seed(
+        seed: Option<(TenantToken, TenantId)>,
+    ) -> Result<Self, StorageFacadeBuilderError> {
         let tenant_tokens = Arc::new(InMemoryTenantTokens::new());
         if let Some((token, tenant)) = seed {
             tenant_tokens.insert(token, tenant);
@@ -74,24 +76,21 @@ impl CoreServices {
         let billing = Arc::new(InMemoryBilling::new(groups.shared()));
         let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
-        #[allow(deprecated)]
-        let facade = StorageFacade::new(
-            tenant_tokens,
-            events.clone(), // reader
-            events,         // writer
-            key_blobs,
-            rings.clone(), // view
-            rings,         // writer
-            ban_index,
-            vote_key_images,
-            poll_ring_hashes,
-            billing,
-            gift_cards,
-            groups,
-            pending_members,
-        );
+        let facade = StorageFacade::builder()
+            .tenant_tokens(tenant_tokens)
+            .event_storage(events.clone(), events)
+            .key_blobs(key_blobs)
+            .ring_storage(rings.clone(), rings)
+            .ban_index(ban_index)
+            .vote_key_images(vote_key_images)
+            .poll_ring_hashes(poll_ring_hashes)
+            .billing(billing)
+            .gift_cards(gift_cards)
+            .groups(groups)
+            .pending_members(pending_members)
+            .build()?;
 
-        Self {
+        Ok(Self {
             event: EventServiceImpl::new(facade.clone(), verifier),
             ring: RingServiceImpl::new(facade.clone()),
             storage: StorageServiceImpl::new(facade.clone()),
@@ -100,7 +99,7 @@ impl CoreServices {
             billing: BillingServiceImpl::new(facade.clone()),
             group: GroupServiceImpl::new(facade.clone()),
             member: MemberServiceImpl::new(facade.clone()),
-        }
+        })
     }
 }
 

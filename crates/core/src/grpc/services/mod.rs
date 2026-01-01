@@ -168,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn push_event_rejects_oversized_event_bytes() {
-        let services = CoreServices::new_in_memory();
+        let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
 
         let mut req = Request::new(PushEventRequest {
@@ -182,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn upload_key_blobs_rejects_oversized_blob() {
-        let services = CoreServices::new_in_memory();
+        let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
         let group_id = ulid::Ulid::new().to_string();
 
@@ -207,7 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn upload_key_blobs_rejects_too_many_entries() {
-        let services = CoreServices::new_in_memory();
+        let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
         let group_id = ulid::Ulid::new().to_string();
 
