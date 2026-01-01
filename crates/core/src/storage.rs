@@ -625,6 +625,31 @@ pub trait BillingStore {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError>;
 
+    /// Deduct funds from a group's operational budget.
+    ///
+    /// This method is used to charge a group for resource consumption (verification, storage, etc.).
+    ///
+    /// # Arguments
+    /// * `group_id` - The group identifier
+    /// * `amount` - Amount to deduct
+    ///
+    /// # Returns
+    /// The updated group balance after deduction.
+    ///
+    /// # Errors
+    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::PreconditionFailed` - When group has insufficient balance
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Invariants
+    /// * Deductions are atomic
+    /// * Balance cannot go negative (checked via precondition)
+    async fn deduct_group_balance(
+        &self,
+        group_id: GroupId,
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError>;
+
     /// Resolve a Telegram user ID to their associated tenant and group.
     ///
     /// This method looks up the tenant record by the owner's Telegram user ID, then

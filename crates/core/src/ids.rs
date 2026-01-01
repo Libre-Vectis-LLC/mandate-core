@@ -263,6 +263,7 @@ pub struct Nanos(pub u64);
 
 impl Nanos {
     pub const ZERO: Self = Self(0);
+    pub const ONE_DOLLAR: Self = Self(1_000_000_000);
 
     pub const fn new(value: u64) -> Self {
         Self(value)
@@ -272,12 +273,32 @@ impl Nanos {
         self.0
     }
 
+    /// Returns the raw nanos value.
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+
+    /// Creates a Nanos value from a dollar amount (with precision up to 9 decimal places).
+    pub fn from_dollars(dollars: f64) -> Self {
+        Self((dollars * 1_000_000_000.0) as u64)
+    }
+
+    /// Converts the nanos value to dollars (as floating point).
+    pub fn to_dollars(self) -> f64 {
+        self.0 as f64 / 1_000_000_000.0
+    }
+
     pub fn checked_add(self, other: Self) -> Option<Self> {
         self.0.checked_add(other.0).map(Self)
     }
 
     pub fn checked_sub(self, other: Self) -> Option<Self> {
         self.0.checked_sub(other.0).map(Self)
+    }
+
+    /// Saturating multiplication by a scalar.
+    pub fn saturating_mul(self, scalar: u64) -> Self {
+        Self(self.0.saturating_mul(scalar))
     }
 
     /// Convert to i64, returning None if the value exceeds i64::MAX.
@@ -289,6 +310,34 @@ impl Nanos {
 impl fmt::Display for Nanos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::Add for Nanos {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl std::ops::Sub for Nanos {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0.saturating_sub(rhs.0))
+    }
+}
+
+impl std::ops::Mul<i64> for Nanos {
+    type Output = Self;
+
+    fn mul(self, rhs: i64) -> Self::Output {
+        if rhs < 0 {
+            Self(0) // Saturate to zero for negative multipliers
+        } else {
+            Self(self.0.saturating_mul(rhs as u64))
+        }
     }
 }
 

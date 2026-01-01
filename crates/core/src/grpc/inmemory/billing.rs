@@ -141,6 +141,32 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
+    async fn deduct_group_balance(
+        &self,
+        group_id: GroupId,
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
+        let delta = i64::try_from(amount.as_u64())
+            .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+
+        let mut groups = self.groups.lock();
+        let record = groups
+            .get_mut(&group_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+
+        if record.balance_nanos < delta {
+            return Err(StorageError::PreconditionFailed(
+                "insufficient balance".into(),
+            ));
+        }
+
+        record.balance_nanos -= delta;
+
+        let balance_u64 = u64::try_from(record.balance_nanos)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        Ok(Nanos::new(balance_u64))
+    }
+
     async fn resolve_telegram_user(
         &self,
         tg_user_id: &str,

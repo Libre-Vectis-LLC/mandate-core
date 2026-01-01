@@ -1,6 +1,7 @@
 //! Provider pricing configuration and cost calculation.
 
-use super::types::{AbstractResourceUnits, Nanos};
+use super::types::AbstractResourceUnits;
+use crate::ids::Nanos;
 use std::str::FromStr;
 
 /// Service tier classification (analogous to AI model tiers).
@@ -219,7 +220,7 @@ impl ProviderPricing {
             .saturating_add(egress_cost)
             .saturating_add(iops_cost);
 
-        Nanos::new(total)
+        Nanos::new(total.max(0) as u64)
     }
 
     /// Calculates charge amount (cost × safety margin).
