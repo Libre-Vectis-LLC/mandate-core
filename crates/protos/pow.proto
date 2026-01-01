@@ -1,0 +1,84 @@
+syntax = "proto3";
+package mandate.v1;
+
+// Proof-of-Work (POW) messages for rate limiting and spam prevention.
+//
+// ## Overview
+// POW challenges are issued by the server and must be solved by clients
+// before certain operations are allowed. This prevents abuse while
+// allowing legitimate usage without payment.
+//
+// ## Workflow
+// 1. Client requests operation (e.g., create group)
+// 2. Server returns POW challenge in PowParams
+// 3. Client computes proofs and submits via PowSubmission
+// 4. Server verifies and proceeds or rejects
+
+// POW parameters issued by server in error responses.
+//
+// The client must solve the POW challenge by finding nonces that,
+// when combined with the deterministic_nonce and hashed, produce
+// a hash with at least `bits` leading zero bits.
+message PowParams {
+  // Required difficulty: number of leading zero bits in hash.
+  // Typical values: 16-24 bits (adjustable based on load).
+  uint32 bits = 1;
+
+  // Number of valid proofs required in the bundle.
+  // Prevents single-proof caching; typical value: 3-10.
+  uint32 required_proofs = 2;
+
+  // Time window in seconds during which proofs must be generated.
+  // Prevents pre-computation attacks.
+  // Typical value: 60-300 seconds.
+  uint64 time_window_secs = 3;
+
+  // Server-generated deterministic nonce (32 bytes).
+  // Derived from tenant ID, group ID, operation type, and server secret.
+  // Prevents cross-operation proof reuse.
+  bytes deterministic_nonce = 4;
+
+  // Timestamp when challenge was issued (Unix seconds).
+  // Client must submit proofs within (timestamp + time_window_secs).
+  uint64 timestamp = 5;
+}
+
+// POW submission from client with computed proofs.
+//
+// The client includes multiple proofs (nonces) that satisfy the
+// difficulty requirement specified in PowParams.
+message PowSubmission {
+  // Timestamp when client started computing (Unix seconds).
+  // Must be within the challenge time window.
+  uint64 timestamp = 1;
+
+  // Client-generated random nonce (32 bytes).
+  // Used as input to the POW hash function.
+  bytes client_nonce = 2;
+
+  // Serialized ProofBundle containing multiple valid nonces.
+  // Format is opaque to protobuf; interpreted by POW verifier.
+  // Typically contains required_proofs nonces that satisfy difficulty.
+  bytes proof_bundle = 3;
+}
+
+// POW verification result returned by server.
+//
+// Used internally or in debug responses to indicate verification status.
+message PowVerifyResult {
+  // Whether the submitted proofs are valid.
+  bool valid = 1;
+
+  // Number of proofs that passed verification.
+  // Should equal required_proofs for success.
+  uint32 proofs_verified = 2;
+
+  // Error message if validation failed.
+  // Empty string if valid=true.
+  // Possible errors:
+  // - "insufficient proofs"
+  // - "difficulty not met"
+  // - "timestamp outside window"
+  // - "invalid nonce format"
+  string error_message = 3;
+}

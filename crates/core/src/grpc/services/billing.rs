@@ -5,7 +5,9 @@ use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
     billing_service_server::BillingService, GetGroupBalanceRequest, GetGroupBalanceResponse,
-    TransferToGroupRequest, TransferToGroupResponse,
+    GetTenantBalanceRequest, GetTenantBalanceResponse, TransferBetweenGroupsRequest,
+    TransferBetweenGroupsResponse, TransferToGroupRequest, TransferToGroupResponse,
+    WithdrawFromGroupRequest, WithdrawFromGroupResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -90,5 +92,35 @@ impl BillingService for BillingServiceImpl {
         Ok(Response::new(GetGroupBalanceResponse {
             balance_nanos: balance_i64,
         }))
+    }
+
+    async fn get_tenant_balance(
+        &self,
+        _request: Request<GetTenantBalanceRequest>,
+    ) -> Result<Response<GetTenantBalanceResponse>, Status> {
+        // TODO: Implement tenant balance query in Phase 16
+        Err(Status::unimplemented(
+            "GetTenantBalance not yet implemented - see Phase 16",
+        ))
+    }
+
+    async fn withdraw_from_group(
+        &self,
+        _request: Request<WithdrawFromGroupRequest>,
+    ) -> Result<Response<WithdrawFromGroupResponse>, Status> {
+        // TODO: Implement withdrawal logic in Phase 16
+        Err(Status::unimplemented(
+            "WithdrawFromGroup not yet implemented - see Phase 16",
+        ))
+    }
+
+    async fn transfer_between_groups(
+        &self,
+        _request: Request<TransferBetweenGroupsRequest>,
+    ) -> Result<Response<TransferBetweenGroupsResponse>, Status> {
+        // TODO: Implement inter-group transfer in Phase 16
+        Err(Status::unimplemented(
+            "TransferBetweenGroups not yet implemented - see Phase 16",
+        ))
     }
 }

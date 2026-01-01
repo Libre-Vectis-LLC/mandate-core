@@ -13,7 +13,25 @@ import "error.proto";
 // ## Use Cases
 // - Transfer credits from tenant account to group budget
 // - Query group balance for display or pre-flight checks
+// - Withdraw unused credits from group back to tenant
+// - Transfer credits between groups within same tenant
 service BillingService {
+  // GetTenantBalance retrieves the current credit balance for a tenant.
+  //
+  // ## Authorization
+  // Tenant ID is derived from the authenticated x-api-token.
+  //
+  // ## Errors
+  // - UNAUTHENTICATED: missing or invalid x-api-token
+  // - NOT_FOUND: tenant doesn't exist
+  rpc GetTenantBalance (GetTenantBalanceRequest) returns (GetTenantBalanceResponse);
+
+  // GetGroupBalance retrieves the current credit balance for a group.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  rpc GetGroupBalance (GetGroupBalanceRequest) returns (GetGroupBalanceResponse);
+
   // TransferToGroup moves funds from tenant balance to a group's budget.
   //
   // The transfer is atomic: either the full amount moves or nothing does.
@@ -29,11 +47,33 @@ service BillingService {
   // - INTERNAL: database transaction failed
   rpc TransferToGroup (TransferToGroupRequest) returns (TransferToGroupResponse);
 
-  // GetGroupBalance retrieves the current credit balance for a group.
+  // WithdrawFromGroup moves funds from a group's budget back to tenant balance.
+  //
+  // The withdrawal is atomic and uses SERIALIZABLE isolation.
+  //
+  // ## Authorization
+  // Caller must own the tenant that owns the group.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
-  rpc GetGroupBalance (GetGroupBalanceRequest) returns (GetGroupBalanceResponse);
+  // - INVALID_ARGUMENT: amount_nanos is zero or negative
+  // - FAILED_PRECONDITION: insufficient group balance
+  // - NOT_FOUND: group_id doesn't exist or caller doesn't own it
+  // - INTERNAL: database transaction failed
+  rpc WithdrawFromGroup (WithdrawFromGroupRequest) returns (WithdrawFromGroupResponse);
+
+  // TransferBetweenGroups moves funds between two groups owned by the same tenant.
+  //
+  // The transfer is atomic and uses SERIALIZABLE isolation.
+  //
+  // ## Authorization
+  // Caller must own both source and destination groups.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: amount_nanos is zero or negative, or groups are the same
+  // - FAILED_PRECONDITION: insufficient balance in source group
+  // - NOT_FOUND: either group doesn't exist or caller doesn't own both
+  // - INTERNAL: database transaction failed
+  rpc TransferBetweenGroups (TransferBetweenGroupsRequest) returns (TransferBetweenGroupsResponse);
 }
 
 // Request to transfer funds from tenant to group.
@@ -65,4 +105,66 @@ message GetGroupBalanceRequest {
 message GetGroupBalanceResponse {
   // Current group balance in nanoUnits.
   int64 balance_nanos = 1;
+}
+
+// Request to query tenant's current balance.
+// Tenant ID is derived from authentication token.
+message GetTenantBalanceRequest {
+  // Empty - tenant is identified by x-api-token
+}
+
+// Response containing the tenant's balance.
+message GetTenantBalanceResponse {
+  // Current tenant balance in nanoUnits.
+  int64 balance_nanos = 1;
+
+  // Timestamp of last balance update (Unix seconds).
+  uint64 updated_at = 2;
+}
+
+// Request to withdraw funds from group back to tenant.
+message WithdrawFromGroupRequest {
+  // Source group ID (ULID format) to withdraw from.
+  string group_id = 1;
+
+  // Amount to withdraw in nanoUnits.
+  // Must be positive; zero or negative values return INVALID_ARGUMENT.
+  int64 amount_nanos = 2;
+}
+
+// Response after successful withdrawal.
+message WithdrawFromGroupResponse {
+  // Transfer ID for audit trail (ULID format).
+  string transfer_id = 1;
+
+  // Amount withdrawn in nanoUnits.
+  int64 amount_nanos = 2;
+
+  // Timestamp of withdrawal (Unix seconds).
+  uint64 timestamp = 3;
+}
+
+// Request to transfer funds between two groups.
+message TransferBetweenGroupsRequest {
+  // Source group ID (ULID format) to debit.
+  string from_group_id = 1;
+
+  // Destination group ID (ULID format) to credit.
+  string to_group_id = 2;
+
+  // Amount to transfer in nanoUnits.
+  // Must be positive; zero or negative values return INVALID_ARGUMENT.
+  int64 amount_nanos = 3;
+}
+
+// Response after successful inter-group transfer.
+message TransferBetweenGroupsResponse {
+  // Transfer ID for audit trail (ULID format).
+  string transfer_id = 1;
+
+  // Amount transferred in nanoUnits.
+  int64 amount_nanos = 2;
+
+  // Timestamp of transfer (Unix seconds).
+  uint64 timestamp = 3;
 }

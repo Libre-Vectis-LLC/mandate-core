@@ -11,7 +11,8 @@ import "error.proto";
 //
 // ## Use Cases
 // - Issuing gift cards for tenant onboarding
-// - Future: system-wide configuration, metrics, etc.
+// - Updating system-wide configuration (pricing, POW defaults)
+// - Future: metrics, maintenance mode, etc.
 service AdminService {
   // IssueGiftCard creates a new gift card code that can be redeemed by tenants.
   //
@@ -25,6 +26,20 @@ service AdminService {
   // - INVALID_ARGUMENT: amount_nanos is zero or negative
   // - INTERNAL: database error during code generation
   rpc IssueGiftCard (IssueGiftCardRequest) returns (IssueGiftCardResponse);
+
+  // UpdateConfig modifies system-wide configuration settings.
+  //
+  // Allows hot-reloading of pricing tiers, POW defaults, and safety margins
+  // without restarting the server.
+  //
+  // ## Authorization
+  // Only callable by operators with bot-secret access.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: invalid config values (e.g., negative prices)
+  // - NOT_FOUND: referenced provider_id or tier doesn't exist
+  // - INTERNAL: database error during update
+  rpc UpdateConfig (ConfigUpdateRequest) returns (ConfigUpdateResponse);
 }
 
 // Request to issue a new gift card.
@@ -43,5 +58,82 @@ message IssueGiftCardResponse {
   // The gift card code in format `MANDATE-GIFT-XXXX`.
   // This code should be securely transmitted to the recipient.
   string code = 1;
+}
+
+// Request to update system configuration.
+//
+// Only one config field should be set per request.
+// Multiple simultaneous updates are not supported.
+message ConfigUpdateRequest {
+  oneof config {
+    // Update pricing for a specific provider and service tier.
+    PricingConfig pricing = 1;
+
+    // Update default POW parameters for new challenges.
+    PowDefaultsConfig pow_defaults = 2;
+
+    // Update global safety margin percentage.
+    uint32 safety_margin = 3;
+  }
+}
+
+// Pricing configuration for a provider and service tier.
+//
+// All prices are in nanoUnits per unit of resource.
+// Zero prices are allowed (free tier).
+message PricingConfig {
+  // Provider identifier (e.g., "anthropic", "openai").
+  string provider_id = 1;
+
+  // Service tier (e.g., "haiku", "sonnet", "opus").
+  string service_tier = 2;
+
+  // Price per CPU cycle in nanoUnits.
+  // Example: 100 nanos = 0.0000001 units per cycle.
+  int64 cpu_cycle_price_nanos = 3;
+
+  // Price per GB-day of storage in nanoUnits.
+  // Example: 1_000_000 nanos = 0.001 units per GB per day.
+  int64 storage_gb_day_price_nanos = 4;
+
+  // Price per GB of network egress in nanoUnits.
+  // Example: 10_000_000 nanos = 0.01 units per GB.
+  int64 egress_gb_price_nanos = 5;
+
+  // Price per IOPS (input/output operation) in nanoUnits.
+  // Example: 10 nanos = 0.00000001 units per operation.
+  int64 iops_price_nanos = 6;
+}
+
+// Default POW parameters for new challenges.
+//
+// These are used when a client triggers POW-protected operations.
+message PowDefaultsConfig {
+  // Whether POW is globally enabled.
+  // If false, all operations skip POW checks.
+  bool enabled = 1;
+
+  // Default difficulty in leading zero bits.
+  // Typical range: 16-24.
+  uint32 bits = 2;
+
+  // Minimum number of proofs required in bundle.
+  // Typical range: 3-10.
+  uint32 min_proofs = 3;
+
+  // Time window in seconds for proof generation.
+  // Typical range: 60-300.
+  uint64 time_window_secs = 4;
+}
+
+// Response after config update.
+message ConfigUpdateResponse {
+  // Whether the update succeeded.
+  bool success = 1;
+
+  // Human-readable message.
+  // On success: "Pricing updated for anthropic/sonnet"
+  // On failure: error description.
+  string message = 2;
 }
 

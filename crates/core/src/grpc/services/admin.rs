@@ -3,7 +3,8 @@
 use crate::ids::Nanos;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
-    admin_service_server::AdminService, IssueGiftCardRequest, IssueGiftCardResponse,
+    admin_service_server::AdminService, ConfigUpdateRequest, ConfigUpdateResponse,
+    IssueGiftCardRequest, IssueGiftCardResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -33,5 +34,15 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(to_status)?;
         Ok(Response::new(IssueGiftCardResponse { code: card.code }))
+    }
+
+    async fn update_config(
+        &self,
+        _request: Request<ConfigUpdateRequest>,
+    ) -> Result<Response<ConfigUpdateResponse>, Status> {
+        // TODO: Implement config update logic in Phase 16
+        Err(Status::unimplemented(
+            "UpdateConfig not yet implemented - see Phase 16",
+        ))
     }
 }
