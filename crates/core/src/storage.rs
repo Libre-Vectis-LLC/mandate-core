@@ -650,6 +650,15 @@ pub trait BillingStore {
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
+    /// Find a tenant by their Telegram user ID.
+    ///
+    /// Returns the TenantId if found, regardless of whether they have any groups.
+    /// Use this for gift card redemption where we want to credit an existing tenant.
+    async fn find_tenant_by_tg_user(
+        &self,
+        tg_user_id: &str,
+    ) -> Result<Option<TenantId>, StorageError>;
+
     /// Resolve a Telegram user ID to their associated tenant and group.
     ///
     /// This method looks up the tenant record by the owner's Telegram user ID, then

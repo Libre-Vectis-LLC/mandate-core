@@ -478,6 +478,16 @@ impl StorageFacade {
         self.billing.get_group_balance(group_id).await
     }
 
+    /// Find a tenant by their Telegram user ID.
+    ///
+    /// Returns the TenantId if found, regardless of whether they have any groups.
+    pub async fn find_tenant_by_tg_user(
+        &self,
+        tg_user_id: &str,
+    ) -> Result<Option<TenantId>, StorageError> {
+        self.billing.find_tenant_by_tg_user(tg_user_id).await
+    }
+
     /// Resolve a Telegram user ID to their associated tenant and group.
     ///
     /// Returns `None` if no tenant or group is found for this user.

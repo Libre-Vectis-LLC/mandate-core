@@ -167,11 +167,18 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
+    async fn find_tenant_by_tg_user(
+        &self,
+        tg_user_id: &str,
+    ) -> Result<Option<TenantId>, StorageError> {
+        let tg_map = self.tg_user_to_tenant.lock();
+        Ok(tg_map.get(tg_user_id).copied())
+    }
+
     async fn resolve_telegram_user(
         &self,
         tg_user_id: &str,
     ) -> Result<Option<(TenantId, GroupId)>, StorageError> {
-        // 1. Lookup tenant ID from tg_user_id
         let tg_map = self.tg_user_to_tenant.lock();
         let tenant_id = match tg_map.get(tg_user_id) {
             Some(&id) => id,
