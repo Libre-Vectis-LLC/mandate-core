@@ -28,8 +28,19 @@ impl AuthService for AuthServiceImpl {
         request: Request<RedeemGiftCardRequest>,
     ) -> Result<Response<RedeemGiftCardResponse>, Status> {
         let body = request.into_inner();
-        // MVP: In-memory tenant creation. Real impl would look up by TG ID.
-        let tenant_id = crate::ids::TenantId(ulid::Ulid::new());
+
+        // Check if this tg_user_id already has an associated tenant.
+        // If so, use the existing tenant for top-up instead of creating a new one.
+        let existing = self
+            .store
+            .resolve_telegram_user(&body.tg_user_id)
+            .await
+            .map_err(to_status)?;
+
+        let tenant_id = match existing {
+            Some((tid, _)) => tid,                           // Existing tenant found
+            None => crate::ids::TenantId(ulid::Ulid::new()), // Create new tenant
+        };
 
         let card = self
             .store
