@@ -15,7 +15,7 @@ use verify::verify_events;
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let mut client = AuditClient::new(cli.edge_url, cli.public_url, cli.api_token);
+    let mut client = AuditClient::new(cli.edge_url, cli.api_token);
 
     match cli.command {
         Command::VerifyEvents {
@@ -23,10 +23,17 @@ async fn main() -> Result<()> {
             start_seq,
             limit,
             report,
+            ignore_legacy_hash_mismatches,
         } => {
-            let report_data = verify_events(&mut client, &group_id, start_seq, limit)
-                .await
-                .context("verify events")?;
+            let report_data = verify_events(
+                &mut client,
+                &group_id,
+                start_seq,
+                limit,
+                ignore_legacy_hash_mismatches,
+            )
+            .await
+            .context("verify events")?;
             let json = serde_json::to_string_pretty(&report_data).context("serialize report")?;
             if let Some(path) = report {
                 std::fs::write(&path, json).with_context(|| format!("write {:?}", path))?;

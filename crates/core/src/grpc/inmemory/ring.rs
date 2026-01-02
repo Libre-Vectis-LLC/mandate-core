@@ -4,6 +4,7 @@ use crate::ring_log::{RingDelta, RingDeltaLog, RingLogError};
 use crate::storage::{NotFound, RingView, RingWriter, StorageError};
 use async_trait::async_trait;
 use nazgul::ring::Ring;
+use nazgul::traits::LocalByteConvertible;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -152,17 +153,49 @@ impl RingWriter for InMemoryRings {
     ) -> Result<RingHash, StorageError> {
         let mut map = self.inner();
         let key = (tenant, group_id);
-        let state = map.entry(key).or_insert_with(|| RingState {
-            log: RingDeltaLog::default(),
-            current: Ring::new(vec![]),
-            current_hash: RingHash([0; 32]),
-        });
 
-        let (hash, _) = state
-            .log
-            .append(&mut state.current, delta.clone())
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-        state.current_hash = hash;
-        Ok(hash)
+        // Check if this is the first delta for this group.
+        let is_new_group = !map.contains_key(&key);
+
+        if is_new_group {
+            // For the first delta (must be Add), use RingDeltaLog::new to properly initialize.
+            let founder = match &delta {
+                RingDelta::Add(pubkey) => *pubkey,
+                RingDelta::Remove(_) => {
+                    return Err(StorageError::Backend(
+                        "first ring delta must be Add, not Remove".to_string(),
+                    ));
+                }
+            };
+
+            let log =
+                RingDeltaLog::new(founder).map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            // Convert MasterPublicKey to RistrettoPoint for Ring construction
+            let founder_point = nazgul::scalar::RistrettoPoint::from_bytes(&founder.0)
+                .map_err(|_| StorageError::Backend("invalid founder public key".to_string()))?;
+            let current = Ring::new(vec![founder_point]);
+            let current_hash = crate::hashing::ring_hash_sha3_256(&current);
+
+            map.insert(
+                key,
+                RingState {
+                    log,
+                    current,
+                    current_hash,
+                },
+            );
+
+            Ok(current_hash)
+        } else {
+            // Subsequent deltas: append to existing log.
+            let state = map.get_mut(&key).expect("just checked existence");
+            let (hash, _) = state
+                .log
+                .append(&mut state.current, delta.clone())
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+            state.current_hash = hash;
+            Ok(hash)
+        }
     }
 }

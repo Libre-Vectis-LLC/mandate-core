@@ -33,6 +33,7 @@ pub async fn verify_events(
     group_id: &str,
     start_seq: i64,
     limit: u32,
+    ignore_legacy_hash_mismatches: bool,
 ) -> Result<VerificationReport> {
     let mut ring_cache = RingLogCache::build(client, group_id, limit)
         .await
@@ -72,6 +73,7 @@ pub async fn verify_events(
                 &mut vote_key_images,
                 start_seq,
                 &mut last_hash,
+                ignore_legacy_hash_mismatches,
             ) {
                 Ok(event_type_name) => {
                     *event_type_counts.entry(event_type_name).or_insert(0) += 1;
@@ -114,6 +116,7 @@ fn process_record(
     vote_key_images: &mut HashMap<String, HashSet<[u8; 32]>>,
     start_seq: i64,
     last_hash: &mut Option<ContentHash>,
+    ignore_legacy_hash_mismatches: bool,
 ) -> std::result::Result<String, VerificationIssue> {
     let event: Event =
         serde_json::from_slice(&record.event_bytes).map_err(|e| VerificationIssue {
@@ -142,6 +145,7 @@ fn process_record(
             &event.signature,
             poll_hashes,
             vote_key_images,
+            ignore_legacy_hash_mismatches,
         )?;
     }
 
@@ -279,19 +283,30 @@ fn handle_vote(
     signature: &Option<Signature>,
     poll_hashes: &mut HashMap<String, (ContentHash, RingHash, EventUlid)>,
     vote_key_images: &mut HashMap<String, HashSet<[u8; 32]>>,
+    ignore_legacy_hash_mismatches: bool,
 ) -> std::result::Result<(), VerificationIssue> {
     if let Some((expected_hash, expected_ring, _poll_ulid)) = poll_hashes.get(&vote.poll_id) {
         if vote.poll_hash.0 != expected_hash.0 {
-            return Err(VerificationIssue {
-                sequence_no,
-                event_ulid: event_ulid.to_string(),
-                kind: "poll_hash_mismatch".to_string(),
-                details: format!(
-                    "vote poll hash mismatch expected={}, got={}",
+            if ignore_legacy_hash_mismatches {
+                // Skip legacy poll hash mismatch
+                eprintln!(
+                    "WARNING: Ignoring poll hash mismatch for seq={} (legacy data): expected={}, got={}",
+                    sequence_no,
                     hex::encode(expected_hash.0),
                     hex::encode(vote.poll_hash.0)
-                ),
-            });
+                );
+            } else {
+                return Err(VerificationIssue {
+                    sequence_no,
+                    event_ulid: event_ulid.to_string(),
+                    kind: "poll_hash_mismatch".to_string(),
+                    details: format!(
+                        "vote poll hash mismatch expected={}, got={}",
+                        hex::encode(expected_hash.0),
+                        hex::encode(vote.poll_hash.0)
+                    ),
+                });
+            }
         }
         if vote.ring_hash != *expected_ring {
             return Err(VerificationIssue {

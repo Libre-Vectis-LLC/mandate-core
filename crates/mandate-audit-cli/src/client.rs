@@ -17,20 +17,16 @@ pub struct EventRecord {
 
 pub struct AuditClient {
     edge_url: String,
-    public_url: Option<String>,
     api_token: String,
     edge_channel: Option<Channel>,
-    public_channel: Option<Channel>,
 }
 
 impl AuditClient {
-    pub fn new(edge_url: String, public_url: Option<String>, api_token: String) -> Self {
+    pub fn new(edge_url: String, api_token: String) -> Self {
         Self {
             edge_url,
-            public_url,
             api_token,
             edge_channel: None,
-            public_channel: None,
         }
     }
 
@@ -44,22 +40,6 @@ impl AuditClient {
             .await
             .context("failed to connect to edge")?;
         self.edge_channel = Some(channel.clone());
-        Ok(channel)
-    }
-
-    async fn public_channel(&mut self) -> Result<Channel> {
-        let Some(url) = self.public_url.clone() else {
-            return self.edge_channel().await;
-        };
-        if let Some(channel) = &self.public_channel {
-            return Ok(channel.clone());
-        }
-        let channel = Channel::from_shared(url)
-            .context("invalid public URL")?
-            .connect()
-            .await
-            .context("failed to connect to public server")?;
-        self.public_channel = Some(channel.clone());
         Ok(channel)
     }
 
@@ -109,7 +89,7 @@ impl AuditClient {
         after_ring_hash: Vec<u8>,
         limit: u32,
     ) -> Result<StreamRingResponse> {
-        let channel = self.public_channel().await?;
+        let channel = self.edge_channel().await?;
         let mut client = RingServiceClient::new(channel);
         let req = self.with_token(Request::new(StreamRingRequest {
             group_id: group_id.to_string(),

@@ -15,9 +15,6 @@ pub struct Cli {
         default_value = "http://127.0.0.1:48080"
     )]
     pub edge_url: String,
-    /// Optional public gRPC endpoint (bypasses edge cache when needed).
-    #[arg(long, env = "MANDATE_PUBLIC_URL")]
-    pub public_url: Option<String>,
     /// API token for group access.
     #[arg(long, env = "MANDATE_API_TOKEN")]
     pub api_token: String,
@@ -41,6 +38,9 @@ pub enum Command {
         /// Optional JSON report output path.
         #[arg(long)]
         report: Option<PathBuf>,
+        /// Ignore legacy poll hash mismatches (data from before hash algorithm change).
+        #[arg(long, default_value_t = false)]
+        ignore_legacy_hash_mismatches: bool,
     },
     /// Export a poll event + vote events + poll key for external audit.
     #[command(group(
@@ -52,10 +52,10 @@ pub enum Command {
         /// Group ID (ULID).
         #[arg(long)]
         group_id: String,
-        /// Poll ID (from PollCreate payload).
+        /// Poll ID (from PollCreate payload). Requires full event history scan.
         #[arg(long)]
         poll_id: Option<String>,
-        /// Poll event ULID (from event metadata).
+        /// Poll event ULID (from event metadata). Recommended for archived data.
         #[arg(long)]
         poll_event_ulid: Option<String>,
         /// Group shared secret K_shared (hex, 32 bytes).
