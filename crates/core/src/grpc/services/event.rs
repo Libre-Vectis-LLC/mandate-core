@@ -171,18 +171,12 @@ impl EventService for EventServiceImpl {
         // Load ring if needed (Compact signature)
         let external_ring = match sig.mode() {
             crate::crypto::signature::StorageMode::Compact => {
-                // Extract ring hash from event body.
-                // We need to inspect event_type to get ring_hash.
-                // This is slightly brittle if event structure changes, but for now:
-                let ring_hash = match &event.event_type {
-                    crate::event::EventType::PollCreate(p) => p.ring_hash,
-                    crate::event::EventType::VoteCast(v) => v.ring_hash,
-                    crate::event::EventType::MessageCreate(m) => m.ring_hash,
-                    crate::event::EventType::RingUpdate(r) => r.ring_hash,
-                    crate::event::EventType::BanCreate(b) => b.ring_hash,
-                    crate::event::EventType::BanRevoke(b) => b.ring_hash,
-                    crate::event::EventType::ProofOfInnocence(p) => p.historical_ring_hash,
-                };
+                // Get ring hash from event body if available, otherwise use signature's ring hash.
+                // BanRevoke events don't store ring_hash in body, so we use the signature's.
+                let ring_hash = event
+                    .event_type
+                    .ring_hash()
+                    .unwrap_or_else(|| sig.ring_hash());
 
                 Some(
                     self.store

@@ -208,19 +208,26 @@ fn verify_signature(
         details: "event signature missing".to_string(),
     })?;
 
-    let ring_hash = event.event_type.ring_hash();
-    if sig.ring_hash() != ring_hash {
-        return Err(VerificationIssue {
-            sequence_no,
-            event_ulid: event.event_ulid.to_string(),
-            kind: "signature_ring_hash".to_string(),
-            details: format!(
-                "signature ring hash mismatch sig={}, event={}",
-                hex::encode(sig.ring_hash().0),
-                hex::encode(ring_hash.0)
-            ),
-        });
-    }
+    // Get ring hash from event body if available, otherwise use signature's ring hash.
+    // BanRevoke events don't store ring_hash in body, so we use the signature's ring_hash.
+    let ring_hash = match event.event_type.ring_hash() {
+        Some(body_hash) => {
+            if sig.ring_hash() != body_hash {
+                return Err(VerificationIssue {
+                    sequence_no,
+                    event_ulid: event.event_ulid.to_string(),
+                    kind: "signature_ring_hash".to_string(),
+                    details: format!(
+                        "signature ring hash mismatch sig={}, event={}",
+                        hex::encode(sig.ring_hash().0),
+                        hex::encode(body_hash.0)
+                    ),
+                });
+            }
+            body_hash
+        }
+        None => sig.ring_hash(),
+    };
 
     let ring = ring_cache
         .ring_for_hash(&ring_hash)
