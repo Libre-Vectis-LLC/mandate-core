@@ -293,4 +293,59 @@ mod tests {
         assert_eq!(sig.kind, de.kind);
         assert_eq!(sig.ring_hash(), de.ring_hash());
     }
+
+    /// Test single-element ring signing for delegate key use case.
+    /// This is critical for the delegate signer implementation where
+    /// the delegate key signs with a ring containing only itself.
+    #[test]
+    fn single_element_ring_signing() {
+        let (signer, ring) = make_ring(1);
+        assert_eq!(ring.members().len(), 1);
+        assert!(ring.members().contains(signer.public()));
+
+        let msg = b"delegate-signed-event";
+
+        // Test Archival mode (self-contained verification)
+        let sig_archival = sign_contextual(
+            SignatureKind::Authoritative,
+            StorageMode::Archival,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign archival with single-element ring");
+
+        assert!(
+            sig_archival
+                .verify(Some(&ring), msg)
+                .expect("verify archival"),
+            "single-element ring archival signature should verify"
+        );
+
+        // Test Compact mode (requires external ring for verification)
+        let sig_compact = sign_contextual(
+            SignatureKind::Authoritative,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            msg,
+        )
+        .expect("sign compact with single-element ring");
+
+        assert!(
+            sig_compact
+                .verify(Some(&ring), msg)
+                .expect("verify compact"),
+            "single-element ring compact signature should verify"
+        );
+
+        // Verify key image is consistent
+        let ki_archival = sig_archival.key_image();
+        let ki_compact = sig_compact.key_image();
+        assert_eq!(
+            ki_archival.compress().to_bytes(),
+            ki_compact.compress().to_bytes(),
+            "key images should match regardless of storage mode"
+        );
+    }
 }

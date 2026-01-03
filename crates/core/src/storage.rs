@@ -770,6 +770,41 @@ pub trait GroupMetadataStore {
     /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError>;
+
+    /// Set the owner's Nazgul master public key for a group.
+    ///
+    /// This key is used to:
+    /// - Verify owner signatures on admin events (RingUpdate, BanCreate, BanRevoke)
+    /// - Derive delegate public keys for delegated signing
+    ///
+    /// # Arguments
+    /// * `group_id` - The group identifier
+    /// * `owner_pubkey` - The owner's Nazgul master public key
+    ///
+    /// # Errors
+    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn set_owner_pubkey(
+        &self,
+        group_id: GroupId,
+        owner_pubkey: MasterPublicKey,
+    ) -> Result<(), StorageError>;
+
+    /// Retrieve the owner's Nazgul master public key for a group.
+    ///
+    /// # Arguments
+    /// * `group_id` - The group identifier
+    ///
+    /// # Returns
+    /// The owner's `MasterPublicKey` if set, `None` if not yet configured.
+    ///
+    /// # Errors
+    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn get_owner_pubkey(
+        &self,
+        group_id: GroupId,
+    ) -> Result<Option<MasterPublicKey>, StorageError>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

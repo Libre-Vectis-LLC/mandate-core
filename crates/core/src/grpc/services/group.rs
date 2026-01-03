@@ -141,6 +141,13 @@ impl GroupService for GroupServiceImpl {
             Err(err) => return Err(to_status(err)),
         }
 
+        // Store owner pubkey in group metadata for delegate key derivation
+        self.store
+            .set_owner_pubkey(group_id, crate::ids::MasterPublicKey(owner_pubkey.0))
+            .await
+            .map_err(to_status)?;
+
+        // Add owner pubkey to ring as first member
         self.store
             .append_ring_delta(tenant, group_id, RingDelta::Add(owner_pubkey))
             .await

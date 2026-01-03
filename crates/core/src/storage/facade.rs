@@ -516,6 +516,27 @@ impl StorageFacade {
         self.groups.get_group(group_id).await
     }
 
+    /// Set the owner's Nazgul public key for a group.
+    ///
+    /// This key is used for verifying owner/delegate signatures on admin events.
+    pub async fn set_owner_pubkey(
+        &self,
+        group_id: GroupId,
+        owner_pubkey: MasterPublicKey,
+    ) -> Result<(), StorageError> {
+        self.groups.set_owner_pubkey(group_id, owner_pubkey).await
+    }
+
+    /// Get the owner's Nazgul public key for a group.
+    ///
+    /// Returns `None` if the owner pubkey has not been set yet.
+    pub async fn get_owner_pubkey(
+        &self,
+        group_id: GroupId,
+    ) -> Result<Option<MasterPublicKey>, StorageError> {
+        self.groups.get_owner_pubkey(group_id).await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Pending member methods
     // ─────────────────────────────────────────────────────────────────────────

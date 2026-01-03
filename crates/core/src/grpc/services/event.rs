@@ -1,15 +1,21 @@
 //! EventService gRPC implementation.
 
 use crate::event::Event;
+use crate::hashing::ring_hash_sha3_256;
 use crate::ids::{GroupId, SequenceNo};
 use crate::ring_log::{apply_delta, RingDelta};
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use crate::storage::BannedOperation;
+use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use mandate_proto::mandate::v1::{
     event_service_server::EventService, PushEventRequest, PushEventResponse, StreamEventsRequest,
     StreamEventsResponse,
 };
+use nazgul::keypair::KeyPair as NazgulKeyPair;
+use nazgul::ring::Ring;
+use nazgul::traits::Derivable;
+use sha3::Sha3_512;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -167,25 +173,94 @@ impl EventService for EventServiceImpl {
             }
         }
 
+        // 2b. Verify owner/delegate for admin ban events
+        let delegate_external_ring = match &event.event_type {
+            crate::event::EventType::BanCreate(_) | crate::event::EventType::BanRevoke(_) => {
+                // Get owner's public key from storage
+                let owner_pubkey = self
+                    .store
+                    .get_owner_pubkey(event.group_id)
+                    .await
+                    .map_err(to_status)?
+                    .ok_or_else(|| RpcError::FailedPrecondition {
+                        operation: "delegate_verification",
+                        reason: "owner public key not set".into(),
+                    })?;
+
+                // Decompress owner's public key to a RistrettoPoint
+                let compressed = CompressedRistretto::from_slice(&owner_pubkey.0).map_err(|e| {
+                    RpcError::FailedPrecondition {
+                        operation: "delegate_verification",
+                        reason: format!("invalid owner public key: {e}"),
+                    }
+                })?;
+                let owner_point: RistrettoPoint =
+                    compressed
+                        .decompress()
+                        .ok_or_else(|| RpcError::FailedPrecondition {
+                            operation: "delegate_verification",
+                            reason: "invalid owner public key".into(),
+                        })?;
+
+                // Create owner keypair (public key only) for derivation
+                let owner_kp = NazgulKeyPair::from_public_key_only(owner_point);
+
+                // Derive delegate key using group_id as context
+                let group_bytes = event.group_id.to_bytes();
+                let mut ctx =
+                    Vec::with_capacity(b"mandate-delegate-signer-v1".len() + group_bytes.len());
+                ctx.extend_from_slice(b"mandate-delegate-signer-v1");
+                ctx.extend_from_slice(&group_bytes);
+
+                let delegate_kp = owner_kp.derive_child::<Sha3_512>(&ctx);
+
+                // Build single-element ring containing only the delegate public key
+                let delegate_ring = Ring::new(vec![*delegate_kp.public()]);
+                let delegate_hash = ring_hash_sha3_256(&delegate_ring);
+
+                // Verify that the signature's ring hash matches the expected delegate ring hash
+                // Use sig.ring_hash() as the authoritative source for what ring was used to sign
+                let actual_ring_hash = sig.ring_hash();
+                if actual_ring_hash != delegate_hash {
+                    return Err(RpcError::PermissionDenied {
+                        resource: "admin_event",
+                        reason: "signature ring is not the owner/delegate ring".into(),
+                    }
+                    .into());
+                }
+
+                // Only provide delegate ring for Compact mode; Archival mode embeds its own ring
+                match sig.mode() {
+                    crate::crypto::signature::StorageMode::Compact => Some(Arc::new(delegate_ring)),
+                    crate::crypto::signature::StorageMode::Archival => None,
+                }
+            }
+            _ => None,
+        };
+
         // 3. Verify Signature
         // Load ring if needed (Compact signature)
-        let external_ring = match sig.mode() {
-            crate::crypto::signature::StorageMode::Compact => {
-                // Get ring hash from event body if available, otherwise use signature's ring hash.
-                // BanRevoke events don't store ring_hash in body, so we use the signature's.
-                let ring_hash = event
-                    .event_type
-                    .ring_hash()
-                    .unwrap_or_else(|| sig.ring_hash());
+        let external_ring = if let Some(ring) = delegate_external_ring {
+            Some(ring)
+        } else {
+            match sig.mode() {
+                crate::crypto::signature::StorageMode::Compact => {
+                    // Get ring hash from event body if available, otherwise use signature's ring hash.
+                    // BanRevoke events don't store ring_hash in body, so we use the signature's.
+                    let ring_hash = event
+                        .event_type
+                        .ring_hash()
+                        .unwrap_or_else(|| sig.ring_hash());
 
-                Some(
-                    self.store
-                        .ring_by_hash(tenant, event.group_id, &ring_hash)
-                        .await
-                        .map_err(to_status)?,
-                )
+                    Some(
+                        self.store
+                            .ring_by_hash(tenant, event.group_id, &ring_hash)
+                            .await
+                            .map_err(to_status)?,
+                    )
+                }
+                crate::crypto::signature::StorageMode::Archival => None,
             }
-            crate::crypto::signature::StorageMode::Archival => None,
         };
 
         let signed_msg = event.to_signing_bytes().map_err(|e| RpcError::Internal {
