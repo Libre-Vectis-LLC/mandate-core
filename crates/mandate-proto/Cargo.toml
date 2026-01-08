@@ -2,6 +2,7 @@
 name = "mandate-proto"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [features]
 default = []
