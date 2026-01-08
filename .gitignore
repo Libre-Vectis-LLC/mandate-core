@@ -58,3 +58,8 @@ GEMINI.md
 AGENTS.md
 drafts
 **/*.zh.md
+
+# Repomix output and cache
+repomix-output.*
+*.repomix.lock
+.repomix/
