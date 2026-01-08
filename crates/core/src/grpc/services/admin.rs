@@ -28,6 +28,11 @@ impl AdminService for AdminServiceImpl {
         request: Request<IssueGiftCardRequest>,
     ) -> Result<Response<IssueGiftCardResponse>, Status> {
         let body = request.into_inner();
+        if body.amount_nanos == 0 {
+            return Err(Status::invalid_argument(
+                "amount_nanos must be positive (non-zero)",
+            ));
+        }
         let card = self
             .store
             .issue_gift_card(Nanos::new(body.amount_nanos))
