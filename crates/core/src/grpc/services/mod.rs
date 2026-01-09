@@ -258,6 +258,7 @@ mod tests {
             }],
             created_at: 123,
             instructions: None,
+            deadline: None,
         };
 
         let event = Event {

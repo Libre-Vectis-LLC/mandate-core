@@ -276,6 +276,7 @@ struct CanonicalPoll<'a> {
     questions: Vec<CanonicalPollQuestion<'a>>,
     created_at: u64,
     instructions: Option<&'a Ciphertext>,
+    deadline: Option<u64>,
 }
 
 impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
@@ -295,6 +296,7 @@ impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
             questions,
             created_at: poll.created_at,
             instructions: poll.instructions.as_ref(),
+            deadline: poll.deadline,
         }
     }
 }
@@ -554,7 +556,7 @@ mod tests {
         let h = poll_hash_sha3_256(&poll).expect("hash poll");
         assert_eq!(
             encode(h.0),
-            "3a78765011ce19aa8064e5f33af17b9253f4b90f104d0900709423e2e043f234"
+            "b31872475eb5d4a4f11e3b9cfaa4a96220eb78e9736f5a0493f2644dab431595"
         );
     }
 
@@ -569,6 +571,7 @@ mod tests {
                 poll_id: "poll-1".into(),
                 created_at: 42,
                 instructions: Some(Ciphertext(b"how-to".to_vec())),
+                deadline: None,
                 questions: vec![
                     crate::event::PollQuestion {
                         question_id: "q1".into(),

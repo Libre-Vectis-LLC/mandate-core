@@ -79,6 +79,7 @@ pub struct Poll {
     pub questions: Vec<PollQuestion>,
     pub created_at: u64,
     pub instructions: Option<Ciphertext>,
+    pub deadline: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -249,6 +250,7 @@ mod tests {
             poll_id: "poll".into(),
             created_at: 1,
             instructions: None,
+            deadline: None,
             questions: vec![
                 PollQuestion {
                     question_id: "q2".into(),
@@ -400,6 +402,7 @@ mod tests {
             questions: vec![],
             created_at: 1,
             instructions: None,
+            deadline: None,
         });
         assert_eq!(poll.ring_hash(), Some(ring_hash));
 
