@@ -1,14 +1,23 @@
 /// In-memory billing store and gift card management.
 use crate::ids::{GroupId, Nanos, TenantId};
-use crate::storage::{BillingStore, GiftCard, GiftCardStore, NotFound, StorageError};
+use crate::storage::{
+    BillingStore, GiftCard, GiftCardStore, IdempotencyResult, NotFound, StorageError,
+};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::group::GroupMap;
 
 type TenantBalanceMap = HashMap<TenantId, i64>;
+
+/// Cached idempotency result with expiration.
+struct IdempotencyEntry {
+    result: IdempotencyResult,
+    expires_at: Instant,
+}
 
 #[derive(Clone, Default)]
 pub struct InMemoryGiftCards {
@@ -56,6 +65,7 @@ pub struct InMemoryBilling {
     tenants: Arc<Mutex<TenantBalanceMap>>,
     groups: Arc<Mutex<GroupMap>>,
     tg_user_to_tenant: Arc<Mutex<HashMap<String, TenantId>>>,
+    idempotency_keys: Arc<Mutex<HashMap<String, IdempotencyEntry>>>,
 }
 
 impl InMemoryBilling {
@@ -64,6 +74,7 @@ impl InMemoryBilling {
             tenants: Arc::new(Mutex::new(HashMap::new())),
             groups,
             tg_user_to_tenant: Arc::new(Mutex::new(HashMap::new())),
+            idempotency_keys: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -201,5 +212,31 @@ impl BillingStore for InMemoryBilling {
             Some(gid) => Ok(Some((tenant_id, gid))),
             None => Ok(None),
         }
+    }
+
+    async fn check_idempotency_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<IdempotencyResult>, StorageError> {
+        let keys = self.idempotency_keys.lock();
+        match keys.get(key) {
+            Some(entry) if entry.expires_at > Instant::now() => Ok(Some(entry.result.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    async fn record_idempotency_result(
+        &self,
+        key: &str,
+        result: IdempotencyResult,
+        ttl_secs: u64,
+    ) -> Result<(), StorageError> {
+        let mut keys = self.idempotency_keys.lock();
+        let entry = IdempotencyEntry {
+            result,
+            expires_at: Instant::now() + Duration::from_secs(ttl_secs),
+        };
+        keys.insert(key.to_string(), entry);
+        Ok(())
     }
 }

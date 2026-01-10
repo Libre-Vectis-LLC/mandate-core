@@ -4,9 +4,9 @@ use crate::ids::{GroupId, KeyImage, MasterPublicKey, Nanos, RingHash, TenantId, 
 use crate::ring_log::RingDelta;
 use crate::storage::{
     BanIndex, BannedOperation, BillingStore, EventBytes, EventReader, EventRecord, EventWriter,
-    GiftCard, GiftCardStore, GroupMetadataStore, KeyBlobStore, PendingMember, PendingMemberStore,
-    PollRingHashIndex, RingDeltaPath, RingView, RingWriter, SequenceNo, StorageError,
-    TenantTokenError, TenantTokenStore, VoteKeyImageIndex,
+    GiftCard, GiftCardStore, GroupMetadataStore, IdempotencyResult, KeyBlobStore, PendingMember,
+    PendingMemberStore, PollRingHashIndex, RingDeltaPath, RingView, RingWriter, SequenceNo,
+    StorageError, TenantTokenError, TenantTokenStore, VoteKeyImageIndex,
 };
 use nazgul::ring::Ring;
 
@@ -458,6 +458,33 @@ impl StorageFacade {
         tg_user_id: &str,
     ) -> Result<Option<(TenantId, GroupId)>, StorageError> {
         self.billing.resolve_telegram_user(tg_user_id).await
+    }
+
+    /// Check if an idempotency key has been used.
+    ///
+    /// Returns `Some(result)` if the key was previously used, allowing the
+    /// caller to replay the original response. Returns `None` if the key
+    /// is new and the operation should proceed.
+    pub async fn check_idempotency_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<IdempotencyResult>, StorageError> {
+        self.billing.check_idempotency_key(key).await
+    }
+
+    /// Record the result of an idempotent operation.
+    ///
+    /// Stores the result with the given TTL so future requests with the same
+    /// key can replay this response.
+    pub async fn record_idempotency_result(
+        &self,
+        key: &str,
+        result: IdempotencyResult,
+        ttl_secs: u64,
+    ) -> Result<(), StorageError> {
+        self.billing
+            .record_idempotency_result(key, result, ttl_secs)
+            .await
     }
 
     // ─────────────────────────────────────────────────────────────────────────

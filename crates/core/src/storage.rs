@@ -13,6 +13,7 @@ use crate::ids::{
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use async_trait::async_trait;
 use nazgul::ring::Ring;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod facade;
@@ -557,6 +558,64 @@ pub trait PollRingHashIndex {
     ) -> Result<RingHash, StorageError>;
 }
 
+/// Error codes for idempotency results, mapped from gRPC status codes.
+///
+/// When an idempotent operation is retried, this enum captures the original
+/// error type so the same error can be returned to the client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdempotencyErrorCode {
+    /// Request is malformed or contains invalid data.
+    InvalidArgument,
+    /// Operation was rejected due to insufficient balance or other precondition.
+    FailedPrecondition,
+    /// Resource (tenant, group, etc.) was not found.
+    NotFound,
+    /// Request conflicts with existing state.
+    AlreadyExists,
+    /// Caller lacks permission for this operation.
+    PermissionDenied,
+    /// Resource quota exceeded.
+    ResourceExhausted,
+    /// Operation was cancelled.
+    Cancelled,
+    /// Operation was aborted due to concurrency conflict.
+    Aborted,
+    /// Operation timed out.
+    DeadlineExceeded,
+    /// Unrecoverable internal error.
+    Internal,
+    /// Service temporarily unavailable.
+    Unavailable,
+    /// Data loss or corruption detected.
+    DataLoss,
+    /// Caller is not authenticated.
+    Unauthenticated,
+    /// Operation not implemented.
+    Unimplemented,
+    /// Unknown error type.
+    Unknown,
+}
+
+/// Result of an idempotent operation, stored for replay on retry.
+///
+/// When a client retries an operation with the same idempotency key,
+/// the stored result is returned instead of re-executing the operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdempotencyResult {
+    /// Operation completed successfully with the resulting balance.
+    Success {
+        /// The balance after the operation completed, in nanos.
+        balance_nanos: u64,
+    },
+    /// Operation failed with an error.
+    Error {
+        /// The error code category.
+        code: IdempotencyErrorCode,
+        /// Human-readable error message.
+        message: String,
+    },
+}
+
 #[async_trait]
 pub trait BillingStore {
     /// Credit a tenant's balance, creating the tenant record if it does not exist.
@@ -677,6 +736,49 @@ pub trait BillingStore {
         &self,
         tg_user_id: &str,
     ) -> Result<Option<(TenantId, GroupId)>, StorageError>;
+
+    /// Check if an idempotency key has been used and return the cached result.
+    ///
+    /// This method is called before executing an idempotent operation to check
+    /// if the same operation was previously completed. If found, the cached result
+    /// is returned instead of re-executing the operation.
+    ///
+    /// # Arguments
+    /// * `key` - The client-provided idempotency key (typically UUID or ULID)
+    ///
+    /// # Returns
+    /// * `Some(IdempotencyResult)` - If the key was previously used, returns the cached result
+    /// * `None` - If the key has not been used or has expired
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn check_idempotency_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<IdempotencyResult>, StorageError>;
+
+    /// Record the result of an idempotent operation for future replays.
+    ///
+    /// This method stores the result of an operation so that retries with the same
+    /// idempotency key return the cached result instead of re-executing.
+    ///
+    /// # Arguments
+    /// * `key` - The client-provided idempotency key
+    /// * `result` - The result to cache (success with balance or error)
+    /// * `ttl_secs` - Time-to-live in seconds (typically 24 hours = 86400)
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Notes
+    /// * If the key already exists, implementations should NOT overwrite it (first-write wins)
+    /// * Expired keys may be automatically cleaned up by the storage layer
+    async fn record_idempotency_result(
+        &self,
+        key: &str,
+        result: IdempotencyResult,
+        ttl_secs: u64,
+    ) -> Result<(), StorageError>;
 }
 
 #[derive(Clone, Debug)]

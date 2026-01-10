@@ -3,15 +3,51 @@
 use crate::ids::{GroupId, Nanos, TenantId};
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
+use crate::storage::{IdempotencyErrorCode, IdempotencyResult};
 use mandate_proto::mandate::v1::{
     billing_service_server::BillingService, GetGroupBalanceRequest, GetGroupBalanceResponse,
     GetTenantBalanceRequest, GetTenantBalanceResponse, TransferBetweenGroupsRequest,
     TransferBetweenGroupsResponse, TransferToGroupRequest, TransferToGroupResponse,
     WithdrawFromGroupRequest, WithdrawFromGroupResponse,
 };
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 use super::to_status;
+
+/// Default time-to-live for idempotency keys in seconds (24 hours).
+const IDEMPOTENCY_TTL_SECS: u64 = 86400;
+
+/// Convert an idempotency error code back to a tonic status code.
+fn from_idempotency_error_code(code: IdempotencyErrorCode) -> Code {
+    match code {
+        IdempotencyErrorCode::InvalidArgument => Code::InvalidArgument,
+        IdempotencyErrorCode::FailedPrecondition => Code::FailedPrecondition,
+        IdempotencyErrorCode::NotFound => Code::NotFound,
+        IdempotencyErrorCode::AlreadyExists => Code::AlreadyExists,
+        IdempotencyErrorCode::PermissionDenied => Code::PermissionDenied,
+        IdempotencyErrorCode::ResourceExhausted => Code::ResourceExhausted,
+        IdempotencyErrorCode::Cancelled => Code::Cancelled,
+        IdempotencyErrorCode::Aborted => Code::Aborted,
+        IdempotencyErrorCode::DeadlineExceeded => Code::DeadlineExceeded,
+        IdempotencyErrorCode::Internal => Code::Internal,
+        IdempotencyErrorCode::Unavailable => Code::Unavailable,
+        IdempotencyErrorCode::DataLoss => Code::DataLoss,
+        IdempotencyErrorCode::Unauthenticated => Code::Unauthenticated,
+        IdempotencyErrorCode::Unimplemented => Code::Unimplemented,
+        IdempotencyErrorCode::Unknown => Code::Unknown,
+    }
+}
+
+/// Map a storage error reference to idempotency error code (without consuming it).
+fn storage_error_to_idempotency(err: &crate::storage::StorageError) -> IdempotencyErrorCode {
+    use crate::storage::StorageError;
+    match err {
+        StorageError::NotFound(_) => IdempotencyErrorCode::NotFound,
+        StorageError::AlreadyExists => IdempotencyErrorCode::AlreadyExists,
+        StorageError::PreconditionFailed(_) => IdempotencyErrorCode::FailedPrecondition,
+        StorageError::Backend(_) => IdempotencyErrorCode::Internal,
+    }
+}
 
 #[derive(Clone)]
 pub struct BillingServiceImpl {
@@ -32,6 +68,39 @@ impl BillingService for BillingServiceImpl {
         request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
         let body = request.into_inner();
+
+        // Extract optional idempotency key
+        let idempotency_key = body.idempotency_key.filter(|k| !k.is_empty());
+
+        // If idempotency key is provided, check for existing result
+        if let Some(ref key) = idempotency_key {
+            match self.store.check_idempotency_key(key).await {
+                Ok(Some(IdempotencyResult::Success { balance_nanos })) => {
+                    // Replay successful result
+                    let balance_i64 =
+                        i64::try_from(balance_nanos).map_err(|_| RpcError::Internal {
+                            operation: "transfer_to_group",
+                            details: "cached balance exceeds i64::MAX".into(),
+                        })?;
+                    return Ok(Response::new(TransferToGroupResponse {
+                        balance_after_nanos: balance_i64,
+                    }));
+                }
+                Ok(Some(IdempotencyResult::Error { code, message })) => {
+                    // Replay error result
+                    return Err(Status::new(from_idempotency_error_code(code), message));
+                }
+                Ok(None) => {
+                    // Key not found, proceed with operation
+                }
+                Err(_) => {
+                    // Backend error checking idempotency key - proceed without idempotency
+                    // to avoid blocking operations. Logging is handled at the storage layer.
+                }
+            }
+        }
+
+        // Parse and validate request parameters
         let tenant_id = TenantId(crate::proto::parse_ulid(&body.tenant_id).map_err(|e| {
             RpcError::InvalidArgument {
                 field: "tenant_id",
@@ -55,11 +124,35 @@ impl BillingService for BillingServiceImpl {
             field: "amount_nanos",
             reason: "too large for u64".into(),
         })?;
-        let balance = self
+
+        // Execute the transfer
+        let result = self
             .store
             .transfer_to_group(tenant_id, group_id, Nanos::new(amount))
-            .await
-            .map_err(to_status)?;
+            .await;
+
+        // Record result if idempotency key was provided
+        if let Some(ref key) = idempotency_key {
+            let idempotency_result = match &result {
+                Ok(balance) => IdempotencyResult::Success {
+                    balance_nanos: balance.as_u64(),
+                },
+                Err(e) => IdempotencyResult::Error {
+                    code: storage_error_to_idempotency(e),
+                    message: e.to_string(),
+                },
+            };
+
+            // Record result - ignore errors (best effort)
+            // Logging is handled at the storage layer.
+            let _ = self
+                .store
+                .record_idempotency_result(key, idempotency_result, IDEMPOTENCY_TTL_SECS)
+                .await;
+        }
+
+        // Return result
+        let balance = result.map_err(to_status)?;
         let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
             operation: "transfer_to_group",
             details: "balance exceeds i64::MAX".into(),
