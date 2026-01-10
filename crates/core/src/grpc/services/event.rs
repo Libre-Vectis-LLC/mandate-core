@@ -1,5 +1,6 @@
 //! EventService gRPC implementation.
 
+use crate::billing::{default_egress_meter, SharedEgressMeter};
 use crate::event::Event;
 use crate::hashing::ring_hash_sha3_256;
 use crate::ids::{GroupId, SequenceNo};
@@ -39,14 +40,33 @@ fn banned_operation_for_event(event_type: &crate::event::EventType) -> Option<Ba
 pub struct EventServiceImpl {
     store: StorageFacade,
     verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
+    egress_meter: SharedEgressMeter,
 }
 
 impl EventServiceImpl {
+    /// Create a new EventService with the default no-op egress meter.
     pub fn new(
         store: StorageFacade,
         verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
     ) -> Self {
-        Self { store, verifier }
+        Self {
+            store,
+            verifier,
+            egress_meter: default_egress_meter(),
+        }
+    }
+
+    /// Create a new EventService with a custom egress meter.
+    pub fn with_egress_meter(
+        store: StorageFacade,
+        verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
+        egress_meter: SharedEgressMeter,
+    ) -> Self {
+        Self {
+            store,
+            verifier,
+            egress_meter,
+        }
     }
 }
 
@@ -382,11 +402,31 @@ impl EventService for EventServiceImpl {
             .await
             .map_err(to_status)?;
 
+        // Calculate total egress bytes for billing
+        let total_bytes: usize = records.iter().map(|(_, b, _)| b.len()).sum();
+        let group_id_str = group_id.to_string();
+
+        // Check egress balance before sending data
+        self.egress_meter
+            .check_egress(&group_id_str, total_bytes)
+            .await
+            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
+
         let (tx, rx) = mpsc::channel(1);
         let sequence_nos: Vec<i64> = records.iter().map(|(_, _, seq)| seq.as_i64()).collect();
+        let event_bytes: Vec<Vec<u8>> = records.into_iter().map(|(_, b, _)| b.to_vec()).collect();
+
+        // Record egress after preparing response (charge for data transfer)
+        // Note: We intentionally ignore errors here - the data is already prepared
+        // and the check_egress call above already validated the balance.
+        let _ = self
+            .egress_meter
+            .record_egress(&group_id_str, total_bytes)
+            .await;
+
         let _ = tx
             .send(Ok(StreamEventsResponse {
-                event_bytes: records.into_iter().map(|(_, b, _)| b.to_vec()).collect(),
+                event_bytes,
                 sequence_nos,
             }))
             .await;

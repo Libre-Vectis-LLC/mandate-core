@@ -617,7 +617,7 @@ pub enum IdempotencyResult {
 }
 
 #[async_trait]
-pub trait BillingStore {
+pub trait BillingStore: Send + Sync {
     /// Credit a tenant's balance, creating the tenant record if it does not exist.
     ///
     /// This method is used when a tenant redeems a gift card or receives a service credit.

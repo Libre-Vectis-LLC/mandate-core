@@ -580,4 +580,16 @@ impl StorageFacade {
     ) -> Result<Arc<[u8]>, StorageError> {
         self.key_blobs.get_one(tenant, group_id, rage_pub).await
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Internal accessor methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Get a reference to the underlying billing store.
+    ///
+    /// This is primarily used for constructing metering interceptors in
+    /// enterprise deployments where egress billing is required.
+    pub fn billing_store(&self) -> Arc<dyn BillingStore + Send + Sync> {
+        self.billing.clone()
+    }
 }

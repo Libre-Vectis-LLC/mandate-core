@@ -3,9 +3,12 @@
 //! This module provides WASM-compatible types for metering operations:
 //! - `MeteringError`: Errors during balance checks and deductions
 //! - `UsageEvent`: Records of resource consumption for audit and billing
+//! - `EgressMeter`: Trait for egress (outbound data) metering
 
 use crate::billing::{AbstractResourceUnits, Nanos};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Errors that occur during metering operations.
 ///
@@ -77,6 +80,89 @@ pub struct UsageEvent {
     pub timestamp_ms: u64,
 }
 
+/// Trait for metering egress (outbound data transfer) charges.
+///
+/// This trait allows services to check and charge for egress without
+/// depending on a specific metering implementation. Enterprise deployments
+/// provide a real implementation; community edition uses [`NoOpEgressMeter`].
+///
+/// # Design
+///
+/// The egress metering follows a check-then-charge pattern:
+/// 1. Before sending data, call [`check_egress`](EgressMeter::check_egress) to verify balance
+/// 2. After sending data, call [`record_egress`](EgressMeter::record_egress) to charge
+///
+/// This allows rejecting requests upfront if the group has insufficient balance,
+/// preventing data exfiltration without payment.
+#[async_trait]
+pub trait EgressMeter: Send + Sync {
+    /// Check if there's sufficient balance for the estimated egress.
+    ///
+    /// This should be called **before** executing the actual data transfer.
+    ///
+    /// # Arguments
+    /// * `group_id` - The group being charged (as string for crate independence)
+    /// * `estimated_bytes` - Estimated data size to be transferred
+    ///
+    /// # Returns
+    /// * `Ok(())` - Sufficient balance for the transfer
+    /// * `Err(MeteringError::InsufficientBalance)` - Not enough credits
+    /// * `Err(MeteringError::GroupNotFound)` - Unknown group
+    async fn check_egress(
+        &self,
+        group_id: &str,
+        estimated_bytes: usize,
+    ) -> Result<(), MeteringError>;
+
+    /// Record and charge for actual egress after successful transfer.
+    ///
+    /// This should be called **after** successfully sending data to the client.
+    ///
+    /// # Arguments
+    /// * `group_id` - The group being charged
+    /// * `actual_bytes` - Actual data size transferred
+    ///
+    /// # Returns
+    /// * `Ok(())` - Charge recorded successfully
+    /// * `Err(MeteringError)` - Failed to record (balance issue or store error)
+    async fn record_egress(&self, group_id: &str, actual_bytes: usize)
+        -> Result<(), MeteringError>;
+}
+
+/// No-op egress meter for community edition or when metering is disabled.
+///
+/// This implementation always succeeds, effectively making egress free.
+/// Used when billing is not configured or in test environments.
+#[derive(Clone, Debug, Default)]
+pub struct NoOpEgressMeter;
+
+#[async_trait]
+impl EgressMeter for NoOpEgressMeter {
+    async fn check_egress(
+        &self,
+        _group_id: &str,
+        _estimated_bytes: usize,
+    ) -> Result<(), MeteringError> {
+        Ok(())
+    }
+
+    async fn record_egress(
+        &self,
+        _group_id: &str,
+        _actual_bytes: usize,
+    ) -> Result<(), MeteringError> {
+        Ok(())
+    }
+}
+
+/// Type alias for a shared egress meter reference.
+pub type SharedEgressMeter = Arc<dyn EgressMeter>;
+
+/// Create a default no-op egress meter.
+pub fn default_egress_meter() -> SharedEgressMeter {
+    Arc::new(NoOpEgressMeter)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +231,28 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: UsageEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, deserialized);
+    }
+
+    // Async tests require tokio, only available on non-wasm targets
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn test_no_op_egress_meter() {
+        let meter = NoOpEgressMeter;
+
+        // Check always succeeds
+        assert!(meter.check_egress("group_123", 1_000_000).await.is_ok());
+
+        // Record always succeeds
+        assert!(meter.record_egress("group_123", 1_000_000).await.is_ok());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn test_default_egress_meter() {
+        let meter = default_egress_meter();
+
+        // Default meter should be NoOp, always succeeds
+        assert!(meter.check_egress("any_group", 999_999_999).await.is_ok());
+        assert!(meter.record_egress("any_group", 999_999_999).await.is_ok());
     }
 }

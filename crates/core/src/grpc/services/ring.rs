@@ -1,5 +1,6 @@
 //! RingService gRPC implementation.
 
+use crate::billing::{default_egress_meter, SharedEgressMeter};
 use crate::ids::{GroupId, RingHash};
 use crate::proto::ring_delta_to_bytes;
 use crate::ring_log::apply_delta;
@@ -21,11 +22,24 @@ use super::{clamp_ring_limit, extract_tenant_id, to_status};
 #[derive(Clone)]
 pub struct RingServiceImpl {
     store: StorageFacade,
+    egress_meter: SharedEgressMeter,
 }
 
 impl RingServiceImpl {
+    /// Create a new RingService with the default no-op egress meter.
     pub fn new(store: StorageFacade) -> Self {
-        Self { store }
+        Self {
+            store,
+            egress_meter: default_egress_meter(),
+        }
+    }
+
+    /// Create a new RingService with a custom egress meter.
+    pub fn with_egress_meter(store: StorageFacade, egress_meter: SharedEgressMeter) -> Self {
+        Self {
+            store,
+            egress_meter,
+        }
     }
 }
 
@@ -137,7 +151,29 @@ impl RingService for RingServiceImpl {
             .last()
             .map(|e| e.ring_hash.clone())
             .unwrap_or_default();
+
+        // Calculate total egress bytes for billing
+        let total_bytes: usize = entries
+            .iter()
+            .map(|e| e.ring_hash.len() + e.deltas.iter().map(|d| d.len()).sum::<usize>())
+            .sum::<usize>()
+            + next_hash.len();
+        let group_id_str = group_id.to_string();
+
+        // Check egress balance before sending data
+        self.egress_meter
+            .check_egress(&group_id_str, total_bytes)
+            .await
+            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
+
         let (tx, rx) = mpsc::channel(1);
+
+        // Record egress after preparing response
+        let _ = self
+            .egress_meter
+            .record_egress(&group_id_str, total_bytes)
+            .await;
+
         let _ = tx
             .send(Ok(StreamRingResponse {
                 entries,

@@ -41,7 +41,10 @@ pub use crate::ids::Nanos;
 pub use balance_transfer::BalanceTransferService;
 pub use cost_models::{PowVerificationCostModel, VerificationCostModel};
 pub use difficulty::PowDifficultyCalculator;
-pub use metering::{MeteringError, UsageEvent};
+pub use metering::{
+    default_egress_meter, EgressMeter, MeteringError, NoOpEgressMeter, SharedEgressMeter,
+    UsageEvent,
+};
 pub use pow_state::{EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy};
 pub use pricing::{ProviderPricing, ServiceTier};
 pub use storage::{GroupStorageStatus, GroupStorageUsage};

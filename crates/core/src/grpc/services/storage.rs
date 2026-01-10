@@ -1,5 +1,6 @@
 //! StorageService gRPC implementation.
 
+use crate::billing::{default_egress_meter, SharedEgressMeter};
 use crate::ids::GroupId;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
@@ -14,11 +15,24 @@ use super::{extract_tenant_id, keyblobs_max_blob_bytes, keyblobs_max_count, to_s
 #[derive(Clone)]
 pub struct StorageServiceImpl {
     store: StorageFacade,
+    egress_meter: SharedEgressMeter,
 }
 
 impl StorageServiceImpl {
+    /// Create a new StorageService with the default no-op egress meter.
     pub fn new(store: StorageFacade) -> Self {
-        Self { store }
+        Self {
+            store,
+            egress_meter: default_egress_meter(),
+        }
+    }
+
+    /// Create a new StorageService with a custom egress meter.
+    pub fn with_egress_meter(store: StorageFacade, egress_meter: SharedEgressMeter) -> Self {
+        Self {
+            store,
+            egress_meter,
+        }
     }
 }
 
@@ -108,6 +122,22 @@ impl StorageService for StorageServiceImpl {
             .get_key_blob(tenant, group_id, rage_pub)
             .await
             .map_err(to_status)?;
+
+        // Calculate egress bytes for billing
+        let total_bytes = blob.len();
+        let group_id_str = group_id.to_string();
+
+        // Check egress balance before sending data
+        self.egress_meter
+            .check_egress(&group_id_str, total_bytes)
+            .await
+            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
+
+        // Record egress after preparing response
+        let _ = self
+            .egress_meter
+            .record_egress(&group_id_str, total_bytes)
+            .await;
 
         Ok(Response::new(DownloadMyKeyBlobResponse {
             blob: blob.to_vec(),
