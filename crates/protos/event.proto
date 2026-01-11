@@ -116,6 +116,11 @@ message PowSubmission {
   // Challenge bytes provided by Edge in previous error response.
   // Server deterministically computes this challenge (stateless design).
   bytes challenge = 3;
+
+  // Client-generated random nonce (32 bytes).
+  // Used for replay protection - each submission must have a unique nonce.
+  // Server uses this to detect and reject duplicate submissions.
+  bytes client_nonce = 4;
 }
 
 // POW challenge parameters returned in error response when POW is required.
