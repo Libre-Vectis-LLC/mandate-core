@@ -13,8 +13,26 @@
 //!      │               M consecutive successes             │
 //!      └────────────────────────────────────────────────────┘
 //! ```
+//!
+//! # Upgrade Strategies
+//!
+//! Three strategies are available for triggering and escalating POW:
+//!
+//! - **TimeWindowBased**: Trigger when failure count exceeds threshold within time window
+//!   and success rate falls below minimum
+//! - **ConsecutiveFailure**: Trigger after N consecutive failures (simplest, stateless)
+//! - **RateBased**: Trigger when failure rate exceeds threshold (responsive to bursts)
+//!
+//! Each strategy supports linear or exponential growth modes.
 
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[cfg(target_arch = "wasm32")]
+use js_sys;
 
 /// Group POW configuration (set by group owner).
 ///
@@ -23,24 +41,39 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```
-/// use mandate_core::billing::{GroupPowConfig, EscalationStrategy, RecoveryStrategy};
+/// use mandate_core::billing::{GroupPowConfig, UpgradeStrategy, EscalationStrategy, RecoveryStrategy};
 ///
-/// // Conservative config: trigger POW after 3 failures, escalate linearly
+/// // Conservative config: trigger POW after 3 consecutive failures, escalate linearly
 /// let config = GroupPowConfig {
-///     failure_threshold: 3,
-///     escalation_strategy: EscalationStrategy::Linear { step: 1.0 },
+///     upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+///         trigger_threshold: 3,
+///         escalate_every: 1,
+///         growth: EscalationStrategy::Linear { step: 1.0 },
+///     },
 ///     initial_multiplier: 3.0,
 ///     recovery_success_count: 10,
 ///     recovery_strategy: RecoveryStrategy::Gradual { steps: 3 },
+///     max_event_history: 1000,
+/// };
+///
+/// // Time-window config: trigger if >5 failures in 60s with <90% success rate
+/// let time_window_config = GroupPowConfig {
+///     upgrade_strategy: UpgradeStrategy::TimeWindowBased {
+///         window_secs: 60,
+///         failure_threshold: 5,
+///         min_success_rate: 0.90,
+///         growth: EscalationStrategy::Linear { step: 1.0 },
+///     },
+///     initial_multiplier: 3.0,
+///     recovery_success_count: 10,
+///     recovery_strategy: RecoveryStrategy::Immediate,
+///     max_event_history: 1000,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GroupPowConfig {
-    /// Number of consecutive verification failures before triggering POW.
-    pub failure_threshold: u32,
-
-    /// How to escalate difficulty on repeated failures.
-    pub escalation_strategy: EscalationStrategy,
+    /// Strategy for triggering and escalating POW.
+    pub upgrade_strategy: UpgradeStrategy,
 
     /// Initial POW multiplier when first triggered (default: 3.0).
     ///
@@ -52,6 +85,12 @@ pub struct GroupPowConfig {
 
     /// How to recover when successes meet threshold.
     pub recovery_strategy: RecoveryStrategy,
+
+    /// Maximum number of verification events to keep in history.
+    ///
+    /// Used by TimeWindowBased and RateBased strategies. Events older than
+    /// the strategy's window are automatically pruned.
+    pub max_event_history: usize,
 }
 
 /// POW difficulty escalation strategy.
@@ -80,6 +119,150 @@ pub enum RecoveryStrategy {
     Gradual { steps: u32 },
 }
 
+/// Upgrade (trigger/escalation) strategy for POW activation.
+///
+/// Determines **when** POW should be triggered or escalated.
+/// Each variant supports linear or exponential difficulty growth.
+///
+/// # Examples
+///
+/// ```
+/// use mandate_core::billing::{UpgradeStrategy, EscalationStrategy};
+///
+/// // Time-window based: trigger if >5 failures in 60s with <90% success rate
+/// let time_window = UpgradeStrategy::TimeWindowBased {
+///     window_secs: 60,
+///     failure_threshold: 5,
+///     min_success_rate: 0.90,
+///     growth: EscalationStrategy::Linear { step: 1.0 },
+/// };
+///
+/// // Consecutive failure: trigger after 3 consecutive failures
+/// let consecutive = UpgradeStrategy::ConsecutiveFailure {
+///     trigger_threshold: 3,
+///     escalate_every: 1,
+///     growth: EscalationStrategy::Exponential { base: 2.0 },
+/// };
+///
+/// // Rate-based: trigger if failure rate exceeds 10% in 30s window
+/// let rate_based = UpgradeStrategy::RateBased {
+///     rate_window_secs: 30,
+///     max_failure_rate: 0.10,
+///     growth: EscalationStrategy::Linear { step: 0.5 },
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum UpgradeStrategy {
+    /// Time-window based triggering.
+    ///
+    /// Triggers when failure count exceeds threshold within time window
+    /// AND success rate falls below minimum.
+    TimeWindowBased {
+        /// Time window in seconds for failure counting.
+        window_secs: u64,
+        /// Number of failures within window to trigger POW.
+        failure_threshold: u32,
+        /// Minimum success rate required (0.0-1.0, e.g., 0.90 = 90%).
+        /// Below this rate, POW is triggered.
+        min_success_rate: f64,
+        /// How difficulty grows on escalation.
+        growth: EscalationStrategy,
+    },
+
+    /// Consecutive failure triggering (simplest, stateless).
+    ///
+    /// Triggers after N consecutive failures. Escalates every M additional failures.
+    ConsecutiveFailure {
+        /// Number of consecutive failures to trigger POW.
+        trigger_threshold: u32,
+        /// Escalate difficulty every N additional failures after trigger.
+        escalate_every: u32,
+        /// How difficulty grows on escalation.
+        growth: EscalationStrategy,
+    },
+
+    /// Rate-based triggering (responsive to bursts).
+    ///
+    /// Triggers when failure rate exceeds threshold.
+    RateBased {
+        /// Time window in seconds for rate calculation.
+        rate_window_secs: u64,
+        /// Maximum allowed failure rate (0.0-1.0, e.g., 0.10 = 10%).
+        /// Exceeding this rate triggers POW.
+        max_failure_rate: f64,
+        /// How difficulty grows on escalation.
+        growth: EscalationStrategy,
+    },
+}
+
+impl Default for UpgradeStrategy {
+    fn default() -> Self {
+        // Default to simple consecutive failure strategy (backward compatible)
+        UpgradeStrategy::ConsecutiveFailure {
+            trigger_threshold: 3,
+            escalate_every: 1,
+            growth: EscalationStrategy::Linear { step: 1.0 },
+        }
+    }
+}
+
+impl UpgradeStrategy {
+    /// Returns the growth (escalation) strategy for this upgrade strategy.
+    pub fn growth(&self) -> &EscalationStrategy {
+        match self {
+            UpgradeStrategy::TimeWindowBased { growth, .. } => growth,
+            UpgradeStrategy::ConsecutiveFailure { growth, .. } => growth,
+            UpgradeStrategy::RateBased { growth, .. } => growth,
+        }
+    }
+}
+
+/// A verification event record with timestamp.
+///
+/// Used by time-window-based and rate-based strategies to track
+/// verification history.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VerificationEvent {
+    /// Timestamp in milliseconds since UNIX epoch.
+    pub timestamp_ms: u64,
+    /// Whether this was a successful verification.
+    pub success: bool,
+}
+
+impl VerificationEvent {
+    /// Creates a new verification event with current timestamp.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn now(success: bool) -> Self {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64;
+        Self {
+            timestamp_ms,
+            success,
+        }
+    }
+
+    /// Creates a new verification event with current timestamp (WASM version).
+    #[cfg(target_arch = "wasm32")]
+    pub fn now(success: bool) -> Self {
+        // In WASM, use js_sys::Date for timestamp
+        let timestamp_ms = js_sys::Date::now() as u64;
+        Self {
+            timestamp_ms,
+            success,
+        }
+    }
+
+    /// Creates a verification event with explicit timestamp (for testing).
+    pub fn with_timestamp(timestamp_ms: u64, success: bool) -> Self {
+        Self {
+            timestamp_ms,
+            success,
+        }
+    }
+}
+
 /// Current POW state for a group.
 ///
 /// Tracks whether POW is required and at what difficulty level.
@@ -106,16 +289,23 @@ pub struct GroupPowState {
 
     /// Number of consecutive verification successes.
     pub consecutive_successes: u32,
+
+    /// Verification event history for time-window and rate-based strategies.
+    ///
+    /// Events are stored in chronological order (oldest first).
+    /// Automatically pruned when exceeding max_event_history.
+    #[serde(default)]
+    pub event_history: VecDeque<VerificationEvent>,
 }
 
 impl Default for GroupPowConfig {
     fn default() -> Self {
         Self {
-            failure_threshold: 3,
-            escalation_strategy: EscalationStrategy::Linear { step: 1.0 },
+            upgrade_strategy: UpgradeStrategy::default(),
             initial_multiplier: 3.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
+            max_event_history: 1000,
         }
     }
 }
@@ -127,6 +317,7 @@ impl Default for GroupPowState {
             current_multiplier: 1.0,
             consecutive_failures: 0,
             consecutive_successes: 0,
+            event_history: VecDeque::new(),
         }
     }
 }
@@ -139,7 +330,7 @@ impl GroupPowState {
 
     /// Handles a verification failure event.
     ///
-    /// If failures exceed threshold, triggers POW or escalates difficulty.
+    /// If failures exceed threshold (based on upgrade strategy), triggers POW or escalates difficulty.
     ///
     /// # Parameters
     ///
@@ -162,7 +353,7 @@ impl GroupPowState {
     /// state.on_verification_failure(&config);
     /// assert!(!state.pow_required);
     ///
-    /// // Third failure triggers POW (threshold=3)
+    /// // Third failure triggers POW (default threshold=3)
     /// state.on_verification_failure(&config);
     /// assert!(state.pow_required);
     /// assert_eq!(state.current_multiplier, 3.0);
@@ -174,9 +365,12 @@ impl GroupPowState {
         // Increment failure counter
         self.consecutive_failures += 1;
 
+        // Record event for time-window strategies
+        self.record_event(false, config);
+
         if !self.pow_required {
             // Not in POW mode yet - check if we should trigger
-            if self.consecutive_failures >= config.failure_threshold {
+            if self.should_trigger(config) {
                 // Trigger POW with initial multiplier
                 self.pow_required = true;
                 self.current_multiplier = config.initial_multiplier;
@@ -185,6 +379,99 @@ impl GroupPowState {
             // Already in POW mode - escalate
             self.escalate(config);
         }
+    }
+
+    /// Records a verification event in history (for time-window strategies).
+    fn record_event(&mut self, success: bool, config: &GroupPowConfig) {
+        let event = VerificationEvent::now(success);
+        self.event_history.push_back(event);
+
+        // Prune old events exceeding max history
+        while self.event_history.len() > config.max_event_history {
+            self.event_history.pop_front();
+        }
+    }
+
+    /// Records a verification event with explicit timestamp (for testing).
+    #[cfg(test)]
+    #[allow(dead_code)] // Reserved for Phase 5.7 POW E2E tests
+    fn record_event_at(&mut self, timestamp_ms: u64, success: bool, config: &GroupPowConfig) {
+        let event = VerificationEvent::with_timestamp(timestamp_ms, success);
+        self.event_history.push_back(event);
+
+        // Prune old events exceeding max history
+        while self.event_history.len() > config.max_event_history {
+            self.event_history.pop_front();
+        }
+    }
+
+    /// Checks if POW should be triggered based on upgrade strategy.
+    fn should_trigger(&self, config: &GroupPowConfig) -> bool {
+        match &config.upgrade_strategy {
+            UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold, ..
+            } => self.consecutive_failures >= *trigger_threshold,
+            UpgradeStrategy::TimeWindowBased {
+                window_secs,
+                failure_threshold,
+                min_success_rate,
+                ..
+            } => {
+                let (failures, total) = self.count_events_in_window(*window_secs);
+                if total == 0 {
+                    return false;
+                }
+                let success_rate = (total - failures) as f64 / total as f64;
+                failures >= *failure_threshold && success_rate < *min_success_rate
+            }
+            UpgradeStrategy::RateBased {
+                rate_window_secs,
+                max_failure_rate,
+                ..
+            } => {
+                let (failures, total) = self.count_events_in_window(*rate_window_secs);
+                if total == 0 {
+                    return false;
+                }
+                let failure_rate = failures as f64 / total as f64;
+                failure_rate > *max_failure_rate
+            }
+        }
+    }
+
+    /// Counts failures and total events within the time window.
+    fn count_events_in_window(&self, window_secs: u64) -> (u32, u32) {
+        let now_ms = Self::current_timestamp_ms();
+        let window_start_ms = now_ms.saturating_sub(window_secs * 1000);
+
+        let mut failures = 0u32;
+        let mut total = 0u32;
+
+        for event in self.event_history.iter() {
+            if event.timestamp_ms >= window_start_ms {
+                total += 1;
+                if !event.success {
+                    failures += 1;
+                }
+            }
+        }
+
+        (failures, total)
+    }
+
+    /// Returns the current timestamp in milliseconds.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn current_timestamp_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64
+    }
+
+    /// Returns the current timestamp in milliseconds (WASM version).
+    #[cfg(target_arch = "wasm32")]
+    fn current_timestamp_ms() -> u64 {
+        js_sys::Date::now() as u64
     }
 
     /// Handles a verification success event.
@@ -198,7 +485,7 @@ impl GroupPowState {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::{GroupPowState, GroupPowConfig, EscalationStrategy};
+    /// use mandate_core::billing::{GroupPowState, GroupPowConfig};
     ///
     /// let mut state = GroupPowState::new();
     /// let mut config = GroupPowConfig::default();
@@ -222,6 +509,9 @@ impl GroupPowState {
         // Reset failure counter
         self.consecutive_failures = 0;
 
+        // Record event for time-window strategies
+        self.record_event(true, config);
+
         if self.pow_required {
             // Increment success counter
             self.consecutive_successes += 1;
@@ -233,9 +523,10 @@ impl GroupPowState {
         }
     }
 
-    /// Escalates POW difficulty based on escalation strategy.
+    /// Escalates POW difficulty based on upgrade strategy's growth mode.
     fn escalate(&mut self, config: &GroupPowConfig) {
-        self.current_multiplier = match config.escalation_strategy {
+        let growth = config.upgrade_strategy.growth();
+        self.current_multiplier = match growth {
             EscalationStrategy::Linear { step } => self.current_multiplier + step,
             EscalationStrategy::Exponential { base } => self.current_multiplier * base,
         };
@@ -253,8 +544,9 @@ impl GroupPowState {
             RecoveryStrategy::Gradual { steps: _ } => {
                 // Gradually reduce multiplier by reversing one escalation step
                 // This makes recovery symmetric with escalation
-                let reduction = match config.escalation_strategy {
-                    EscalationStrategy::Linear { step } => step,
+                let growth = config.upgrade_strategy.growth();
+                let reduction = match growth {
+                    EscalationStrategy::Linear { step } => *step,
                     EscalationStrategy::Exponential { base } => {
                         // For exponential, divide by base (inverse of multiplication)
                         self.current_multiplier - (self.current_multiplier / base)
@@ -320,11 +612,15 @@ mod tests {
     fn test_linear_escalation() {
         let mut state = GroupPowState::new();
         let config = GroupPowConfig {
-            failure_threshold: 1,
-            escalation_strategy: EscalationStrategy::Linear { step: 1.5 },
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 1,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 1.5 },
+            },
             initial_multiplier: 3.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
+            max_event_history: 1000,
         };
 
         // Trigger POW
@@ -346,11 +642,15 @@ mod tests {
     fn test_exponential_escalation() {
         let mut state = GroupPowState::new();
         let config = GroupPowConfig {
-            failure_threshold: 1,
-            escalation_strategy: EscalationStrategy::Exponential { base: 2.0 },
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 1,
+                escalate_every: 1,
+                growth: EscalationStrategy::Exponential { base: 2.0 },
+            },
             initial_multiplier: 3.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
+            max_event_history: 1000,
         };
 
         // Trigger POW
@@ -372,11 +672,15 @@ mod tests {
     fn test_immediate_recovery() {
         let mut state = GroupPowState::new();
         let config = GroupPowConfig {
-            failure_threshold: 1,
-            escalation_strategy: EscalationStrategy::Linear { step: 1.0 },
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 1,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 1.0 },
+            },
             initial_multiplier: 3.0,
             recovery_success_count: 2,
             recovery_strategy: RecoveryStrategy::Immediate,
+            max_event_history: 1000,
         };
 
         // Trigger and escalate POW
@@ -401,11 +705,15 @@ mod tests {
     fn test_gradual_recovery() {
         let mut state = GroupPowState::new();
         let config = GroupPowConfig {
-            failure_threshold: 1,
-            escalation_strategy: EscalationStrategy::Linear { step: 3.0 },
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 1,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 3.0 },
+            },
             initial_multiplier: 3.0,
             recovery_success_count: 2,
             recovery_strategy: RecoveryStrategy::Gradual { steps: 3 },
+            max_event_history: 1000,
         };
 
         // Escalate to 12.0:
@@ -466,11 +774,15 @@ mod tests {
     fn test_failure_resets_successes() {
         let mut state = GroupPowState::new();
         let config = GroupPowConfig {
-            failure_threshold: 1,
-            escalation_strategy: EscalationStrategy::Linear { step: 1.0 },
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 1,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 1.0 },
+            },
             initial_multiplier: 3.0,
             recovery_success_count: 3,
             recovery_strategy: RecoveryStrategy::Immediate,
+            max_event_history: 1000,
         };
 
         // Trigger POW
@@ -491,14 +803,18 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = GroupPowConfig::default();
-        assert_eq!(config.failure_threshold, 3);
+        assert_eq!(
+            config.upgrade_strategy,
+            UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 3,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 1.0 },
+            }
+        );
         assert_eq!(config.initial_multiplier, 3.0);
         assert_eq!(config.recovery_success_count, 10);
-        assert_eq!(
-            config.escalation_strategy,
-            EscalationStrategy::Linear { step: 1.0 }
-        );
         assert_eq!(config.recovery_strategy, RecoveryStrategy::Immediate);
+        assert_eq!(config.max_event_history, 1000);
     }
 
     #[test]

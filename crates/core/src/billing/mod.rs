@@ -45,7 +45,10 @@ pub use metering::{
     default_egress_meter, EgressMeter, MeteringError, NoOpEgressMeter, SharedEgressMeter,
     UsageEvent,
 };
-pub use pow_state::{EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy};
+pub use pow_state::{
+    EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy, UpgradeStrategy,
+    VerificationEvent,
+};
 pub use pricing::{ProviderPricing, ServiceTier};
 pub use storage::{GroupStorageStatus, GroupStorageUsage};
 pub use tenant_tier::{
