@@ -1,0 +1,135 @@
+syntax = "proto3";
+package mandate.v1;
+
+// EdgeAdminService provides Edge-specific administrative operations.
+//
+// ## Authentication
+// Requires `x-bot-secret` header matching the Edge's configured secret.
+// This service should be exposed only on internal interfaces.
+//
+// ## Use Cases
+// - Configuring POW recovery strategies per group
+// - Monitoring POW state for groups under attack
+// - Manual POW reset (force recovery) for stuck groups
+service EdgeAdminService {
+  // SetPowConfig configures POW parameters for a specific group.
+  //
+  // Allows operators to customize POW behavior including:
+  // - Recovery strategy (time-based, consecutive-success, or rate-based)
+  // - Difficulty multiplier bounds
+  // - Failure thresholds
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: invalid config values
+  // - NOT_FOUND: group_id doesn't exist in cache
+  rpc SetPowConfig (SetPowConfigRequest) returns (SetPowConfigResponse);
+
+  // GetPowState retrieves current POW state for a group.
+  //
+  // Returns the current POW requirements and escalation status.
+  // Useful for monitoring groups under attack.
+  //
+  // ## Errors
+  // - NOT_FOUND: group has no POW state (never triggered)
+  rpc GetPowState (GetPowStateRequest) returns (GetPowStateResponse);
+
+  // ResetPowState forces POW recovery for a group.
+  //
+  // Immediately disables POW requirement for the group and resets
+  // all escalation counters. Use when a group is stuck in POW mode
+  // after an attack has subsided.
+  //
+  // ## Errors
+  // - NOT_FOUND: group has no POW state to reset
+  rpc ResetPowState (ResetPowStateRequest) returns (ResetPowStateResponse);
+}
+
+// Request to configure POW settings for a group.
+message SetPowConfigRequest {
+  // Group ID (ULID format) to configure.
+  string group_id = 1;
+
+  // POW configuration settings.
+  EdgePowConfig config = 2;
+}
+
+// POW configuration for Edge.
+message EdgePowConfig {
+  // Number of consecutive signature failures to trigger POW.
+  // Default: 5
+  uint32 failure_threshold = 1;
+
+  // Initial difficulty multiplier when POW is first triggered.
+  // Default: 3.0 (3 proofs required instead of 1)
+  float initial_multiplier = 2;
+
+  // Maximum difficulty multiplier (prevents infinite escalation).
+  // Default: 20.0
+  float max_multiplier = 3;
+
+  // Recovery strategy type.
+  RecoveryStrategy recovery_strategy = 4;
+}
+
+// POW recovery strategy determines when POW requirements are relaxed.
+enum RecoveryStrategy {
+  // Recover after a time window without failures.
+  RECOVERY_TIME_BASED = 0;
+
+  // Recover after consecutive successful verifications.
+  RECOVERY_CONSECUTIVE_SUCCESS = 1;
+
+  // Recover based on failure rate dropping below threshold.
+  RECOVERY_RATE_BASED = 2;
+}
+
+// Response after POW config update.
+message SetPowConfigResponse {
+  // Whether the update succeeded.
+  bool success = 1;
+}
+
+// Request to get POW state for a group.
+message GetPowStateRequest {
+  // Group ID (ULID format) to query.
+  string group_id = 1;
+}
+
+// Response containing current POW state.
+message GetPowStateResponse {
+  // Whether POW is currently required for this group.
+  bool pow_required = 1;
+
+  // Current difficulty multiplier (increases during escalation).
+  float current_multiplier = 2;
+
+  // Number of consecutive verification failures.
+  uint32 consecutive_failures = 3;
+
+  // Number of consecutive verification successes (for recovery).
+  uint32 consecutive_successes = 4;
+
+  // Unix timestamp of last verification failure.
+  uint64 last_failure_time = 5;
+
+  // Total failures since POW was triggered.
+  uint64 total_failures_since_trigger = 6;
+
+  // Total successes since POW was triggered.
+  uint64 total_successes_since_trigger = 7;
+}
+
+// Request to reset POW state for a group.
+message ResetPowStateRequest {
+  // Group ID (ULID format) to reset.
+  string group_id = 1;
+}
+
+// Response after POW state reset.
+message ResetPowStateResponse {
+  // Whether the reset succeeded.
+  bool success = 1;
+
+  // Previous state before reset (for audit logging).
+  GetPowStateResponse previous_state = 2;
+}
