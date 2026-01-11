@@ -343,6 +343,20 @@ impl StorageFacade {
             .await
     }
 
+    /// Count the number of bans for a specific ring hash.
+    ///
+    /// Used for OOM protection to limit the number of bans per ring state.
+    pub async fn count_bans_for_ring(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        ring_hash: &RingHash,
+    ) -> Result<usize, StorageError> {
+        self.ban_index
+            .count_bans_for_ring(tenant, group_id, ring_hash)
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Ring methods
     // ─────────────────────────────────────────────────────────────────────────

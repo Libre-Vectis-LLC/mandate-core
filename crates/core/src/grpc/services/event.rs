@@ -287,6 +287,25 @@ impl EventService for EventServiceImpl {
             _ => None,
         };
 
+        // 2c. Check ban limit for BanCreate events (OOM protection)
+        if let crate::event::EventType::BanCreate(ban) = &event.event_type {
+            let current_count = self
+                .store
+                .count_bans_for_ring(tenant, event.group_id, &ban.ring_hash)
+                .await
+                .map_err(to_status)?;
+            if current_count >= crate::storage::MAX_BANS_PER_RING_HASH {
+                return Err(RpcError::FailedPrecondition {
+                    operation: "ban_create",
+                    reason: format!(
+                        "too many bans for ring hash (limit: {})",
+                        crate::storage::MAX_BANS_PER_RING_HASH
+                    ),
+                }
+                .into());
+            }
+        }
+
         // 3. Verify Signature
         // Load ring if needed (Compact signature)
         let external_ring = if let Some(ring) = delegate_external_ring {

@@ -421,6 +421,18 @@ pub trait RingWriter {
     ) -> Result<RingHash, StorageError>;
 }
 
+/// Maximum number of bans allowed per ring hash to prevent OOM attacks.
+///
+/// This limit defends against malicious tenants creating unlimited fake KeyImages
+/// to exhaust server memory. Since bans are cached in memory, an attacker could
+/// otherwise add millions of bans to cause out-of-memory conditions.
+///
+/// The limit is per ring hash because:
+/// - Each ring update naturally clears old bans (different KeyImages)
+/// - Legitimate use cases rarely need more than a few hundred bans per ring state
+/// - This allows gradual growth with ring updates while preventing abuse
+pub const MAX_BANS_PER_RING_HASH: usize = 1000;
+
 /// Operation categories enforced by ban scopes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BannedOperation {
@@ -462,6 +474,28 @@ pub trait BanIndex {
         key_image: &KeyImage,
         operation: BannedOperation,
     ) -> Result<bool, StorageError>;
+
+    /// Count the number of active bans for a specific ring hash.
+    ///
+    /// This method is used to enforce [`MAX_BANS_PER_RING_HASH`] limits to prevent
+    /// OOM attacks where malicious tenants add unlimited fake KeyImages.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `group_id` - The group identifier
+    /// * `ring_hash` - The ring hash to count bans for
+    ///
+    /// # Returns
+    /// The count of active bans associated with the given ring hash.
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn count_bans_for_ring(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        ring_hash: &RingHash,
+    ) -> Result<usize, StorageError>;
 }
 
 /// Index to prevent vote key-image reuse within a poll.

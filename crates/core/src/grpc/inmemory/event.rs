@@ -55,8 +55,14 @@ impl InMemoryEvents {
                 if event.signature.is_none() {
                     return Err(StorageError::PreconditionFailed("missing signature".into()));
                 }
-                self.ban_index
-                    .record_ban(tenant, group_id, ban.target, ban.scope, event_id)?;
+                self.ban_index.record_ban(
+                    tenant,
+                    group_id,
+                    ban.target,
+                    ban.scope,
+                    event_id,
+                    ban.ring_hash,
+                )?;
             }
             EventType::BanRevoke(revoke) => {
                 self.ban_index.revoke_ban(revoke.ban_event_id)?;

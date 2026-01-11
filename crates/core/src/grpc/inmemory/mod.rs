@@ -52,6 +52,7 @@ mod tests {
     };
     use crate::test_utils::TEST_MNEMONIC;
     use curve25519_dalek::ristretto::RistrettoPoint;
+    use curve25519_dalek::Scalar;
     use nazgul::traits::{Derivable, LocalByteConvertible};
     use sha3::Sha3_512;
     use std::sync::Arc;
@@ -190,6 +191,8 @@ mod tests {
         let key_image = RistrettoPoint::default();
         let ban_event_id = EventId([42u8; 32]);
 
+        // Create a dummy ring hash for testing
+        let ring_hash = RingHash([0u8; 32]);
         ban_index
             .record_ban(
                 tenant,
@@ -197,6 +200,7 @@ mod tests {
                 key_image.clone(),
                 crate::event::BanScope::BanVote,
                 ban_event_id,
+                ring_hash,
             )
             .expect("ban recorded");
 
@@ -307,5 +311,79 @@ mod tests {
             err,
             crate::storage::StorageError::PreconditionFailed(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn ban_index_counts_bans_per_ring_hash() {
+        let ban_index = InMemoryBanIndex::new();
+        let tenant = TenantId(ulid::Ulid::new());
+        let group = GroupId(ulid::Ulid::new());
+
+        let ring_hash_a = RingHash([1u8; 32]);
+        let ring_hash_b = RingHash([2u8; 32]);
+
+        // Initially, count should be 0
+        let count_a = ban_index
+            .count_bans_for_ring(tenant, group, &ring_hash_a)
+            .await
+            .expect("count query");
+        assert_eq!(count_a, 0, "should have 0 bans initially");
+
+        // Add 3 bans for ring_hash_a
+        for i in 0..3u8 {
+            let key_image = RistrettoPoint::mul_base(&Scalar::from(i as u64));
+            let event_id = EventId([i; 32]);
+            ban_index
+                .record_ban(
+                    tenant,
+                    group,
+                    key_image,
+                    crate::event::BanScope::BanAll,
+                    event_id,
+                    ring_hash_a,
+                )
+                .expect("ban recorded");
+        }
+
+        // Count should be 3 for ring_hash_a
+        let count_a = ban_index
+            .count_bans_for_ring(tenant, group, &ring_hash_a)
+            .await
+            .expect("count query");
+        assert_eq!(count_a, 3, "should have 3 bans for ring_hash_a");
+
+        // Count should be 0 for ring_hash_b (different ring)
+        let count_b = ban_index
+            .count_bans_for_ring(tenant, group, &ring_hash_b)
+            .await
+            .expect("count query");
+        assert_eq!(count_b, 0, "should have 0 bans for ring_hash_b");
+
+        // Add 1 ban for ring_hash_b
+        let key_image_b = RistrettoPoint::mul_base(&Scalar::from(99u64));
+        let event_id_b = EventId([99u8; 32]);
+        ban_index
+            .record_ban(
+                tenant,
+                group,
+                key_image_b,
+                crate::event::BanScope::BanPost,
+                event_id_b,
+                ring_hash_b,
+            )
+            .expect("ban recorded");
+
+        // Verify counts are independent
+        let count_a = ban_index
+            .count_bans_for_ring(tenant, group, &ring_hash_a)
+            .await
+            .expect("count query");
+        let count_b = ban_index
+            .count_bans_for_ring(tenant, group, &ring_hash_b)
+            .await
+            .expect("count query");
+
+        assert_eq!(count_a, 3, "ring_hash_a should still have 3 bans");
+        assert_eq!(count_b, 1, "ring_hash_b should have 1 ban");
     }
 }
