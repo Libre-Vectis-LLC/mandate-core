@@ -125,6 +125,35 @@ impl EventService for EventServiceImpl {
             _ => {}
         }
 
+        // Validate poll existence for VoteCast events (before expensive signature verification)
+        // This provides fast-path rejection for votes targeting non-existent polls.
+        //
+        // SECURITY: We MUST reject NotFound because signature verification alone cannot
+        // validate poll existence - it only verifies the ring hash is valid. An attacker
+        // could craft a VoteCast with any valid ring hash but a fake poll_id.
+        if let crate::event::EventType::VoteCast(vote) = &event.event_type {
+            match self
+                .store
+                .get_poll_ring_hash(tenant, event.group_id, &vote.poll_id)
+                .await
+            {
+                Ok(_) => {
+                    // Poll exists in index, fast-path validation passed.
+                    // Signature verification (step 3) will validate ring hash matches.
+                }
+                Err(crate::storage::StorageError::NotFound(_)) => {
+                    // Poll not found in ring-hash index - reject the vote.
+                    // This prevents votes against non-existent polls.
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "poll_existence",
+                        reason: format!("poll does not exist: {}", vote.poll_id),
+                    }
+                    .into());
+                }
+                Err(other) => return Err(to_status(other)),
+            }
+        }
+
         // 1. Verify Chain Hash
         match self.store.event_tail(tenant, event.group_id).await {
             Ok((tail_id, _, _)) => {
@@ -360,7 +389,24 @@ impl EventService for EventServiceImpl {
             }
         }
 
-        // 4. Commit
+        // 4. Store poll ring hash BEFORE committing the event
+        //
+        // DESIGN DECISION: Index write happens before event commit for consistent error handling.
+        // - If index write fails → Event not committed, clean failure
+        // - If event commit fails → Orphan index entry exists, but harmless:
+        //   VoteCast validates ring hash against signature, so votes against orphan entries
+        //   will fail signature verification (ring hash won't match any real poll)
+        //
+        // This ordering ensures we never return an error after the event is committed,
+        // which would confuse clients about the actual state.
+        if let crate::event::EventType::PollCreate(poll) = &event.event_type {
+            self.store
+                .store_poll_ring_hash(tenant, event.group_id, &poll.poll_id, poll.ring_hash)
+                .await
+                .map_err(to_status)?;
+        }
+
+        // 5. Commit the event
         let id = self
             .store
             .append_event(tenant, event.group_id, event_bytes.clone())
