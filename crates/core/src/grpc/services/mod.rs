@@ -178,6 +178,7 @@ mod tests {
 
         let mut req = Request::new(PushEventRequest {
             event_bytes: vec![0u8; max_event_bytes() + 1],
+            pow_submission: None,
         });
         req.extensions_mut().insert(tenant);
 
@@ -273,7 +274,10 @@ mod tests {
         };
 
         let event_bytes = serde_json::to_vec(&event).expect("serialize");
-        let mut req = Request::new(PushEventRequest { event_bytes });
+        let mut req = Request::new(PushEventRequest {
+            event_bytes,
+            pow_submission: None,
+        });
         req.extensions_mut().insert(tenant);
 
         let err = services.event.push_event(req).await.expect_err("reject");

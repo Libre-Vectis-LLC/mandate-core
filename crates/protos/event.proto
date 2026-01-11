@@ -55,6 +55,10 @@ message PushEventRequest {
   // Canonical event bytes including embedded ring signature.
   // Format: [event_header | event_payload | signature]
   bytes event_bytes = 1;
+
+  // Optional proof-of-work submission when required by Edge.
+  // Only needed when group is under attack and POW defense is active.
+  optional PowSubmission pow_submission = 2;
 }
 
 // Response after successful event push.
@@ -93,4 +97,44 @@ message StreamEventsResponse {
   // Sequence numbers aligned 1:1 with event_bytes.
   // Clients should track the highest sequence for resumption.
   repeated int64 sequence_nos = 2;
+}
+
+// Proof-of-work submission attached to PushEventRequest when POW defense is active.
+//
+// POW is triggered per-group when signature verification failures exceed threshold,
+// indicating potential attack or abuse. Clients must compute and submit valid POW
+// bundle to have their events accepted during this defensive state.
+message PowSubmission {
+  // Bincode-serialized ProofBundle (from rspow crate).
+  // Contains N proofs (each with 'bits' difficulty), where N = required_proofs.
+  bytes proof_bundle = 1;
+
+  // Unix timestamp (seconds) when client computed the proof.
+  // Must fall within server's time_window_secs from challenge issuance.
+  int64 timestamp = 2;
+
+  // Challenge bytes provided by Edge in previous error response.
+  // Server deterministically computes this challenge (stateless design).
+  bytes challenge = 3;
+}
+
+// POW challenge parameters returned in error response when POW is required.
+//
+// Included in RESOURCE_EXHAUSTED status details when Edge rejects event
+// due to missing or invalid POW submission. Client must solve POW and retry.
+message PowChallenge {
+  // Difficulty bits per individual proof (typically 7-10 bits).
+  uint32 bits = 1;
+
+  // Number of proofs required in the bundle (may escalate during sustained attack).
+  // Initial multiplier is 3.0x, can grow linearly or exponentially based on strategy.
+  uint32 required_proofs = 2;
+
+  // Time window (seconds) within which POW solution remains valid.
+  // Submissions outside this window are rejected to prevent replay attacks.
+  uint64 time_window_secs = 3;
+
+  // Server-generated challenge bytes (deterministic, no server-side caching).
+  // Client must include this in PowSubmission for verification.
+  bytes challenge = 4;
 }
