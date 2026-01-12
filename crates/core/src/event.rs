@@ -25,18 +25,22 @@ impl Event {
         event_hash_sha3_256(self)
     }
 
-    /// Produce the canonical bytes used for signing (excludes signature and sequence_no).
+    /// Produce the canonical bytes used for signing.
+    ///
+    /// Excludes the following fields from signature calculation:
+    /// - `signature`: Obviously not part of its own signature
+    /// - `sequence_no`: Assigned by server after event is received
+    /// - `previous_event_hash`: Server handles chain integrity; allows O(n) concurrent sends
+    ///
+    /// Security note: Chain integrity is enforced by Party A's Edge and Bot monitoring.
+    /// The server will auto-fill the correct `previous_event_hash` before storing.
     pub fn to_signing_bytes(&self) -> Result<Vec<u8>, CanonicalHashError> {
-        // We reuse the logic from event_hash_sha3_256 but return bytes instead of hash.
-        // The hashing module likely has a helper for this, or we duplicate the stripping logic.
-        // Let's verify hashing::event_hash_sha3_256 implementation.
-        // It likely serializes a "CanonicalEvent" intermediate struct.
-        // Ideally we expose that serialization.
-        //
-        // For now, I'll replicate the stripping:
         let mut clone = self.clone();
         clone.signature = None;
         clone.sequence_no = None;
+        // Exclude previous_event_hash from signature to enable server-side chain management.
+        // This allows concurrent event submissions without O(n²) re-signing on ChainMismatch.
+        clone.previous_event_hash = EventId([0u8; 32]);
         crate::hashing::canonical_json(&clone)
     }
 }
@@ -453,5 +457,37 @@ mod tests {
             historical_ring_hash: historical_hash,
         });
         assert_eq!(proof.ring_hash(), Some(historical_hash));
+    }
+
+    #[test]
+    fn signing_bytes_excludes_previous_event_hash() {
+        // Two events identical except for previous_event_hash
+        let event1 = Event {
+            event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
+            previous_event_hash: EventId([1u8; 32]),
+            group_id: test_group_id(),
+            sequence_no: None,
+            processed_at: 100,
+            serialization_version: 1,
+            event_type: EventType::MessageCreate(AnonymousMessage {
+                group_id: test_group_id(),
+                ring_hash: RingHash([7u8; 32]),
+                message_id: "m1".into(),
+                content: Ciphertext(b"test message".to_vec()),
+                sent_at: 100,
+            }),
+            signature: None,
+        };
+
+        let mut event2 = event1.clone();
+        event2.previous_event_hash = EventId([2u8; 32]);
+
+        let bytes1 = event1.to_signing_bytes().expect("signing bytes 1");
+        let bytes2 = event2.to_signing_bytes().expect("signing bytes 2");
+
+        assert_eq!(
+            bytes1, bytes2,
+            "Different previous_event_hash should produce identical signing bytes"
+        );
     }
 }

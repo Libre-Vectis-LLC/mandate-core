@@ -87,7 +87,7 @@ impl EventService for EventServiceImpl {
             }
             .into());
         }
-        let event: Event =
+        let mut event: Event =
             serde_json::from_slice(&event_bytes).map_err(|e| RpcError::InvalidArgument {
                 field: "event_bytes",
                 reason: format!("invalid JSON payload: {e}"),
@@ -170,30 +170,21 @@ impl EventService for EventServiceImpl {
             }
         }
 
-        // 1. Verify Chain Hash
+        // 1. Auto-fill Chain Hash
+        //
+        // The server automatically assigns the correct previous_event_hash based on chain state.
+        // This enables O(n) concurrent event submissions without client re-signing on conflicts.
+        //
+        // Security note: Chain integrity is enforced by Party A's Edge and Bot monitoring.
+        // The signature does NOT include previous_event_hash (see Event::to_signing_bytes).
         match self.store.event_tail(tenant, event.group_id).await {
             Ok((tail_id, _, _)) => {
-                let tail_hash = crate::ids::ContentHash(tail_id.0);
-                if event.previous_event_hash.0 != tail_hash.0 {
-                    return Err(RpcError::FailedPrecondition {
-                        operation: "chain_verification",
-                        reason: format!(
-                            "hash mismatch: expected prev={:?}, got {:?}",
-                            tail_hash, event.previous_event_hash
-                        ),
-                    }
-                    .into());
-                }
+                // Chain exists - set previous_event_hash to current tail
+                event.previous_event_hash = crate::ids::EventId(tail_id.0);
             }
             Err(crate::storage::StorageError::NotFound(_)) => {
-                // Genesis event must have zero prev hash
-                if event.previous_event_hash.0 != [0u8; 32] {
-                    return Err(RpcError::FailedPrecondition {
-                        operation: "genesis_validation",
-                        reason: "first event must have zero prev hash".into(),
-                    }
-                    .into());
-                }
+                // Genesis event - set zero prev hash
+                event.previous_event_hash = crate::ids::EventId([0u8; 32]);
             }
             Err(e) => return Err(to_status(e)),
         }
@@ -442,9 +433,19 @@ impl EventService for EventServiceImpl {
         }
 
         // 5. Commit the event
+        //
+        // Re-serialize the event to include the server-assigned previous_event_hash.
+        // This ensures the stored event has the correct chain linkage.
+        let final_event_bytes: crate::storage::EventBytes = serde_json::to_vec(&event)
+            .map_err(|e| RpcError::Internal {
+                operation: "event_serialization",
+                details: format!("failed to serialize event: {e}"),
+            })?
+            .into();
+
         let id = self
             .store
-            .append_event(tenant, event.group_id, event_bytes.clone())
+            .append_event(tenant, event.group_id, final_event_bytes)
             .await
             .map_err(to_status)?;
 
