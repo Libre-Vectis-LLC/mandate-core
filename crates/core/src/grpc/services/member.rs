@@ -4,7 +4,8 @@ use crate::ids::GroupId;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
-    member_service_server::MemberService, ListPendingMembersRequest, ListPendingMembersResponse,
+    member_service_server::MemberService, GetApprovedMemberByTgUserIdRequest,
+    GetApprovedMemberByTgUserIdResponse, ListPendingMembersRequest, ListPendingMembersResponse,
     PendingMember as ProtoPendingMember, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
 };
 use tonic::{Request, Response, Status};
@@ -119,5 +120,54 @@ impl MemberService for MemberServiceImpl {
             members: proto_members,
             next_page_token: None,
         }))
+    }
+
+    async fn get_approved_member_by_tg_user_id(
+        &self,
+        request: Request<GetApprovedMemberByTgUserIdRequest>,
+    ) -> Result<Response<GetApprovedMemberByTgUserIdResponse>, Status> {
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+
+        // Verify tenant owns the group
+        let (group_tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
+        if group_tenant != tenant {
+            return Err(RpcError::NotFound {
+                resource: "group",
+                id: format!("{}", group_id.0),
+            }
+            .into());
+        }
+
+        let member = self
+            .store
+            .get_approved_member_by_tg_user_id(tenant, group_id, &body.tg_user_id)
+            .await
+            .map_err(to_status)?;
+
+        match member {
+            Some(m) => Ok(Response::new(GetApprovedMemberByTgUserIdResponse {
+                member: Some(ProtoPendingMember {
+                    pending_id: m.pending_id,
+                    tg_user_id: m.tg_user_id,
+                    nazgul_pub: Some(crate::proto::master_pub_to_proto(&m.nazgul_pub)),
+                    rage_pub: Some(mandate_proto::mandate::v1::RagePublicKey {
+                        value: m.rage_pub.to_vec(),
+                    }),
+                    submitted_at_ms: m.submitted_at_ms,
+                }),
+            })),
+            None => Err(RpcError::NotFound {
+                resource: "approved_member",
+                id: body.tg_user_id,
+            }
+            .into()),
+        }
     }
 }

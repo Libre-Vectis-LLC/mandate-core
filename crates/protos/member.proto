@@ -44,6 +44,16 @@ service MemberService {
   // ## Errors
   // - NOT_FOUND: group_id doesn't exist
   rpc ListPendingMembers (ListPendingMembersRequest) returns (ListPendingMembersResponse);
+
+  // GetApprovedMemberByTgUserId retrieves an approved member's cryptographic keys
+  // by their Telegram user ID.
+  //
+  // This is used by the audit bot for the /kick command to look up
+  // a member's nazgul public key from their Telegram identity.
+  //
+  // ## Errors
+  // - NOT_FOUND: no approved member with the given tg_user_id exists
+  rpc GetApprovedMemberByTgUserId (GetApprovedMemberByTgUserIdRequest) returns (GetApprovedMemberByTgUserIdResponse);
 }
 
 // Request to submit a pending member.
@@ -109,4 +119,20 @@ message ListPendingMembersResponse {
   // Pagination cursor for next page.
   // Empty if no more pages.
   PageToken next_page_token = 2;
+}
+
+// Request to get an approved member by Telegram user ID.
+message GetApprovedMemberByTgUserIdRequest {
+  // Group ID (ULID format) to query.
+  string group_id = 1;
+
+  // Telegram user ID (numeric string from Telegram API).
+  string tg_user_id = 2;
+}
+
+// Response containing the approved member's cryptographic keys.
+message GetApprovedMemberByTgUserIdResponse {
+  // The approved member's information (same structure as PendingMember).
+  // Contains nazgul_pub and rage_pub for ring operations.
+  PendingMember member = 1;
 }
