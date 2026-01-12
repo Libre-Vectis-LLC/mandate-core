@@ -60,6 +60,14 @@ pub(crate) fn max_poll_id_length() -> usize {
     env_usize("MANDATE_GRPC_MAX_POLL_ID_LENGTH", 256)
 }
 
+/// Maximum allowed length for message content in UTF-8 characters (default: 3000).
+///
+/// This prevents resource exhaustion from extremely large messages and ensures
+/// reasonable display sizes across clients.
+pub(crate) fn max_message_content_chars() -> usize {
+    env_usize("MANDATE_GRPC_MAX_MESSAGE_CONTENT_CHARS", 3000)
+}
+
 pub(crate) fn clamp_events_limit(client_limit: u32) -> usize {
     let max_limit = env_usize("MANDATE_GRPC_EVENTS_MAX_LIMIT", 100);
     let default_limit = env_usize("MANDATE_GRPC_EVENTS_DEFAULT_LIMIT", 50).min(max_limit);
@@ -283,5 +291,47 @@ mod tests {
         let err = services.event.push_event(req).await.expect_err("reject");
         assert_eq!(err.code(), Code::InvalidArgument);
         assert!(err.message().contains("poll_id"));
+    }
+
+    #[tokio::test]
+    async fn push_event_rejects_oversized_message_content() {
+        use crate::crypto::ciphertext::Ciphertext;
+        use crate::event::{AnonymousMessage, Event, EventType};
+        use crate::ids::{EventId, EventUlid, GroupId, RingHash, Ulid};
+
+        let services = CoreServices::new_in_memory().expect("in-memory services");
+        let tenant = TenantId(ulid::Ulid::new());
+
+        // Create a message event with oversized content (in UTF-8 characters)
+        let oversized_content = "x".repeat(max_message_content_chars() + 1);
+        let message = AnonymousMessage {
+            group_id: GroupId(Ulid::new()),
+            ring_hash: RingHash([0u8; 32]),
+            message_id: Ulid::new().to_string(),
+            content: Ciphertext(oversized_content.into_bytes()),
+            sent_at: 123,
+        };
+
+        let event = Event {
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([0u8; 32]),
+            group_id: GroupId(Ulid::new()),
+            sequence_no: None,
+            processed_at: 123,
+            serialization_version: 1,
+            event_type: EventType::MessageCreate(message),
+            signature: None,
+        };
+
+        let event_bytes = serde_json::to_vec(&event).expect("serialize");
+        let mut req = Request::new(PushEventRequest {
+            event_bytes,
+            pow_submission: None,
+        });
+        req.extensions_mut().insert(tenant);
+
+        let err = services.event.push_event(req).await.expect_err("reject");
+        assert_eq!(err.code(), Code::InvalidArgument);
+        assert!(err.message().contains("message_content"));
     }
 }

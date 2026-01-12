@@ -23,7 +23,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use super::{
-    clamp_events_limit, extract_tenant_id, max_event_bytes, max_poll_id_length, to_status,
+    clamp_events_limit, extract_tenant_id, max_event_bytes, max_message_content_chars,
+    max_poll_id_length, to_status,
 };
 
 fn banned_operation_for_event(event_type: &crate::event::EventType) -> Option<BannedOperation> {
@@ -118,6 +119,21 @@ impl EventService for EventServiceImpl {
                     return Err(RpcError::InvalidArgument {
                         field: "poll_id",
                         reason: format!("too long: {} > {}", vote.poll_id.len(), max_id_len),
+                    }
+                    .into());
+                }
+            }
+            crate::event::EventType::MessageCreate(msg) => {
+                // Count UTF-8 characters (not bytes) for proper international text support
+                let content_chars = String::from_utf8_lossy(&msg.content.0).chars().count();
+                let max_chars = max_message_content_chars();
+                if content_chars > max_chars {
+                    return Err(RpcError::InvalidArgument {
+                        field: "message_content",
+                        reason: format!(
+                            "too long: {} characters > {} limit",
+                            content_chars, max_chars
+                        ),
                     }
                     .into());
                 }
