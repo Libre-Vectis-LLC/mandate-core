@@ -571,6 +571,21 @@ impl StorageFacade {
             .await
     }
 
+    /// Get an approved member by their Telegram user ID.
+    ///
+    /// This method retrieves an approved member's record for the purpose of
+    /// obtaining their cryptographic keys (e.g., for ring operations like kick).
+    pub async fn get_approved_member_by_tg_user_id(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        tg_user_id: &str,
+    ) -> Result<Option<PendingMember>, StorageError> {
+        self.pending_members
+            .get_approved_by_tg_user_id(tenant, group_id, tg_user_id)
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Key blob methods
     // ─────────────────────────────────────────────────────────────────────────

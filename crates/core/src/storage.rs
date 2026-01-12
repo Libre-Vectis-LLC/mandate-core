@@ -1028,4 +1028,31 @@ pub trait PendingMemberStore {
         limit: usize,
         page_token: Option<String>,
     ) -> Result<(Vec<PendingMember>, Option<String>), StorageError>;
+
+    /// Get an approved member by their Telegram user ID.
+    ///
+    /// This method retrieves an approved member's record for the purpose of
+    /// obtaining their cryptographic keys (e.g., for ring operations like kick).
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `group_id` - The group identifier
+    /// * `tg_user_id` - The Telegram user ID to look up
+    ///
+    /// # Returns
+    /// The approved member's record if found, `None` if no approved member
+    /// exists with the given Telegram user ID.
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Invariants
+    /// * Only returns members with status = Approved
+    /// * Returns the most recently approved record if multiple exist
+    async fn get_approved_by_tg_user_id(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        tg_user_id: &str,
+    ) -> Result<Option<PendingMember>, StorageError>;
 }

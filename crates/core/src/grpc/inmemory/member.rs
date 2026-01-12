@@ -99,4 +99,27 @@ impl PendingMemberStore for InMemoryPendingMembers {
             Ok((Vec::new(), None))
         }
     }
+
+    async fn get_approved_by_tg_user_id(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        tg_user_id: &str,
+    ) -> Result<Option<PendingMember>, StorageError> {
+        let map = self.members.lock();
+        if let Some(list) = map.get(&(tenant, group_id)) {
+            // Find the most recently submitted approved member with matching tg_user_id
+            let result = list
+                .iter()
+                .filter(|record| {
+                    record.status == PendingMemberStatus::Approved
+                        && record.member.tg_user_id == tg_user_id
+                })
+                .max_by_key(|record| record.member.submitted_at_ms)
+                .map(|record| record.member.clone());
+            Ok(result)
+        } else {
+            Ok(None)
+        }
+    }
 }
