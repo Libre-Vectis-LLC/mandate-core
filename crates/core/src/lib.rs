@@ -16,6 +16,7 @@
 //! - Pluggability: digest trait leaves room for future BLAKE3 swap without API breakage.
 //!
 pub mod billing;
+pub mod config;
 pub mod crypto;
 pub mod event;
 pub mod hashing;
