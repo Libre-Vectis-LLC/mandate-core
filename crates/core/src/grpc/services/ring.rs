@@ -184,6 +184,10 @@ impl RingService for RingServiceImpl {
     }
 }
 
+/// Encode ring delta path into protobuf entries.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC services. Boxing would break compatibility with tonic's service API.
 #[allow(clippy::result_large_err)]
 async fn encode_ring_delta_path(
     store: &StorageFacade,

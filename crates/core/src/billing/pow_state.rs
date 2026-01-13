@@ -393,9 +393,9 @@ impl GroupPowState {
     }
 
     /// Records a verification event with explicit timestamp (for testing).
+    /// Reserved for Phase 5.7 POW E2E tests.
     #[cfg(test)]
-    #[allow(dead_code)] // Reserved for Phase 5.7 POW E2E tests
-    fn record_event_at(&mut self, timestamp_ms: u64, success: bool, config: &GroupPowConfig) {
+    fn _record_event_at(&mut self, timestamp_ms: u64, success: bool, config: &GroupPowConfig) {
         let event = VerificationEvent::with_timestamp(timestamp_ms, success);
         self.event_history.push_back(event);
 

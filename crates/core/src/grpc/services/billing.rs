@@ -51,7 +51,6 @@ fn storage_error_to_idempotency(err: &crate::storage::StorageError) -> Idempoten
 
 #[derive(Clone)]
 pub struct BillingServiceImpl {
-    #[allow(dead_code)]
     store: StorageFacade,
 }
 

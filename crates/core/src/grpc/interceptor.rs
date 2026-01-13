@@ -9,6 +9,9 @@ use ulid::Ulid;
 /// Enforce presence of `x-api-token` and attach a `TenantToken` to request extensions.
 ///
 /// The token is treated as an opaque secret (rotatable). Core must not interpret it as a tenant ID.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC interceptors. Boxing would break compatibility with tonic's interceptor API.
 #[allow(clippy::result_large_err)]
 pub fn require_api_token(mut req: Request<()>) -> Result<Request<()>, Status> {
     let token = {
@@ -41,6 +44,9 @@ pub fn require_api_token(mut req: Request<()>) -> Result<Request<()>, Status> {
 }
 
 /// Extract bot secret from request metadata.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC interceptors. Boxing would break compatibility with tonic's interceptor API.
 #[allow(clippy::result_large_err)]
 fn extract_bot_secret(req: &Request<()>) -> Result<BotSecret, Status> {
     let secret = req
@@ -68,6 +74,9 @@ fn extract_bot_secret(req: &Request<()>) -> Result<BotSecret, Status> {
 }
 
 /// Extract tenant ID from request metadata.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC interceptors. Boxing would break compatibility with tonic's interceptor API.
 #[allow(clippy::result_large_err)]
 fn extract_tenant_id(req: &Request<()>) -> Result<TenantId, Status> {
     let tenant_str = req
@@ -104,6 +113,9 @@ fn extract_tenant_id(req: &Request<()>) -> Result<TenantId, Status> {
 ///
 /// **Warning:** This function only checks presence, not correctness of the bot secret.
 /// Use `make_bot_secret_interceptor` for production deployments.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC interceptors. Boxing would break compatibility with tonic's interceptor API.
 #[allow(clippy::result_large_err)]
 pub fn require_bot_secret(mut req: Request<()>) -> Result<Request<()>, Status> {
     let secret = extract_bot_secret(&req)?;

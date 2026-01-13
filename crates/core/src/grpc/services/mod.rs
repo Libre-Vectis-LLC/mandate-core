@@ -105,6 +105,10 @@ pub(crate) fn to_status(err: crate::storage::StorageError) -> Status {
     }
 }
 
+/// Extract tenant token from request extensions or metadata.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC services. Boxing would break compatibility with tonic's service API.
 #[allow(clippy::result_large_err)]
 pub(crate) fn extract_tenant_token<T>(req: &Request<T>) -> Result<crate::ids::TenantToken, Status> {
     if let Some(token) = req.extensions().get::<crate::ids::TenantToken>() {
@@ -150,6 +154,10 @@ fn to_status_token(err: TenantTokenError) -> Status {
     }
 }
 
+/// Extract and validate tenant ID from request token.
+///
+/// Note: `result_large_err` is acceptable here as `tonic::Status` is the required error type
+/// for gRPC services. Boxing would break compatibility with tonic's service API.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn extract_tenant_id<T>(
     req: &Request<T>,
