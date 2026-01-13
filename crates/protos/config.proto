@@ -1,0 +1,107 @@
+syntax = "proto3";
+package mandate.v1;
+
+// ConfigService provides hot-reloadable configuration management.
+//
+// ## Purpose
+// Allows runtime configuration changes without restarting services.
+// Supports reading, updating, and reloading configuration from multiple sources.
+//
+// ## Authentication
+// Requires `x-bot-secret` header matching the server's configured secret.
+// This service is exposed only on the internal gRPC listener.
+//
+// ## Configuration Priority (on reload)
+// 1. Redis (if available and has saved config)
+// 2. Environment variables
+// 3. Struct defaults
+service ConfigService {
+  // GetConfig retrieves the current runtime configuration.
+  //
+  // Returns the current in-memory configuration as JSON.
+  // This reflects any runtime updates, not necessarily the persisted state.
+  //
+  // ## Errors
+  // - INTERNAL: serialization failed
+  rpc GetConfig (GetConfigRequest) returns (GetConfigResponse);
+
+  // UpdateConfig modifies specific configuration fields.
+  //
+  // Uses JSON patch semantics for partial updates.
+  // Optionally persists changes to Redis.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: invalid JSON patch or config values
+  // - INTERNAL: Redis persistence failed (if requested)
+  rpc UpdateConfig (RuntimeConfigUpdateRequest) returns (RuntimeConfigUpdateResponse);
+
+  // ReloadConfig reloads configuration from external sources.
+  //
+  // Reloads from Redis first, then environment variables.
+  // Useful after manual Redis edits or environment changes.
+  //
+  // ## Errors
+  // - INTERNAL: Redis connection failed
+  rpc ReloadConfig (ReloadConfigRequest) returns (ReloadConfigResponse);
+}
+
+// Request to get current configuration.
+message GetConfigRequest {
+  // Binary name to get config for (e.g., "audit-helper", "edge", "server").
+  // If empty, returns config for the current binary.
+  string binary_name = 1;
+}
+
+// Response containing current configuration.
+message GetConfigResponse {
+  // Configuration as JSON string.
+  // Structure depends on the binary (see each binary's RuntimeConfig struct).
+  string config_json = 1;
+}
+
+// Request to update runtime configuration.
+message RuntimeConfigUpdateRequest {
+  // Binary name to update config for.
+  // If empty, updates config for the current binary.
+  string binary_name = 1;
+
+  // JSON patch for partial update (RFC 7396 merge patch).
+  // Example: {"auto_approve_enabled": false, "quota": {"cost_multiplier": 30}}
+  string json_patch = 2;
+
+  // Whether to persist changes to Redis.
+  // If false, changes are memory-only and will be lost on restart.
+  bool persist = 3;
+}
+
+// Response after config update.
+message RuntimeConfigUpdateResponse {
+  // Whether the update succeeded.
+  bool success = 1;
+
+  // Human-readable message describing the result.
+  string message = 2;
+
+  // Updated configuration as JSON (after applying patch).
+  string config_json = 3;
+}
+
+// Request to reload configuration from external sources.
+message ReloadConfigRequest {
+  // Binary name to reload config for.
+  // If empty, reloads config for the current binary.
+  string binary_name = 1;
+}
+
+// Response after config reload.
+message ReloadConfigResponse {
+  // Whether the reload succeeded.
+  bool success = 1;
+
+  // Human-readable message describing the result.
+  // Indicates source of loaded config (Redis, env, or defaults).
+  string message = 2;
+
+  // Reloaded configuration as JSON.
+  string config_json = 3;
+}

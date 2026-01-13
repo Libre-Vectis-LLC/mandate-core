@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../protos/admin.proto",
         "../protos/auth.proto",
         "../protos/edge_admin.proto",
+        "../protos/config.proto",
     ];
 
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
