@@ -520,18 +520,144 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<GetPollResultsRequest>,
     ) -> Result<Response<GetPollResultsResponse>, Status> {
-        let _tenant = extract_tenant_id(&request, &self.store).await?;
-        let _body = request.into_inner();
+        use crate::key_manager::decrypt_event_content;
+        use crate::proto::ring_hash_to_hash32;
+        use age::x25519::Identity as RageIdentity;
+        use mandate_proto::mandate::v1::PollOption as ProtoPollOption;
+        use std::collections::HashMap;
+        use std::time::{SystemTime, UNIX_EPOCH};
 
-        // TODO(P2.1): Implement poll results aggregation from storage
-        // This requires:
-        // 1. Validate poll_key authorization
-        // 2. Fetch poll event to get question and options
-        // 3. Fetch all vote events for this poll_id
-        // 4. Aggregate votes by option
-        // 5. Return GetPollResultsResponse with aggregated data
-        Err(Status::unimplemented(
-            "poll results aggregation not yet implemented",
-        ))
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+
+        // 1. Parse request fields
+        let group_id = GroupId(
+            crate::proto::parse_ulid(&body.group_id)
+                .map_err(|e| Status::invalid_argument(format!("invalid group_id: {e}")))?,
+        );
+
+        let event_ulid_proto = body
+            .event_ulid
+            .ok_or_else(|| Status::invalid_argument("missing event_ulid"))?;
+        let event_ulid = crate::ids::EventUlid(
+            crate::proto::parse_ulid(&event_ulid_proto.value)
+                .map_err(|e| Status::invalid_argument(format!("invalid event_ulid: {e}")))?,
+        );
+
+        // 2. Decode poll_key hex to age Identity
+        let poll_key_bytes: [u8; 32] = hex::decode(&body.poll_key)
+            .map_err(|e| Status::invalid_argument(format!("invalid poll_key hex: {e}")))?
+            .try_into()
+            .map_err(|_| Status::invalid_argument("poll_key must be exactly 32 bytes"))?;
+
+        let identity = RageIdentity::from_secret_bytes(poll_key_bytes);
+
+        // 3. Find the Poll event
+        let event_records = self
+            .store
+            .stream_events(tenant, group_id, None, usize::MAX)
+            .await
+            .map_err(to_status)?;
+
+        // Deserialize all events
+        let mut events: Vec<Event> = Vec::new();
+        for (_event_id, event_bytes, _seq) in &event_records {
+            let event: Event = serde_json::from_slice(event_bytes)
+                .map_err(|e| Status::internal(format!("failed to deserialize event: {e}")))?;
+            events.push(event);
+        }
+
+        let poll_event = events
+            .iter()
+            .find(|event| event.event_ulid == event_ulid)
+            .ok_or_else(|| Status::not_found("poll event not found"))?;
+
+        let poll = match &poll_event.event_type {
+            crate::event::EventType::PollCreate(p) => p,
+            _ => {
+                return Err(Status::invalid_argument(
+                    "specified event is not a poll creation event",
+                ))
+            }
+        };
+
+        // 4. Decrypt and validate poll_key by attempting to decrypt the question title
+        let question_bytes = decrypt_event_content(&identity, &poll.questions[0].title.0)
+            .map_err(|_| Status::permission_denied("invalid poll_key: decryption failed"))?;
+
+        let question_title = String::from_utf8_lossy(&question_bytes).to_string();
+
+        // 5. Decrypt option labels and build option_id -> (index, label) map
+        let mut option_map: HashMap<String, (usize, String)> = HashMap::new();
+
+        if let Some(first_question) = poll.questions.first() {
+            let options_vec = match &first_question.kind {
+                crate::event::PollQuestionKind::SingleChoice { options } => options,
+                crate::event::PollQuestionKind::MultipleChoice { options, .. } => options,
+                crate::event::PollQuestionKind::FillInTheBlank => {
+                    // No options to decrypt for fill-in-the-blank
+                    &vec![]
+                }
+            };
+
+            for (idx, opt) in options_vec.iter().enumerate() {
+                let label_bytes = decrypt_event_content(&identity, &opt.text.0).map_err(|e| {
+                    Status::internal(format!("failed to decrypt option label: {e}"))
+                })?;
+
+                let label = String::from_utf8_lossy(&label_bytes).to_string();
+                option_map.insert(opt.id.clone(), (idx, label));
+            }
+        }
+
+        // 6. Count votes for this poll
+        let mut vote_counts: HashMap<String, u32> = HashMap::new();
+
+        for event in events.iter() {
+            if let crate::event::EventType::VoteCast(vote) = &event.event_type {
+                if vote.poll_id == poll.poll_id {
+                    // Aggregate votes from all selections
+                    for selection in &vote.selections {
+                        for option_id in &selection.option_ids {
+                            *vote_counts.entry(option_id.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 7. Build response
+        let mut proto_options: Vec<ProtoPollOption> = option_map
+            .iter()
+            .map(|(option_id, (idx, label))| ProtoPollOption {
+                index: *idx as u32,
+                label: label.clone(),
+                vote_count: vote_counts.get(option_id).copied().unwrap_or(0),
+            })
+            .collect();
+
+        // Sort by index to maintain option order
+        proto_options.sort_by_key(|opt| opt.index);
+
+        let total_votes: u32 = vote_counts.values().sum();
+
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_secs();
+
+        let is_open = poll
+            .deadline
+            .map(|deadline| current_time < deadline)
+            .unwrap_or(true);
+
+        Ok(Response::new(GetPollResultsResponse {
+            question: question_title,
+            created_at: poll.created_at as i64,
+            options: proto_options,
+            total_votes,
+            ring_hash: Some(ring_hash_to_hash32(&poll.ring_hash)),
+            is_open,
+        }))
     }
 }
