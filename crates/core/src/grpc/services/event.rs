@@ -10,8 +10,8 @@ use crate::storage::facade::StorageFacade;
 use crate::storage::BannedOperation;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use mandate_proto::mandate::v1::{
-    event_service_server::EventService, PushEventRequest, PushEventResponse, StreamEventsRequest,
-    StreamEventsResponse,
+    event_service_server::EventService, GetPollResultsRequest, GetPollResultsResponse,
+    PushEventRequest, PushEventResponse, StreamEventsRequest, StreamEventsResponse,
 };
 use nazgul::keypair::KeyPair as NazgulKeyPair;
 use nazgul::ring::Ring;
@@ -455,6 +455,7 @@ impl EventService for EventServiceImpl {
             event_ulid: Some(event_ulid),
             event_hash: Some(event_hash),
             sequence_no: id.1.as_i64(),
+            event_url: None, // Set by Edge proxy for poll events with Onion URL
         }))
     }
 
@@ -513,5 +514,24 @@ impl EventService for EventServiceImpl {
             }))
             .await;
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn get_poll_results(
+        &self,
+        request: Request<GetPollResultsRequest>,
+    ) -> Result<Response<GetPollResultsResponse>, Status> {
+        let _tenant = extract_tenant_id(&request, &self.store).await?;
+        let _body = request.into_inner();
+
+        // TODO(P2.1): Implement poll results aggregation from storage
+        // This requires:
+        // 1. Validate poll_key authorization
+        // 2. Fetch poll event to get question and options
+        // 3. Fetch all vote events for this poll_id
+        // 4. Aggregate votes by option
+        // 5. Return GetPollResultsResponse with aggregated data
+        Err(Status::unimplemented(
+            "poll results aggregation not yet implemented",
+        ))
     }
 }

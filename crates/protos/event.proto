@@ -48,6 +48,22 @@ service EventService {
   // - NOT_FOUND: group_id doesn't exist
   // - INVALID_ARGUMENT: limit exceeds server maximum
   rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
+
+  // GetPollResults fetches aggregated voting results for a poll event.
+  //
+  // Requires the poll_key for authorization. This key is derived from the
+  // event creator's shared secret and allows read-only access to poll results.
+  // The poll_key is typically embedded in the event_url and passed via query parameter.
+  //
+  // ## Authentication
+  // The poll_key serves as a capability token - anyone with this key can view results.
+  // The key is intentionally shareable to enable anonymous result viewing via Tor.
+  //
+  // ## Errors
+  // - NOT_FOUND: event_ulid doesn't exist or is not a poll event
+  // - PERMISSION_DENIED: invalid poll_key
+  // - INVALID_ARGUMENT: malformed group_id or event_ulid
+  rpc GetPollResults (GetPollResultsRequest) returns (GetPollResultsResponse);
 }
 
 // Request to push a signed event.
@@ -72,6 +88,11 @@ message PushEventResponse {
   // Monotonically increasing sequence number within the group.
   // Used for ordering and resumption during streaming.
   int64 sequence_no = 3;
+
+  // Optional Onion URL for anonymous result viewing (only set by Edge for poll events).
+  // Format: http://<onion-address>.onion/events/<event_ulid>?key=<poll_key>
+  // Enables Tor-based access to poll results without revealing IP address.
+  optional string event_url = 4;
 }
 
 // Request to stream events from a group.
@@ -142,4 +163,50 @@ message PowChallenge {
   // Server-generated challenge bytes (deterministic, no server-side caching).
   // Client must include this in PowSubmission for verification.
   bytes challenge = 4;
+}
+
+// Request to get aggregated poll results.
+message GetPollResultsRequest {
+  // Group ID (ULID format) containing the poll event.
+  string group_id = 1;
+
+  // Event ID (ULID format) of the poll to retrieve results for.
+  Ulid event_ulid = 2;
+
+  // Capability token for result access (derived from creator's shared secret).
+  // Anyone with this key can view results anonymously.
+  string poll_key = 3;
+}
+
+// Response containing aggregated poll results.
+message GetPollResultsResponse {
+  // Poll question or title.
+  string question = 1;
+
+  // Unix timestamp (seconds) when poll was created.
+  int64 created_at = 2;
+
+  // Poll options with aggregated vote counts.
+  repeated PollOption options = 3;
+
+  // Total number of votes cast (sum of all option vote counts).
+  uint32 total_votes = 4;
+
+  // Ring hash at poll creation time (ensures votes are from valid snapshot).
+  Hash32 ring_hash = 5;
+
+  // Whether poll is still accepting votes (based on deadline or manual closure).
+  bool is_open = 6;
+}
+
+// Single poll option with aggregated vote count.
+message PollOption {
+  // Option index (0-based, matches option order in poll creation event).
+  uint32 index = 1;
+
+  // Option label or description.
+  string label = 2;
+
+  // Number of votes received for this option.
+  uint32 vote_count = 3;
 }
