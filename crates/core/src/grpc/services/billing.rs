@@ -62,10 +62,32 @@ impl BillingServiceImpl {
 
 #[tonic::async_trait]
 impl BillingService for BillingServiceImpl {
+    /// Transfer credits from tenant wallet to group wallet.
+    ///
+    /// # Authentication
+    ///
+    /// Requires `x-tenant-id` header in request metadata. The tenant ID is obtained
+    /// from the authenticated context (injected by `make_bot_secret_interceptor`),
+    /// NOT from the request body.
+    ///
+    /// This prevents a compromised Bot from transferring funds from arbitrary tenants.
+    /// The Bot must explicitly authenticate as the tenant it intends to act for.
     async fn transfer_to_group(
         &self,
         request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
+        // Extract tenant_id from authenticated context (set by interceptor from x-tenant-id header).
+        // This is a defense-in-depth measure: even if Bot is compromised, it can only
+        // transfer from the tenant it authenticated as, not arbitrary tenants.
+        let tenant_id = request
+            .extensions()
+            .get::<TenantId>()
+            .cloned()
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "tenant_id",
+                reason: "missing x-tenant-id header".into(),
+            })?;
+
         let body = request.into_inner();
 
         // Extract optional idempotency key
@@ -100,12 +122,7 @@ impl BillingService for BillingServiceImpl {
         }
 
         // Parse and validate request parameters
-        let tenant_id = TenantId(crate::proto::parse_ulid(&body.tenant_id).map_err(|e| {
-            RpcError::InvalidArgument {
-                field: "tenant_id",
-                reason: e.to_string(),
-            }
-        })?);
+        // Note: body.tenant_id is ignored - we use the authenticated tenant_id from context
         let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
             RpcError::InvalidArgument {
                 field: "group_id",
