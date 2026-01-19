@@ -197,7 +197,7 @@ mod tests {
             .record_ban(
                 tenant,
                 group,
-                key_image.clone(),
+                key_image,
                 crate::event::BanScope::BanVote,
                 ban_event_id,
                 ring_hash,
@@ -240,7 +240,7 @@ mod tests {
         assert!(!used);
 
         vote_index
-            .record_vote(tenant, group, poll_id, key_image.clone())
+            .record_vote(tenant, group, poll_id, key_image)
             .expect("record vote");
 
         let used = vote_index

@@ -91,7 +91,7 @@ mod tests {
         )
         .expect("sign");
 
-        let verifier = LocalSignatureVerifier::default();
+        let verifier = LocalSignatureVerifier;
         let items = [SignatureItem {
             signature: sig,
             message: msg.to_vec(),
@@ -115,7 +115,7 @@ mod tests {
         )
         .expect("sign");
 
-        let verifier = LocalSignatureVerifier::default();
+        let verifier = LocalSignatureVerifier;
 
         // Missing ring should return error
         let items = [SignatureItem {

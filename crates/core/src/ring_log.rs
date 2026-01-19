@@ -361,13 +361,13 @@ mod tests {
         assert_eq!(ring_hash, ring_hash_sha3_256(&genesis));
         assert_eq!(restored.members().len(), 1);
 
-        assert!(log.index.get(&ring_hash_sha3_256(&ring_at_h1)).is_some());
+        assert!(log.index.contains_key(&ring_hash_sha3_256(&ring_at_h1)));
     }
 
     #[test]
     fn founder_only_reconstruction() {
         let founder = mpk(b"founder");
-        let log = RingDeltaLog::new(founder.clone()).expect("new log");
+        let log = RingDeltaLog::new(founder).expect("new log");
 
         let ring = Ring::new(vec![point_from(&founder).unwrap()]);
         let target_hash = ring_hash_sha3_256(&ring);
@@ -381,7 +381,7 @@ mod tests {
     fn delta_path_backward_respects_target() {
         // Build a log: founder a, add b, add c. Anchor at h2 (after c), target at h1 (after b).
         let founder = mpk(b"a");
-        let mut log = RingDeltaLog::new(founder.clone()).expect("founder add cannot fail");
+        let mut log = RingDeltaLog::new(founder).expect("founder add cannot fail");
         let mut ring = Ring::new(vec![point_from(&founder).unwrap()]);
 
         let (h1, _) = log
@@ -410,22 +410,19 @@ mod tests {
     fn add_remove_add_replay() {
         let founder = mpk(b"founder");
         let member = mpk(b"member");
-        let mut log = RingDeltaLog::new(founder.clone()).unwrap();
+        let mut log = RingDeltaLog::new(founder).unwrap();
         let mut ring = Ring::new(vec![point_from(&founder).unwrap()]);
 
         // 1. Add
-        log.append(&mut ring, RingDelta::Add(member.clone()))
-            .unwrap();
+        log.append(&mut ring, RingDelta::Add(member)).unwrap();
         let hash_with_member = ring_hash_sha3_256(&ring);
 
         // 2. Remove
-        log.append(&mut ring, RingDelta::Remove(member.clone()))
-            .unwrap();
+        log.append(&mut ring, RingDelta::Remove(member)).unwrap();
         assert_ne!(ring_hash_sha3_256(&ring), hash_with_member);
 
         // 3. Add again
-        log.append(&mut ring, RingDelta::Add(member.clone()))
-            .unwrap();
+        log.append(&mut ring, RingDelta::Add(member)).unwrap();
         let final_hash = ring_hash_sha3_256(&ring);
 
         // Verify state consistency
@@ -471,16 +468,16 @@ mod tests {
         let b = mpk(b"B");
 
         // States: {A}(idx0) -> {A,B}(idx1) -> {A}(idx2) -> {A,B}(idx3)
-        let mut log = RingDeltaLog::new(a.clone()).unwrap();
+        let mut log = RingDeltaLog::new(a).unwrap();
         let mut ring = Ring::new(vec![point_from(&a).unwrap()]);
 
-        log.append(&mut ring, RingDelta::Add(b.clone())).unwrap();
+        log.append(&mut ring, RingDelta::Add(b)).unwrap();
         let hash_ab = ring_hash_sha3_256(&ring);
 
-        log.append(&mut ring, RingDelta::Remove(b.clone())).unwrap();
+        log.append(&mut ring, RingDelta::Remove(b)).unwrap();
         let _hash_a = ring_hash_sha3_256(&ring);
 
-        log.append(&mut ring, RingDelta::Add(b.clone())).unwrap();
+        log.append(&mut ring, RingDelta::Add(b)).unwrap();
 
         // anchor = {A} hash_a, target = hash_ab (appears twice)
         let anchor_ring = Ring::new(vec![point_from(&a).unwrap()]);
@@ -498,15 +495,15 @@ mod tests {
         let b = mpk(b"B");
 
         // Log 1: {A} -> +B
-        let mut log1 = RingDeltaLog::new(a.clone()).unwrap();
+        let mut log1 = RingDeltaLog::new(a).unwrap();
         let mut ring1 = Ring::new(vec![point_from(&a).unwrap()]);
-        log1.append(&mut ring1, RingDelta::Add(b.clone())).unwrap();
+        log1.append(&mut ring1, RingDelta::Add(b)).unwrap();
         let hash1 = ring_hash_sha3_256(&ring1);
 
         // Log 2: {B} -> +A
-        let mut log2 = RingDeltaLog::new(b.clone()).unwrap();
+        let mut log2 = RingDeltaLog::new(b).unwrap();
         let mut ring2 = Ring::new(vec![point_from(&b).unwrap()]);
-        log2.append(&mut ring2, RingDelta::Add(a.clone())).unwrap();
+        log2.append(&mut ring2, RingDelta::Add(a)).unwrap();
         let hash2 = ring_hash_sha3_256(&ring2);
 
         assert_eq!(hash1, hash2, "member ordering must be canonical");

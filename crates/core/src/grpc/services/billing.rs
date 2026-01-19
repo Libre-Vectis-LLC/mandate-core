@@ -205,12 +205,32 @@ impl BillingService for BillingServiceImpl {
 
     async fn get_tenant_balance(
         &self,
-        _request: Request<GetTenantBalanceRequest>,
+        request: Request<GetTenantBalanceRequest>,
     ) -> Result<Response<GetTenantBalanceResponse>, Status> {
-        // TODO: Implement tenant balance query in Phase 16
-        Err(Status::unimplemented(
-            "GetTenantBalance not yet implemented - see Phase 16",
-        ))
+        // Extract tenant_id from authenticated context (set by interceptor from x-api-token header).
+        // The request body is empty - tenant is identified by the API token.
+        let tenant_id = request
+            .extensions()
+            .get::<TenantId>()
+            .cloned()
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "tenant_id",
+                reason: "missing x-api-token header".into(),
+            })?;
+
+        let balance = self
+            .store
+            .get_tenant_balance(tenant_id)
+            .await
+            .map_err(to_status)?;
+        let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
+            operation: "get_tenant_balance",
+            details: "balance exceeds i64::MAX".into(),
+        })?;
+        Ok(Response::new(GetTenantBalanceResponse {
+            balance_nanos: balance_i64,
+            updated_at: 0, // TODO: Track actual update timestamp in storage layer
+        }))
     }
 
     async fn withdraw_from_group(

@@ -718,6 +718,19 @@ pub trait BillingStore: Send + Sync {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError>;
 
+    /// Retrieve the current balance for a tenant.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    ///
+    /// # Returns
+    /// The tenant's current balance.
+    ///
+    /// # Errors
+    /// * `StorageError::NotFound(NotFound::Tenant)` - When the tenant does not exist
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn get_tenant_balance(&self, tenant: TenantId) -> Result<Nanos, StorageError>;
+
     /// Deduct funds from a group's operational budget.
     ///
     /// This method is used to charge a group for resource consumption (verification, storage, etc.).

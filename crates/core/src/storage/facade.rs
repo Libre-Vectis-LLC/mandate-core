@@ -454,6 +454,11 @@ impl StorageFacade {
         self.billing.get_group_balance(group_id).await
     }
 
+    /// Retrieve the current balance for a tenant.
+    pub async fn get_tenant_balance(&self, tenant: TenantId) -> Result<Nanos, StorageError> {
+        self.billing.get_tenant_balance(tenant).await
+    }
+
     /// Find a tenant by their Telegram user ID.
     ///
     /// Returns the TenantId if found, regardless of whether they have any groups.

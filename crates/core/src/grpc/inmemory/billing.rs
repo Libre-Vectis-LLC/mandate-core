@@ -152,6 +152,16 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
+    async fn get_tenant_balance(&self, tenant: TenantId) -> Result<Nanos, StorageError> {
+        let tenants = self.tenants.lock();
+        let balance = *tenants
+            .get(&tenant)
+            .ok_or(StorageError::NotFound(NotFound::Tenant { tenant }))?;
+        let balance_u64 = u64::try_from(balance)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        Ok(Nanos::new(balance_u64))
+    }
+
     async fn deduct_group_balance(
         &self,
         group_id: GroupId,
