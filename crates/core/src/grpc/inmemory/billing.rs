@@ -249,4 +249,124 @@ impl BillingStore for InMemoryBilling {
         keys.insert(key.to_string(), entry);
         Ok(())
     }
+
+    async fn withdraw_from_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
+        let delta = i64::try_from(amount.as_u64())
+            .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+
+        let mut groups = self.groups.lock();
+        let group_record = groups
+            .get_mut(&group_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+
+        // Verify group belongs to tenant
+        if group_record.tenant != tenant {
+            return Err(StorageError::PreconditionFailed(
+                "group does not belong to tenant".into(),
+            ));
+        }
+
+        // Check group has sufficient balance
+        if group_record.balance_nanos < delta {
+            return Err(StorageError::PreconditionFailed(
+                "insufficient group balance".into(),
+            ));
+        }
+
+        // Deduct from group
+        group_record.balance_nanos -= delta;
+
+        // Release groups lock before acquiring tenants lock
+        drop(groups);
+
+        // Credit to tenant
+        let mut tenants = self.tenants.lock();
+        let tenant_balance = tenants.entry(tenant).or_insert(0);
+        *tenant_balance = tenant_balance
+            .checked_add(delta)
+            .ok_or_else(|| StorageError::PreconditionFailed("tenant balance overflow".into()))?;
+
+        let balance_u64 = u64::try_from(*tenant_balance)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        Ok(Nanos::new(balance_u64))
+    }
+
+    async fn transfer_between_groups(
+        &self,
+        tenant: TenantId,
+        source_group: GroupId,
+        dest_group: GroupId,
+        amount: Nanos,
+    ) -> Result<(Nanos, Nanos), StorageError> {
+        let delta = i64::try_from(amount.as_u64())
+            .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+
+        let mut groups = self.groups.lock();
+
+        // Get source group
+        let source_record =
+            groups
+                .get(&source_group)
+                .ok_or(StorageError::NotFound(NotFound::Group {
+                    group_id: source_group,
+                }))?;
+
+        // Verify source group belongs to tenant
+        if source_record.tenant != tenant {
+            return Err(StorageError::PreconditionFailed(
+                "source group does not belong to tenant".into(),
+            ));
+        }
+
+        // Get destination group
+        let dest_record =
+            groups
+                .get(&dest_group)
+                .ok_or(StorageError::NotFound(NotFound::Group {
+                    group_id: dest_group,
+                }))?;
+
+        // Verify destination group belongs to tenant
+        if dest_record.tenant != tenant {
+            return Err(StorageError::PreconditionFailed(
+                "destination group does not belong to tenant".into(),
+            ));
+        }
+
+        // Check source group has sufficient balance
+        let source_balance = source_record.balance_nanos;
+        if source_balance < delta {
+            return Err(StorageError::PreconditionFailed(
+                "insufficient source group balance".into(),
+            ));
+        }
+
+        // Perform atomic transfer
+        // SAFETY: We checked above that both groups exist and belong to the same tenant
+        let source_record = groups.get_mut(&source_group).unwrap();
+        source_record.balance_nanos -= delta;
+        let new_source_balance = source_record.balance_nanos;
+
+        let dest_record = groups.get_mut(&dest_group).unwrap();
+        dest_record.balance_nanos =
+            dest_record
+                .balance_nanos
+                .checked_add(delta)
+                .ok_or_else(|| {
+                    StorageError::PreconditionFailed("destination balance overflow".into())
+                })?;
+        let new_dest_balance = dest_record.balance_nanos;
+
+        let source_u64 = u64::try_from(new_source_balance)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+        let dest_u64 = u64::try_from(new_dest_balance)
+            .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
+
+        Ok((Nanos::new(source_u64), Nanos::new(dest_u64)))
+    }
 }

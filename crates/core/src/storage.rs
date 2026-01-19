@@ -826,6 +826,66 @@ pub trait BillingStore: Send + Sync {
         result: IdempotencyResult,
         ttl_secs: u64,
     ) -> Result<(), StorageError>;
+
+    /// Withdraw credits from group wallet back to tenant wallet.
+    ///
+    /// This method moves funds from a group's operational budget back to the tenant's
+    /// personal balance. This is the reverse operation of `transfer_to_group`.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `group_id` - The group identifier (must belong to the tenant)
+    /// * `amount` - Amount to withdraw
+    ///
+    /// # Returns
+    /// The updated tenant balance after the withdrawal.
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    /// * `StorageError::PreconditionFailed` - When group has insufficient balance or group does not belong to tenant
+    /// * `StorageError::NotFound` - When tenant or group does not exist
+    ///
+    /// # Invariants
+    /// * Withdrawals are atomic (group debit and tenant credit happen together)
+    /// * Tenant balance is always non-negative
+    async fn withdraw_from_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError>;
+
+    /// Transfer credits between two group wallets (must be same tenant).
+    ///
+    /// This method moves funds from one group's operational budget to another group's
+    /// budget. Both groups must belong to the same tenant.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier (both groups must belong to this tenant)
+    /// * `source_group` - The source group identifier (funds withdrawn from here)
+    /// * `dest_group` - The destination group identifier (funds deposited here)
+    /// * `amount` - Amount to transfer
+    ///
+    /// # Returns
+    /// A tuple of (source_balance, dest_balance) representing the updated balances
+    /// after the transfer.
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    /// * `StorageError::PreconditionFailed` - When source group has insufficient balance or groups belong to different tenants
+    /// * `StorageError::NotFound` - When either group does not exist
+    ///
+    /// # Invariants
+    /// * Transfers are atomic (source debit and destination credit happen together)
+    /// * Both group balances are always non-negative
+    /// * Both groups must belong to the same tenant
+    async fn transfer_between_groups(
+        &self,
+        tenant: TenantId,
+        source_group: GroupId,
+        dest_group: GroupId,
+        amount: Nanos,
+    ) -> Result<(Nanos, Nanos), StorageError>;
 }
 
 #[derive(Clone, Debug)]

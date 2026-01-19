@@ -235,21 +235,125 @@ impl BillingService for BillingServiceImpl {
 
     async fn withdraw_from_group(
         &self,
-        _request: Request<WithdrawFromGroupRequest>,
+        request: Request<WithdrawFromGroupRequest>,
     ) -> Result<Response<WithdrawFromGroupResponse>, Status> {
-        // TODO: Implement withdrawal logic in Phase 16
-        Err(Status::unimplemented(
-            "WithdrawFromGroup not yet implemented - see Phase 16",
-        ))
+        // Extract tenant_id from authenticated context (set by interceptor from x-tenant-id header).
+        let tenant_id = request
+            .extensions()
+            .get::<TenantId>()
+            .cloned()
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "tenant_id",
+                reason: "missing x-tenant-id header".into(),
+            })?;
+
+        let body = request.into_inner();
+
+        // Parse and validate request parameters
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+        if body.amount_nanos <= 0 {
+            return Err(RpcError::InvalidArgument {
+                field: "amount_nanos",
+                reason: "must be positive".into(),
+            }
+            .into());
+        }
+        let amount = u64::try_from(body.amount_nanos).map_err(|_| RpcError::InvalidArgument {
+            field: "amount_nanos",
+            reason: "too large for u64".into(),
+        })?;
+
+        // Execute the withdrawal
+        let _tenant_balance = self
+            .store
+            .withdraw_from_group(tenant_id, group_id, Nanos::new(amount))
+            .await
+            .map_err(to_status)?;
+
+        // Generate transfer ID and timestamp
+        let transfer_id = ulid::Ulid::new().to_string();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        Ok(Response::new(WithdrawFromGroupResponse {
+            transfer_id,
+            amount_nanos: body.amount_nanos,
+            timestamp,
+        }))
     }
 
     async fn transfer_between_groups(
         &self,
-        _request: Request<TransferBetweenGroupsRequest>,
+        request: Request<TransferBetweenGroupsRequest>,
     ) -> Result<Response<TransferBetweenGroupsResponse>, Status> {
-        // TODO: Implement inter-group transfer in Phase 16
-        Err(Status::unimplemented(
-            "TransferBetweenGroups not yet implemented - see Phase 16",
-        ))
+        // Extract tenant_id from authenticated context (set by interceptor from x-tenant-id header).
+        let tenant_id = request
+            .extensions()
+            .get::<TenantId>()
+            .cloned()
+            .ok_or_else(|| RpcError::Unauthenticated {
+                credential: "tenant_id",
+                reason: "missing x-tenant-id header".into(),
+            })?;
+
+        let body = request.into_inner();
+
+        // Parse and validate request parameters
+        let source_group_id =
+            GroupId(crate::proto::parse_ulid(&body.from_group_id).map_err(|e| {
+                RpcError::InvalidArgument {
+                    field: "from_group_id",
+                    reason: e.to_string(),
+                }
+            })?);
+        let dest_group_id = GroupId(crate::proto::parse_ulid(&body.to_group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "to_group_id",
+                reason: e.to_string(),
+            }
+        })?);
+        if body.amount_nanos <= 0 {
+            return Err(RpcError::InvalidArgument {
+                field: "amount_nanos",
+                reason: "must be positive".into(),
+            }
+            .into());
+        }
+        let amount = u64::try_from(body.amount_nanos).map_err(|_| RpcError::InvalidArgument {
+            field: "amount_nanos",
+            reason: "too large for u64".into(),
+        })?;
+
+        // Execute the transfer
+        let (_source_balance, _dest_balance) = self
+            .store
+            .transfer_between_groups(
+                tenant_id,
+                source_group_id,
+                dest_group_id,
+                Nanos::new(amount),
+            )
+            .await
+            .map_err(to_status)?;
+
+        // Generate transfer ID and timestamp
+        let transfer_id = ulid::Ulid::new().to_string();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        Ok(Response::new(TransferBetweenGroupsResponse {
+            transfer_id,
+            amount_nanos: body.amount_nanos,
+            timestamp,
+        }))
     }
 }

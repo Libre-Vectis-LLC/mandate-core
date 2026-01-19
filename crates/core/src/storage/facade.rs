@@ -506,6 +506,37 @@ impl StorageFacade {
             .await
     }
 
+    /// Withdraw credits from group wallet back to tenant wallet.
+    ///
+    /// This is the reverse operation of `transfer_to_group`, moving funds from
+    /// a group's operational budget back to the tenant's personal balance.
+    pub async fn withdraw_from_group(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        amount: Nanos,
+    ) -> Result<Nanos, StorageError> {
+        self.billing
+            .withdraw_from_group(tenant, group_id, amount)
+            .await
+    }
+
+    /// Transfer credits between two group wallets.
+    ///
+    /// Both groups must belong to the same tenant. Returns a tuple of
+    /// (source_balance, dest_balance) after the transfer.
+    pub async fn transfer_between_groups(
+        &self,
+        tenant: TenantId,
+        source_group: GroupId,
+        dest_group: GroupId,
+        amount: Nanos,
+    ) -> Result<(Nanos, Nanos), StorageError> {
+        self.billing
+            .transfer_between_groups(tenant, source_group, dest_group, amount)
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Group methods
     // ─────────────────────────────────────────────────────────────────────────
