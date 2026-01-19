@@ -158,8 +158,27 @@ impl GroupService for GroupServiceImpl {
 
     async fn get_group(
         &self,
-        _request: Request<GetGroupRequest>,
+        request: Request<GetGroupRequest>,
     ) -> Result<Response<GetGroupResponse>, Status> {
-        Err(Status::unimplemented("get_group not implemented"))
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+
+        let (tenant_id, _tg_group_id) = self.store.get_group(group_id).await.map_err(to_status)?;
+        let owner_pubkey = self
+            .store
+            .get_owner_pubkey(group_id)
+            .await
+            .map_err(to_status)?;
+
+        Ok(Response::new(GetGroupResponse {
+            group_id: group_id.to_string(),
+            tenant_id: tenant_id.0.to_string(),
+            owner_pubkey: owner_pubkey.map(|pk| crate::proto::master_pub_to_proto(&pk)),
+        }))
     }
 }
