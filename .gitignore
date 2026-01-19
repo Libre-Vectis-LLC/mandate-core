@@ -64,3 +64,6 @@ drafts
 repomix-output.*
 *.repomix.lock
 .repomix/
+
+# Proptest regression files
+**/proptest-regressions/

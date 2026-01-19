@@ -527,6 +527,154 @@ mod tests {
             let b = canonical_json(&Value::Object(map_b)).expect("canon b");
             prop_assert_eq!(a, b);
         }
+
+        /// Property: SHA3-256 hash is deterministic.
+        /// The same input bytes always produce the same hash output.
+        #[test]
+        fn prop_sha3_256_deterministic(data in prop::collection::vec(any::<u8>(), 0..1024)) {
+            let hash1 = sha3_256_bytes(&data);
+            let hash2 = sha3_256_bytes(&data);
+            prop_assert_eq!(hash1, hash2);
+        }
+
+        /// Property: SHA3-512 hash is deterministic.
+        /// The same input bytes always produce the same hash output.
+        #[test]
+        fn prop_sha3_512_deterministic(data in prop::collection::vec(any::<u8>(), 0..1024)) {
+            let hash1 = sha3_512_bytes(&data);
+            let hash2 = sha3_512_bytes(&data);
+            prop_assert_eq!(hash1, hash2);
+        }
+
+        /// Property: Different inputs produce different hashes (collision resistance).
+        /// Two different input bytes should produce different hashes with very high probability.
+        #[test]
+        fn prop_sha3_256_collision_resistance(
+            data1 in prop::collection::vec(any::<u8>(), 1..512),
+            data2 in prop::collection::vec(any::<u8>(), 1..512),
+        ) {
+            prop_assume!(data1 != data2);
+            let hash1 = sha3_256_bytes(&data1);
+            let hash2 = sha3_256_bytes(&data2);
+            prop_assert_ne!(hash1, hash2);
+        }
+
+        /// Property: Content hash for ciphertext matches hash of raw bytes.
+        /// Hashing a ciphertext should be equivalent to hashing its underlying bytes.
+        #[test]
+        fn prop_content_hash_ciphertext_consistency(
+            payload in prop::collection::vec(any::<u8>(), 0..512),
+        ) {
+            let ciphertext = Ciphertext(payload.clone());
+            let hash_ct = content_hash_ciphertext(&ciphertext);
+            let hash_bytes = content_hash_bytes(&payload);
+            prop_assert_eq!(hash_ct, hash_bytes);
+        }
+
+        /// Property: Ring hash is deterministic for the same ring.
+        /// Computing ring hash multiple times for the same ring yields identical results.
+        #[test]
+        fn prop_ring_hash_deterministic(ring_size in 2usize..20) {
+            let mut members = Vec::new();
+            for i in 0..ring_size {
+                let label = format!("member-{}", i);
+                members.push(point(label.as_bytes()));
+            }
+            let ring = Ring::new(members);
+
+            let hash1 = ring_hash_sha3_256(&ring);
+            let hash2 = ring_hash_sha3_256(&ring);
+
+            prop_assert_eq!(hash1, hash2);
+        }
+
+        /// Property: Canonical JSON hashing is order-invariant for objects.
+        /// Objects with the same key-value pairs but different insertion orders
+        /// should hash to the same value.
+        #[test]
+        fn prop_canonical_hash_order_invariant(
+            kvs in prop::collection::hash_map("[a-z]{1,8}", 0u32..1000u32, 1..10),
+        ) {
+            use serde_json::json;
+
+            // Create two JSON objects with different insertion orders
+            let mut obj1 = serde_json::Map::new();
+            for (k, v) in kvs.iter() {
+                obj1.insert(k.clone(), json!(v));
+            }
+
+            let mut keys: Vec<_> = kvs.keys().cloned().collect();
+            keys.reverse();
+            let mut obj2 = serde_json::Map::new();
+            for k in keys {
+                let v = kvs.get(&k).unwrap();
+                obj2.insert(k.clone(), json!(v));
+            }
+
+            let hash1 = canonical_content_hash_sha3_256(
+                domain::EVENT,
+                &Value::Object(obj1)
+            ).expect("hash obj1");
+
+            let hash2 = canonical_content_hash_sha3_256(
+                domain::EVENT,
+                &Value::Object(obj2)
+            ).expect("hash obj2");
+
+            prop_assert_eq!(hash1, hash2);
+        }
+
+        /// Property: Domain separation produces different hashes.
+        /// The same content with different domain prefixes should produce different hashes.
+        #[test]
+        fn prop_domain_separation(
+            data in prop::collection::vec(any::<u8>(), 1..256),
+        ) {
+            let hash_event = Sha3_256Digest::hash_with_domain(domain::EVENT, &data);
+            let hash_poll = Sha3_256Digest::hash_with_domain(domain::POLL, &data);
+            let hash_vote = Sha3_256Digest::hash_with_domain(domain::VOTE, &data);
+
+            // All three should be different
+            prop_assert_ne!(hash_event, hash_poll);
+            prop_assert_ne!(hash_event, hash_vote);
+            prop_assert_ne!(hash_poll, hash_vote);
+        }
+
+        /// Property: Arrays preserve order in canonical JSON.
+        /// Two arrays with the same elements but different orders should hash differently.
+        #[test]
+        fn prop_canonical_json_array_order_significant(
+            items in prop::collection::vec(0u32..100u32, 2..10),
+        ) {
+            let mut reversed = items.clone();
+            reversed.reverse();
+
+            // Only test if reversing actually changes the array (not a palindrome)
+            prop_assume!(items != reversed);
+
+            let hash1 = canonical_content_hash_sha3_256(
+                domain::EVENT,
+                &items
+            ).expect("hash items");
+
+            let hash2 = canonical_content_hash_sha3_256(
+                domain::EVENT,
+                &reversed
+            ).expect("hash reversed");
+
+            prop_assert_ne!(hash1, hash2);
+        }
+
+        /// Property: Hash output length is always correct.
+        /// SHA3-256 should always produce 32 bytes, SHA3-512 should always produce 64 bytes.
+        #[test]
+        fn prop_hash_output_length(data in prop::collection::vec(any::<u8>(), 0..512)) {
+            let hash256 = sha3_256_bytes(&data);
+            let hash512 = sha3_512_bytes(&data);
+
+            prop_assert_eq!(hash256.as_bytes().len(), 32);
+            prop_assert_eq!(hash512.as_bytes().len(), 64);
+        }
     }
 
     #[test]

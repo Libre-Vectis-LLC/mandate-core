@@ -188,6 +188,7 @@ pub fn sign_contextual(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn make_ring(size: usize) -> (KeyPair, Ring) {
         let mut csprng = OsRng;
@@ -347,5 +348,220 @@ mod tests {
             ki_compact.compress().to_bytes(),
             "key images should match regardless of storage mode"
         );
+    }
+
+    // Property-based tests using proptest
+
+    proptest! {
+        /// Property: Signature serialization roundtrip preserves verification.
+        /// For any valid signature, serialize -> deserialize -> verify should succeed.
+        #[test]
+        fn prop_signature_serde_roundtrip(
+            ring_size in 1usize..10,
+            msg in prop::collection::vec(any::<u8>(), 0..256),
+            use_compact in any::<bool>(),
+            use_anonymous in any::<bool>(),
+        ) {
+            let (signer, ring) = make_ring(ring_size);
+            let storage = if use_compact { StorageMode::Compact } else { StorageMode::Archival };
+            let kind = if use_anonymous { SignatureKind::Anonymous } else { SignatureKind::Authoritative };
+
+            let sig = sign_contextual(kind, storage, &signer, &ring, &msg)
+                .expect("signing should succeed");
+
+            // Serialize and deserialize
+            let json = serde_json::to_string(&sig).expect("serialize");
+            let deserialized: Signature = serde_json::from_str(&json).expect("deserialize");
+
+            // Verification should still succeed
+            let ring_ref = if storage == StorageMode::Compact { Some(&ring) } else { None };
+            prop_assert!(deserialized.verify(ring_ref, &msg).expect("verify"));
+
+            // Properties should be preserved
+            prop_assert_eq!(sig.kind, deserialized.kind);
+            prop_assert_eq!(sig.mode(), deserialized.mode());
+            prop_assert_eq!(sig.ring_hash(), deserialized.ring_hash());
+            prop_assert_eq!(
+                sig.key_image().compress().to_bytes(),
+                deserialized.key_image().compress().to_bytes()
+            );
+        }
+
+        /// Property: Key derivation is deterministic.
+        /// For any master key and context, deriving twice yields identical public keys.
+        #[test]
+        fn prop_key_derivation_deterministic(
+            context_bytes in prop::collection::vec(any::<u8>(), 32),
+        ) {
+            let mut csprng = OsRng;
+            let master = MasterKeypair::new(KeyPair::generate(&mut csprng));
+
+            let derived1 = master.derive_for_context(&context_bytes);
+            let derived2 = master.derive_for_context(&context_bytes);
+
+            prop_assert_eq!(derived1.public(), derived2.public());
+        }
+
+        /// Property: Ring hash is order-invariant.
+        /// The ring hash should be identical regardless of member insertion order.
+        #[test]
+        fn prop_ring_hash_order_invariant(
+            ring_size in 2usize..10,
+        ) {
+            use crate::hashing::ring_hash_sha3_256;
+
+            // Generate unique ring members
+            let mut csprng = OsRng;
+            let members: Vec<_> = (0..ring_size)
+                .map(|_| *KeyPair::generate(&mut csprng).public())
+                .collect();
+
+            // Create rings with different orderings
+            let mut shuffled = members.clone();
+            shuffled.reverse();
+
+            let ring1 = Ring::new(members);
+            let ring2 = Ring::new(shuffled);
+
+            let hash1 = ring_hash_sha3_256(&ring1);
+            let hash2 = ring_hash_sha3_256(&ring2);
+
+            prop_assert_eq!(hash1, hash2);
+        }
+
+        /// Property: Compact signature verification fails without correct ring.
+        /// A compact signature must reject verification when given the wrong ring.
+        #[test]
+        fn prop_compact_signature_rejects_wrong_ring(
+            ring_size in 2usize..10,
+            msg in prop::collection::vec(any::<u8>(), 0..256),
+        ) {
+            let (signer, ring) = make_ring(ring_size);
+            let (_, wrong_ring) = make_ring(ring_size);
+
+            let sig = sign_contextual(
+                SignatureKind::Anonymous,
+                StorageMode::Compact,
+                &signer,
+                &ring,
+                &msg,
+            )
+            .expect("sign");
+
+            // Correct ring should verify
+            prop_assert!(sig.verify(Some(&ring), &msg).expect("verify"));
+
+            // Wrong ring should fail (returns false, not error)
+            prop_assert!(!sig.verify(Some(&wrong_ring), &msg).expect("verify"));
+        }
+
+        /// Property: Key image is stable across different messages.
+        /// For the same signer and ring, signing different messages produces the same key image.
+        /// This is a critical security property of BLSAG - the key image is bound to the
+        /// signer's identity, not the message, enabling double-spend detection.
+        #[test]
+        fn prop_key_image_stable_across_messages(
+            ring_size in 2usize..10,
+            msg1 in prop::collection::vec(any::<u8>(), 1..256),
+            msg2 in prop::collection::vec(any::<u8>(), 1..256),
+        ) {
+            prop_assume!(msg1 != msg2);
+
+            let (signer, ring) = make_ring(ring_size);
+
+            let sig1 = sign_contextual(
+                SignatureKind::Anonymous,
+                StorageMode::Archival,
+                &signer,
+                &ring,
+                &msg1,
+            )
+            .expect("sign msg1");
+
+            let sig2 = sign_contextual(
+                SignatureKind::Anonymous,
+                StorageMode::Archival,
+                &signer,
+                &ring,
+                &msg2,
+            )
+            .expect("sign msg2");
+
+            // Key images should be the SAME - bound to signer, not message
+            // This allows detection of double-voting/double-signing
+            prop_assert_eq!(
+                sig1.key_image().compress().to_bytes(),
+                sig2.key_image().compress().to_bytes()
+            );
+        }
+
+        /// Property: Different signers produce different key images.
+        /// Even with the same message and ring, different signers yield different key images.
+        #[test]
+        fn prop_different_signers_different_key_images(
+            ring_size in 3usize..10,
+            msg in prop::collection::vec(any::<u8>(), 1..256),
+        ) {
+            // Create two different signers in the same ring
+            let mut csprng = OsRng;
+            let signer1 = KeyPair::generate(&mut csprng);
+            let signer2 = KeyPair::generate(&mut csprng);
+
+            let mut members: Vec<_> = (0..ring_size - 2)
+                .map(|_| *KeyPair::generate(&mut csprng).public())
+                .collect();
+            members.push(*signer1.public());
+            members.push(*signer2.public());
+            let ring = Ring::new(members);
+
+            let sig1 = sign_contextual(
+                SignatureKind::Anonymous,
+                StorageMode::Archival,
+                &signer1,
+                &ring,
+                &msg,
+            )
+            .expect("sign with signer1");
+
+            let sig2 = sign_contextual(
+                SignatureKind::Anonymous,
+                StorageMode::Archival,
+                &signer2,
+                &ring,
+                &msg,
+            )
+            .expect("sign with signer2");
+
+            // Different signers should produce different key images
+            prop_assert_ne!(
+                sig1.key_image().compress().to_bytes(),
+                sig2.key_image().compress().to_bytes()
+            );
+        }
+
+        /// Property: Archival signatures are self-contained.
+        /// Archival signatures should verify without external ring.
+        #[test]
+        fn prop_archival_signature_self_contained(
+            ring_size in 1usize..10,
+            msg in prop::collection::vec(any::<u8>(), 0..256),
+        ) {
+            let (signer, ring) = make_ring(ring_size);
+
+            let sig = sign_contextual(
+                SignatureKind::Anonymous,
+                StorageMode::Archival,
+                &signer,
+                &ring,
+                &msg,
+            )
+            .expect("sign");
+
+            // Should verify without external ring
+            prop_assert!(sig.verify(None, &msg).expect("verify"));
+
+            // Should also verify with ring provided
+            prop_assert!(sig.verify(Some(&ring), &msg).expect("verify"));
+        }
     }
 }
