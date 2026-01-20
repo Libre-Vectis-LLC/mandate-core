@@ -3,6 +3,7 @@ package mandate.v1;
 
 import "common.proto";
 import "error.proto";
+import "event.proto";  // For MemberIdentity, IdentitySource, CredentialRef
 
 // MemberService handles the group membership onboarding workflow.
 //
@@ -10,18 +11,25 @@ import "error.proto";
 // Requires `x-api-token` header with valid tenant token.
 // Exposed on the public gRPC listener.
 //
-// ## Membership Flow
+// ## Membership Flow (Telegram)
 // 1. User initiates join via Telegram bot command
 // 2. Bot calls SubmitPendingMember with user's cryptographic keys
 // 3. Owner/Audit bot calls ListPendingMembers to review requests
 // 4. Owner approves by adding member to ring (via RingService)
 // 5. Owner uploads encrypted key blob (via StorageService)
 //
+// ## Membership Flow (Standalone)
+// 1. Admin generates invite code via InviteService
+// 2. User opens invite link and calls RegisterMember with invite code + keys
+// 3. Owner reviews pending members (same as Telegram flow)
+// 4. Owner approves by adding member to ring
+//
 // ## Use Cases
 // - Bot submits join requests from Telegram users
+// - Standalone users register via invite codes
 // - Owner client reviews pending members before approval
 service MemberService {
-  // SubmitPendingMember registers a user's intent to join a group.
+  // SubmitPendingMember registers a Telegram user's intent to join a group.
   //
   // The member remains in "pending" state until the group owner approves
   // by adding them to the ring and uploading their key blob.
@@ -35,6 +43,24 @@ service MemberService {
   // - INVALID_ARGUMENT: malformed public key bytes
   // - INTERNAL: database error
   rpc SubmitPendingMember (SubmitPendingMemberRequest) returns (SubmitPendingMemberResponse);
+
+  // RegisterMember registers a standalone user via invite code.
+  //
+  // This is the standalone mode alternative to SubmitPendingMember.
+  // The invite code determines which group the user joins.
+  //
+  // ## Flow
+  // 1. User receives invite link containing code
+  // 2. User generates keypair client-side
+  // 3. User calls RegisterMember with code + keys + identity info
+  // 4. Server validates code, creates pending member, increments code usage
+  //
+  // ## Errors
+  // - NOT_FOUND: invite code doesn't exist
+  // - FAILED_PRECONDITION: invite code expired, exhausted, or revoked
+  // - INVALID_ARGUMENT: malformed public key bytes
+  // - INTERNAL: database error
+  rpc RegisterMember (RegisterMemberRequest) returns (RegisterMemberResponse);
 
   // ListPendingMembers retrieves pending membership requests for review.
   //
@@ -135,4 +161,38 @@ message GetApprovedMemberByTgUserIdResponse {
   // The approved member's information (same structure as PendingMember).
   // Contains nazgul_pub and rage_pub for ring operations.
   PendingMember member = 1;
+}
+
+// ============================================================================
+// Standalone Registration (Phase 2)
+// ============================================================================
+// Note: IdentitySource, MemberIdentity, CredentialRef are defined in event.proto
+// and imported at the top of this file.
+
+// Request to register a standalone member via invite code.
+message RegisterMemberRequest {
+  // Invite code from the invite link (required).
+  // The code determines which group to join.
+  string invite_code = 1;
+
+  // Member's Nazgul master public key for ring signatures (32 bytes).
+  NazgulMasterPublicKey nazgul_pub = 2;
+
+  // Member's Rage (X25519) public key for encryption (32 bytes).
+  RagePublicKey rage_pub = 3;
+
+  // Member identity information (required).
+  MemberIdentity identity = 4;
+}
+
+// Response after registering a standalone member.
+message RegisterMemberResponse {
+  // Server-assigned pending member ID (ULID format).
+  string pending_id = 1;
+
+  // Group ID that the member will join (derived from invite code).
+  string group_id = 2;
+
+  // Current status: "pending" (awaiting owner approval).
+  string status = 3;
 }

@@ -6,7 +6,8 @@ use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
     member_service_server::MemberService, GetApprovedMemberByTgUserIdRequest,
     GetApprovedMemberByTgUserIdResponse, ListPendingMembersRequest, ListPendingMembersResponse,
-    PendingMember as ProtoPendingMember, SubmitPendingMemberRequest, SubmitPendingMemberResponse,
+    PendingMember as ProtoPendingMember, RegisterMemberRequest, RegisterMemberResponse,
+    SubmitPendingMemberRequest, SubmitPendingMemberResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -169,5 +170,78 @@ impl MemberService for MemberServiceImpl {
             }
             .into()),
         }
+    }
+
+    async fn register_member(
+        &self,
+        request: Request<RegisterMemberRequest>,
+    ) -> Result<Response<RegisterMemberResponse>, Status> {
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+
+        // Validate invite_code (required)
+        if body.invite_code.is_empty() {
+            return Err(RpcError::InvalidArgument {
+                field: "invite_code",
+                reason: "missing".into(),
+            }
+            .into());
+        }
+
+        // Validate nazgul_pub (required)
+        let nazgul_pub = body
+            .nazgul_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument {
+                field: "nazgul_pub",
+                reason: "missing".into(),
+            })?;
+        let nazgul_pub = crate::proto::nazgul_pub_from_proto(nazgul_pub).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "nazgul_pub",
+                reason: e.to_string(),
+            }
+        })?;
+
+        // Validate rage_pub (required)
+        let rage_pub = body
+            .rage_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: "missing".into(),
+            })?;
+        let rage_pub =
+            crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: e.to_string(),
+            })?;
+
+        // Extract optional identity fields
+        let (display_name, organization_id) = if let Some(identity) = body.identity {
+            (identity.display_name, identity.organization_id)
+        } else {
+            (None, None)
+        };
+
+        // Register via invite code
+        let (pending_id, group_id) = self
+            .store
+            .register_standalone_member(
+                tenant,
+                &body.invite_code,
+                nazgul_pub,
+                rage_pub,
+                display_name,
+                organization_id,
+            )
+            .await
+            .map_err(to_status)?;
+
+        Ok(Response::new(RegisterMemberResponse {
+            pending_id,
+            group_id: group_id.to_string(),
+            status: "pending".to_string(),
+        }))
     }
 }

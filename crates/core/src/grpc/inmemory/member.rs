@@ -1,12 +1,25 @@
 /// In-memory pending member storage.
 use crate::ids::{GroupId, MasterPublicKey, TenantId};
-use crate::storage::{PendingMember, PendingMemberStatus, PendingMemberStore, StorageError};
+use crate::storage::{
+    NotFound, PendingMember, PendingMemberStatus, PendingMemberStore, StorageError,
+};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) type PendingMemberMap = HashMap<(TenantId, GroupId), Vec<PendingMemberRecord>>;
+
+/// In-memory invite code record for testing.
+#[derive(Clone, Debug)]
+pub(crate) struct InMemoryInviteCode {
+    pub(crate) tenant_id: TenantId,
+    pub(crate) group_id: GroupId,
+    pub(crate) max_uses: u32,
+    pub(crate) current_uses: u32,
+    pub(crate) is_active: bool,
+    pub(crate) expires_at_ms: Option<i64>,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct PendingMemberRecord {
@@ -18,11 +31,60 @@ pub(crate) struct PendingMemberRecord {
 pub struct InMemoryPendingMembers {
     // Keyed by (TenantId, GroupId)
     members: Arc<Mutex<PendingMemberMap>>,
+    // Keyed by invite code string (for register_standalone testing)
+    invite_codes: Arc<Mutex<HashMap<String, InMemoryInviteCode>>>,
 }
 
 impl InMemoryPendingMembers {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Add an invite code for testing purposes.
+    ///
+    /// This allows testing the register_standalone flow without a real database.
+    pub fn add_invite_code(
+        &self,
+        code: impl Into<String>,
+        tenant_id: TenantId,
+        group_id: GroupId,
+        max_uses: u32,
+    ) {
+        let mut codes = self.invite_codes.lock();
+        codes.insert(
+            code.into(),
+            InMemoryInviteCode {
+                tenant_id,
+                group_id,
+                max_uses,
+                current_uses: 0,
+                is_active: true,
+                expires_at_ms: None,
+            },
+        );
+    }
+
+    /// Add an invite code with expiration for testing.
+    pub fn add_invite_code_with_expiry(
+        &self,
+        code: impl Into<String>,
+        tenant_id: TenantId,
+        group_id: GroupId,
+        max_uses: u32,
+        expires_at_ms: i64,
+    ) {
+        let mut codes = self.invite_codes.lock();
+        codes.insert(
+            code.into(),
+            InMemoryInviteCode {
+                tenant_id,
+                group_id,
+                max_uses,
+                current_uses: 0,
+                is_active: true,
+                expires_at_ms: Some(expires_at_ms),
+            },
+        );
     }
 
     pub(crate) fn approve_member(
@@ -121,5 +183,97 @@ impl PendingMemberStore for InMemoryPendingMembers {
         } else {
             Ok(None)
         }
+    }
+
+    async fn register_standalone(
+        &self,
+        tenant: TenantId,
+        invite_code: &str,
+        nazgul_pub: MasterPublicKey,
+        rage_pub: [u8; 32],
+        _display_name: Option<String>,
+        _organization_id: Option<String>,
+    ) -> Result<(String, GroupId), StorageError> {
+        // Validate and consume invite code atomically
+        let (group_id, code_tenant) = {
+            let mut codes = self.invite_codes.lock();
+            let code = codes.get_mut(invite_code).ok_or_else(|| {
+                StorageError::NotFound(NotFound::InviteCode {
+                    code: invite_code.to_string(),
+                })
+            })?;
+
+            // Check tenant matches
+            if code.tenant_id != tenant {
+                return Err(StorageError::NotFound(NotFound::InviteCode {
+                    code: invite_code.to_string(),
+                }));
+            }
+
+            // Check if active
+            if !code.is_active {
+                return Err(StorageError::PreconditionFailed(
+                    "invite code is revoked".into(),
+                ));
+            }
+
+            // Check expiration
+            if let Some(expires_at) = code.expires_at_ms {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                if now_ms > expires_at {
+                    return Err(StorageError::PreconditionFailed(
+                        "invite code has expired".into(),
+                    ));
+                }
+            }
+
+            // Check usage limit
+            if code.current_uses >= code.max_uses {
+                return Err(StorageError::PreconditionFailed(
+                    "invite code has reached maximum uses".into(),
+                ));
+            }
+
+            // Increment usage
+            code.current_uses += 1;
+
+            (code.group_id, code.tenant_id)
+        };
+
+        // Verify tenant consistency
+        if code_tenant != tenant {
+            return Err(StorageError::NotFound(NotFound::InviteCode {
+                code: invite_code.to_string(),
+            }));
+        }
+
+        // Create pending member record
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        let pending_id = format!("PENDING-{}", ulid::Ulid::new());
+        let member = PendingMember {
+            pending_id: pending_id.clone(),
+            tg_user_id: String::new(), // Standalone users don't have Telegram ID
+            nazgul_pub,
+            rage_pub,
+            submitted_at_ms: now_ms,
+        };
+
+        let record = PendingMemberRecord {
+            member,
+            status: PendingMemberStatus::Pending,
+        };
+
+        let mut map = self.members.lock();
+        let list = map.entry((tenant, group_id)).or_default();
+        list.push(record);
+
+        Ok((pending_id, group_id))
     }
 }

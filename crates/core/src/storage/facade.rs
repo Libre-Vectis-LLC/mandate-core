@@ -622,6 +622,31 @@ impl StorageFacade {
             .await
     }
 
+    /// Register a standalone user via invite code.
+    ///
+    /// This atomically validates the invite code, increments its usage,
+    /// and creates a pending member record.
+    pub async fn register_standalone_member(
+        &self,
+        tenant: TenantId,
+        invite_code: &str,
+        nazgul_pub: MasterPublicKey,
+        rage_pub: [u8; 32],
+        display_name: Option<String>,
+        organization_id: Option<String>,
+    ) -> Result<(String, GroupId), StorageError> {
+        self.pending_members
+            .register_standalone(
+                tenant,
+                invite_code,
+                nazgul_pub,
+                rage_pub,
+                display_name,
+                organization_id,
+            )
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Key blob methods
     // ─────────────────────────────────────────────────────────────────────────

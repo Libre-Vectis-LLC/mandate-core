@@ -137,6 +137,8 @@ pub enum NotFound {
     },
     #[error("gift card {code}")]
     GiftCard { code: String },
+    #[error("invite code {code}")]
+    InviteCode { code: String },
 }
 
 /// Append-only event storage. Intended for a single-writer per tenant; multi-tenant shares one table.
@@ -1128,4 +1130,40 @@ pub trait PendingMemberStore {
         group_id: GroupId,
         tg_user_id: &str,
     ) -> Result<Option<PendingMember>, StorageError>;
+
+    /// Register a standalone user via invite code.
+    ///
+    /// This method atomically validates the invite code, increments its usage count,
+    /// and creates a pending member record for a standalone (non-Telegram) user.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `invite_code` - The invite code to redeem
+    /// * `nazgul_pub` - The member's Nazgul master public key (for ring signatures)
+    /// * `rage_pub` - The member's Rage public key (for encrypted key distribution)
+    /// * `display_name` - Optional user-provided display name
+    /// * `organization_id` - Optional organization-assigned identifier
+    ///
+    /// # Returns
+    /// A tuple of `(pending_id, group_id)` on success.
+    ///
+    /// # Errors
+    /// * `StorageError::NotFound` - When invite code doesn't exist
+    /// * `StorageError::FailedPrecondition` - When invite code is expired, exhausted, or revoked
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Invariants
+    /// * Operation is atomic: invite code validation, usage increment, and member creation
+    ///   all succeed or fail together
+    /// * The created member has `identity_source = "standalone"`
+    /// * `submitted_at` and `registered_at` are set to the current timestamp
+    async fn register_standalone(
+        &self,
+        tenant: TenantId,
+        invite_code: &str,
+        nazgul_pub: MasterPublicKey,
+        rage_pub: [u8; 32],
+        display_name: Option<String>,
+        organization_id: Option<String>,
+    ) -> Result<(String, GroupId), StorageError>;
 }
