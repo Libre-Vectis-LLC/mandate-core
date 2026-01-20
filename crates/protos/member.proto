@@ -80,6 +80,27 @@ service MemberService {
   // ## Errors
   // - NOT_FOUND: no approved member with the given tg_user_id exists
   rpc GetApprovedMemberByTgUserId (GetApprovedMemberByTgUserIdRequest) returns (GetApprovedMemberByTgUserIdResponse);
+
+  // ListMembers returns all approved members for a group with unified MemberInfo.
+  //
+  // Returns members with full identity information regardless of identity source
+  // (Telegram or Standalone). Supports pagination for groups with many members.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - PERMISSION_DENIED: caller is not authorized to view members
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+
+  // ExportMembers exports member data in specified format (CSV or JSON).
+  //
+  // Admin-only RPC. Exports approved member data with selectable fields.
+  // Supports filtering which fields to include in the export.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - INVALID_ARGUMENT: unsupported format or invalid field names
+  // - PERMISSION_DENIED: caller is not a tenant admin
+  rpc ExportMembers(ExportMembersRequest) returns (ExportMembersResponse);
 }
 
 // Request to submit a pending member.
@@ -195,4 +216,97 @@ message RegisterMemberResponse {
 
   // Current status: "pending" (awaiting owner approval).
   string status = 3;
+}
+
+// =============================================================================
+// Phase 4: Member Management Enhancement
+// =============================================================================
+
+// Unified member information for both Telegram and Standalone members.
+message MemberInfo {
+  // Member's cryptographic public key (Nazgul master public key).
+  bytes nazgul_pub = 1;
+
+  // Unified identity information.
+  // Contains external_id, display_name, organization_id, credential_ref, and source.
+  MemberIdentity identity = 2;
+
+  // Member status.
+  // Possible values: "pending", "approved", "banned"
+  string status = 3;
+
+  // Unix timestamp in milliseconds when member joined the group.
+  uint64 joined_at = 4;
+}
+
+// Request to list approved members in a group.
+message ListMembersRequest {
+  // Group ID (ULID format) to list members for.
+  string group_id = 1;
+
+  // Maximum number of members to return (server may cap this).
+  // Recommended: 50. Maximum: 100.
+  uint32 limit = 2;
+
+  // Pagination cursor from previous response.
+  // Pass empty/null for first page.
+  PageToken page_token = 3;
+
+  // Optional filter by identity source.
+  // If not specified, returns all members regardless of source.
+  optional IdentitySource filter_source = 4;
+
+  // Optional filter by status.
+  // If not specified, returns only "approved" members.
+  optional string filter_status = 5;
+}
+
+// Response containing list of members.
+message ListMembersResponse {
+  // List of members matching the criteria.
+  repeated MemberInfo members = 1;
+
+  // Pagination cursor for next page.
+  // Empty if no more pages.
+  PageToken next_page_token = 2;
+
+  // Total count of members matching criteria (for UI display).
+  uint32 total_count = 3;
+}
+
+// Request to export member data.
+message ExportMembersRequest {
+  // Group ID (ULID format) to export members from.
+  string group_id = 1;
+
+  // Export format.
+  // Supported values: "csv", "json"
+  string format = 2;
+
+  // Fields to include in export.
+  // Available fields: "external_id", "display_name", "organization_id",
+  // "credential_status", "joined_at", "status", "identity_source"
+  // If empty, exports all available fields.
+  repeated string include_fields = 3;
+
+  // Optional filter by identity source.
+  optional IdentitySource filter_source = 4;
+
+  // Optional filter by status.
+  // If not specified, exports only "approved" members.
+  optional string filter_status = 5;
+}
+
+// Response containing exported member data.
+message ExportMembersResponse {
+  // Exported data in the requested format.
+  // For "csv": CSV string with header row
+  // For "json": JSON array of member objects
+  string data = 1;
+
+  // Number of members exported.
+  uint32 member_count = 2;
+
+  // Export timestamp (Unix milliseconds).
+  uint64 exported_at = 3;
 }

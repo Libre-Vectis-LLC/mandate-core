@@ -4,8 +4,9 @@ use crate::ids::GroupId;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
-    member_service_server::MemberService, GetApprovedMemberByTgUserIdRequest,
-    GetApprovedMemberByTgUserIdResponse, ListPendingMembersRequest, ListPendingMembersResponse,
+    member_service_server::MemberService, ExportMembersRequest, ExportMembersResponse,
+    GetApprovedMemberByTgUserIdRequest, GetApprovedMemberByTgUserIdResponse, ListMembersRequest,
+    ListMembersResponse, ListPendingMembersRequest, ListPendingMembersResponse,
     PendingMember as ProtoPendingMember, RegisterMemberRequest, RegisterMemberResponse,
     SubmitPendingMemberRequest, SubmitPendingMemberResponse,
 };
@@ -243,5 +244,25 @@ impl MemberService for MemberServiceImpl {
             group_id: group_id.to_string(),
             status: "pending".to_string(),
         }))
+    }
+
+    async fn list_members(
+        &self,
+        _request: Request<ListMembersRequest>,
+    ) -> Result<Response<ListMembersResponse>, Status> {
+        // TODO: Implement Phase 4 member listing
+        Err(Status::unimplemented(
+            "ListMembers will be implemented in Phase 4",
+        ))
+    }
+
+    async fn export_members(
+        &self,
+        _request: Request<ExportMembersRequest>,
+    ) -> Result<Response<ExportMembersResponse>, Status> {
+        // TODO: Implement Phase 4 member export
+        Err(Status::unimplemented(
+            "ExportMembers will be implemented in Phase 4",
+        ))
     }
 }
