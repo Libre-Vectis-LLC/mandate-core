@@ -4,6 +4,36 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
+// Identity source enumeration
+// Indicates how a member was onboarded into the system
+enum IdentitySource {
+  IDENTITY_SOURCE_UNKNOWN = 0;    // Reserved for proto default, should not be used
+  IDENTITY_SOURCE_TELEGRAM = 1;   // Telegram-based identity (default for backward compatibility)
+  IDENTITY_SOURCE_STANDALONE = 2; // Standalone mode identity (invite-based registration)
+  IDENTITY_SOURCE_OTHER = 3;      // Other identity sources (reserved for future use)
+}
+
+// Reference to a verified credential
+// Links member identity to externally verified credentials (government ID, org membership, etc.)
+message CredentialRef {
+  string credential_id = 1;       // Credential ID in ULID format
+  string credential_type = 2;     // Credential type: "government_id", "org_membership", "custom", etc.
+  uint64 verified_at = 3;         // Unix timestamp (milliseconds) when the credential was verified
+}
+
+// Unified member identity metadata
+// Embedded in RingOperation::AddMember events, covered by ring signature
+// All fields except 'source' are optional to support different onboarding modes
+message MemberIdentity {
+  optional string external_id = 1;      // External identity identifier:
+                                        // - Telegram: tg_user_id (e.g., "123456789")
+                                        // - Standalone: standalone_user_id (ULID)
+  optional string display_name = 2;     // User's display name (tg_username or custom name)
+  optional string organization_id = 3;  // Organization internal ID (applicable to both modes)
+  optional CredentialRef credential_ref = 4; // Reference to verified credential (if any)
+  IdentitySource source = 5;            // Required: identity source (Telegram, Standalone, or Other)
+}
+
 // EventService handles the append-only event log for group coordination.
 //
 // ## Authentication
