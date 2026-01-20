@@ -590,4 +590,190 @@ mod tests {
             "Different previous_event_hash should produce identical signing bytes"
         );
     }
+
+    // Backward compatibility tests for RingOperation serialization
+
+    #[test]
+    fn test_ring_operation_deserialize_legacy_format_no_identity() {
+        // Old format: AddMember without identity field
+        // This simulates data persisted before the identity field was added
+        let json = r#"{
+            "AddMember": {
+                "public_key": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+            }
+        }"#;
+
+        let op: RingOperation = serde_json::from_str(json).expect("should deserialize");
+
+        match op {
+            RingOperation::AddMember {
+                public_key,
+                identity,
+            } => {
+                // Verify public key deserialized correctly
+                assert_eq!(public_key.0, [0u8; 32]);
+
+                // Verify identity defaults to legacy()
+                assert_eq!(identity.source, IdentitySource::Telegram);
+                assert!(identity.external_id.is_none());
+                assert!(identity.display_name.is_none());
+                assert!(identity.organization_id.is_none());
+                assert!(identity.credential_ref.is_none());
+            }
+            _ => panic!("expected AddMember"),
+        }
+    }
+
+    #[test]
+    fn test_ring_operation_roundtrip_with_identity() {
+        // New format with full identity metadata
+        let identity = MemberIdentity {
+            external_id: Some("123456".to_string()),
+            display_name: Some("Alice".to_string()),
+            organization_id: Some("ORG001".to_string()),
+            credential_ref: None,
+            source: IdentitySource::Standalone,
+        };
+
+        let op = RingOperation::AddMember {
+            public_key: MasterPublicKey([42u8; 32]),
+            identity: identity.clone(),
+        };
+
+        // Serialize and deserialize
+        let json = serde_json::to_string(&op).expect("should serialize");
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("should deserialize");
+
+        match deserialized {
+            RingOperation::AddMember {
+                public_key,
+                identity: id,
+            } => {
+                assert_eq!(public_key.0, [42u8; 32]);
+                assert_eq!(id.external_id, Some("123456".to_string()));
+                assert_eq!(id.display_name, Some("Alice".to_string()));
+                assert_eq!(id.organization_id, Some("ORG001".to_string()));
+                assert_eq!(id.source, IdentitySource::Standalone);
+            }
+            _ => panic!("expected AddMember"),
+        }
+    }
+
+    #[test]
+    fn test_ring_operation_remove_member_unchanged() {
+        // Verify RemoveMember works as before (no identity field)
+        let op = RingOperation::RemoveMember {
+            public_key: MasterPublicKey([99u8; 32]),
+        };
+
+        let json = serde_json::to_string(&op).expect("should serialize");
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("should deserialize");
+
+        match deserialized {
+            RingOperation::RemoveMember { public_key } => {
+                assert_eq!(public_key.0, [99u8; 32]);
+            }
+            _ => panic!("expected RemoveMember"),
+        }
+    }
+
+    #[test]
+    fn test_member_identity_telegram_constructor() {
+        let id = MemberIdentity::telegram("12345".to_string(), Some("alice".to_string()));
+
+        assert_eq!(id.external_id, Some("12345".to_string()));
+        assert_eq!(id.display_name, Some("alice".to_string()));
+        assert_eq!(id.source, IdentitySource::Telegram);
+        assert!(id.organization_id.is_none());
+        assert!(id.credential_ref.is_none());
+    }
+
+    #[test]
+    fn test_member_identity_telegram_constructor_no_username() {
+        let id = MemberIdentity::telegram("67890".to_string(), None);
+
+        assert_eq!(id.external_id, Some("67890".to_string()));
+        assert!(id.display_name.is_none());
+        assert_eq!(id.source, IdentitySource::Telegram);
+    }
+
+    #[test]
+    fn test_member_identity_standalone_constructor() {
+        let id = MemberIdentity::standalone(
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string(),
+            Some("Bob".to_string()),
+            Some("ORG002".to_string()),
+        );
+
+        assert_eq!(
+            id.external_id,
+            Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string())
+        );
+        assert_eq!(id.display_name, Some("Bob".to_string()));
+        assert_eq!(id.organization_id, Some("ORG002".to_string()));
+        assert_eq!(id.source, IdentitySource::Standalone);
+        assert!(id.credential_ref.is_none());
+    }
+
+    #[test]
+    fn test_member_identity_standalone_constructor_minimal() {
+        // Standalone identity with only user_id
+        let id = MemberIdentity::standalone("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string(), None, None);
+
+        assert_eq!(
+            id.external_id,
+            Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string())
+        );
+        assert!(id.display_name.is_none());
+        assert!(id.organization_id.is_none());
+        assert_eq!(id.source, IdentitySource::Standalone);
+    }
+
+    #[test]
+    fn test_member_identity_legacy_constructor() {
+        let id = MemberIdentity::legacy();
+
+        assert!(id.external_id.is_none());
+        assert!(id.display_name.is_none());
+        assert!(id.organization_id.is_none());
+        assert!(id.credential_ref.is_none());
+        assert_eq!(id.source, IdentitySource::Telegram);
+    }
+
+    #[test]
+    fn test_ring_operation_with_credential_ref() {
+        // Test AddMember with verified credential
+        let credential = CredentialRef {
+            credential_id: "01CRED123456789".to_string(),
+            credential_type: "government_id".to_string(),
+            verified_at: 1704067200000, // 2024-01-01 00:00:00 UTC
+        };
+
+        let identity = MemberIdentity {
+            external_id: Some("user123".to_string()),
+            display_name: Some("Charlie".to_string()),
+            organization_id: Some("ORG003".to_string()),
+            credential_ref: Some(credential.clone()),
+            source: IdentitySource::Standalone,
+        };
+
+        let op = RingOperation::AddMember {
+            public_key: MasterPublicKey([77u8; 32]),
+            identity,
+        };
+
+        // Serialize and deserialize
+        let json = serde_json::to_string(&op).expect("should serialize");
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("should deserialize");
+
+        match deserialized {
+            RingOperation::AddMember { identity, .. } => {
+                let cred = identity.credential_ref.expect("credential should exist");
+                assert_eq!(cred.credential_id, "01CRED123456789");
+                assert_eq!(cred.credential_type, "government_id");
+                assert_eq!(cred.verified_at, 1704067200000);
+            }
+            _ => panic!("expected AddMember"),
+        }
+    }
 }
