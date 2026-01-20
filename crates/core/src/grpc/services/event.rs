@@ -384,7 +384,7 @@ impl EventService for EventServiceImpl {
             let mut validation_ring = (*current_ring).clone();
             for operation in &update.operations {
                 let delta = match operation {
-                    crate::event::RingOperation::AddMember { public_key } => {
+                    crate::event::RingOperation::AddMember { public_key, .. } => {
                         RingDelta::Add(*public_key)
                     }
                     crate::event::RingOperation::RemoveMember { public_key } => {
@@ -401,7 +401,7 @@ impl EventService for EventServiceImpl {
 
             for operation in &update.operations {
                 let delta = match operation {
-                    crate::event::RingOperation::AddMember { public_key } => {
+                    crate::event::RingOperation::AddMember { public_key, .. } => {
                         RingDelta::Add(*public_key)
                     }
                     crate::event::RingOperation::RemoveMember { public_key } => {

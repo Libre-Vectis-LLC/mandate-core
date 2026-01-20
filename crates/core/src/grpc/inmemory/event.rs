@@ -81,7 +81,7 @@ impl InMemoryEvents {
             }
             EventType::RingUpdate(update) => {
                 for operation in &update.operations {
-                    if let crate::event::RingOperation::AddMember { public_key } = operation {
+                    if let crate::event::RingOperation::AddMember { public_key, .. } = operation {
                         self.pending_members
                             .approve_member(tenant, group_id, *public_key);
                     }

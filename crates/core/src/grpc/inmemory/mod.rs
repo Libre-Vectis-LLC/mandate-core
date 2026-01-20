@@ -42,7 +42,7 @@ pub use vote::{InMemoryVoteKeyImages, NoopVoteKeyImages};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{Event, EventType, RingOperation, RingUpdate};
+    use crate::event::{Event, EventType, MemberIdentity, RingOperation, RingUpdate};
     use crate::hashing::ring_hash_sha3_256;
     use crate::ids::{EventId, EventUlid, GroupId, MasterPublicKey, Nanos, RingHash, TenantId};
     use crate::key_manager::KeyManager;
@@ -118,6 +118,7 @@ mod tests {
                 ring_hash: RingHash([7u8; 32]),
                 operations: vec![RingOperation::AddMember {
                     public_key: member_key,
+                    identity: MemberIdentity::legacy(),
                 }],
             }),
             signature: None,
