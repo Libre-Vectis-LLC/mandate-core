@@ -1,0 +1,222 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+import "error.proto";
+
+// InviteService manages invite codes for group membership onboarding.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener.
+//
+// ## Invite Code Flow
+// 1. Tenant admin creates an invite code for a group
+// 2. Invite URL is shared with potential members via Telegram or other channels
+// 3. User validates code before registration (ValidateInviteCode)
+// 4. Registration UI pre-fills group info and metadata
+// 5. User submits registration via MemberService.SubmitPendingMember
+// 6. Invite code usage count increments automatically
+//
+// ## Use Cases
+// - Admin creates one-time or multi-use invite codes
+// - Admin lists and manages active invite codes
+// - Registration UI validates invite code and retrieves group info
+// - Admin revokes compromised or expired invite codes
+service InviteService {
+  // CreateInviteCode generates a new invite code for a group.
+  //
+  // Only tenant admins can create invite codes.
+  // The generated code is a URL-safe random string (16-32 characters)
+  // suitable for sharing via Telegram messages or web links.
+  //
+  // ## Idempotency
+  // Each call generates a new unique invite code.
+  // No deduplication is performed.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - PERMISSION_DENIED: caller is not a tenant admin
+  // - INVALID_ARGUMENT: expires_at is in the past or max_uses is 0
+  // - INTERNAL: database error or random generation failure
+  rpc CreateInviteCode(CreateInviteCodeRequest) returns (CreateInviteCodeResponse);
+
+  // ListInviteCodes returns all invite codes for a group.
+  //
+  // Returns both active and revoked codes in reverse chronological order
+  // (newest first). Expired codes are marked with is_active = false.
+  // Supports pagination for groups with many invite codes.
+  //
+  // ## Errors
+  // - NOT_FOUND: group_id doesn't exist
+  // - PERMISSION_DENIED: caller is not a tenant admin
+  rpc ListInviteCodes(ListInviteCodesRequest) returns (ListInviteCodesResponse);
+
+  // ValidateInviteCode checks if an invite code is valid and returns group info.
+  //
+  // This is called by the registration page BEFORE showing the registration form.
+  // Returns group name and optional metadata for pre-filling the form.
+  // Does NOT consume the invite code (usage count unchanged).
+  //
+  // ## Validation Logic
+  // An invite code is INVALID if:
+  // - Code doesn't exist in database
+  // - is_active = false (manually revoked)
+  // - expires_at is set and current time > expires_at
+  // - current_uses >= max_uses (exhausted)
+  //
+  // ## Errors
+  // - NOT_FOUND: code doesn't exist
+  // - NO ERROR if code is invalid (returns valid=false with error_reason)
+  rpc ValidateInviteCode(ValidateInviteCodeRequest) returns (ValidateInviteCodeResponse);
+
+  // RevokeInviteCode deactivates an invite code.
+  //
+  // Sets is_active = false, preventing further use.
+  // Does NOT delete the code from the database (for audit trail).
+  // Idempotent: revoking an already-revoked code succeeds.
+  //
+  // ## Use Cases
+  // - Admin suspects code was leaked or shared publicly
+  // - Admin wants to disable a code without deleting it
+  //
+  // ## Errors
+  // - NOT_FOUND: code doesn't exist
+  // - PERMISSION_DENIED: caller is not a tenant admin
+  rpc RevokeInviteCode(RevokeInviteCodeRequest) returns (RevokeInviteCodeResponse);
+}
+
+// Request to create a new invite code.
+message CreateInviteCodeRequest {
+  // Group ID (ULID format) for which the invite code is created.
+  string group_id = 1;
+
+  // Optional expiration time (Unix timestamp in milliseconds).
+  // If not set, the invite code never expires.
+  // Must be in the future if set.
+  optional int64 expires_at = 2;
+
+  // Maximum number of times this code can be redeemed.
+  // Must be >= 1. Use 1 for one-time invite codes.
+  uint32 max_uses = 3;
+
+  // Optional JSON metadata for pre-filling registration form.
+  // Example: {"display_name": "Alice", "role": "contributor"}
+  // Maximum length: 4096 bytes.
+  optional string metadata = 4;
+}
+
+// Response after creating an invite code.
+message CreateInviteCodeResponse {
+  // Generated invite code (URL-safe, 16-32 alphanumeric characters).
+  // Example: "Abc123XyZ456qwErTy"
+  string code = 1;
+
+  // Full invite URL for sharing.
+  // Example: "https://app.mandate.io/invite/Abc123XyZ456qwErTy"
+  string invite_url = 2;
+}
+
+// Request to list invite codes for a group.
+message ListInviteCodesRequest {
+  // Group ID (ULID format) to query.
+  string group_id = 1;
+
+  // Maximum number of invite codes to return (server may cap this).
+  // Recommended: 50. Maximum: 100.
+  uint32 limit = 2;
+
+  // Pagination cursor from previous response.
+  // Pass empty/null for first page.
+  PageToken page_token = 3;
+}
+
+// Invite code details.
+message InviteCode {
+  // The invite code itself (URL-safe, 16-32 characters).
+  string code = 1;
+
+  // Group ID (ULID format) this code belongs to.
+  string group_id = 2;
+
+  // Admin ID (ULID format) who created this code.
+  string created_by = 3;
+
+  // Unix timestamp in milliseconds when the code was created.
+  int64 created_at = 4;
+
+  // Optional expiration time (Unix timestamp in milliseconds).
+  // If not set, the code never expires.
+  optional int64 expires_at = 5;
+
+  // Maximum number of times this code can be redeemed.
+  uint32 max_uses = 6;
+
+  // Current number of times this code has been redeemed.
+  // Increments when a member successfully joins using this code.
+  uint32 current_uses = 7;
+
+  // Member ID (ULID format) who redeemed this code, if max_uses = 1 and redeemed.
+  // For multi-use codes, this field is not set (use audit logs for full history).
+  optional string redeemed_by = 8;
+
+  // Optional JSON metadata (same as in CreateInviteCodeRequest).
+  optional string metadata = 9;
+
+  // Whether the code is active.
+  // False if manually revoked or automatically deactivated after expiration/exhaustion.
+  bool is_active = 10;
+}
+
+// Response containing a list of invite codes.
+message ListInviteCodesResponse {
+  // List of invite codes in reverse chronological order (newest first).
+  repeated InviteCode codes = 1;
+
+  // Pagination cursor for next page.
+  // Empty if no more pages.
+  PageToken next_page_token = 2;
+}
+
+// Request to validate an invite code.
+message ValidateInviteCodeRequest {
+  // The invite code to validate (URL-safe, 16-32 characters).
+  string code = 1;
+}
+
+// Response indicating whether the invite code is valid.
+message ValidateInviteCodeResponse {
+  // Whether the invite code is valid and can be used.
+  bool valid = 1;
+
+  // Group ID (ULID format) if valid.
+  // Only returned when valid = true.
+  optional string group_id = 2;
+
+  // Group display name for showing in the registration UI.
+  // Example: "Acme Corp DAO"
+  // Only returned when valid = true.
+  optional string group_name = 3;
+
+  // Pre-filled registration metadata (JSON string).
+  // Example: {"display_name": "Alice", "role": "contributor"}
+  // Only returned when valid = true and metadata is set.
+  optional string metadata = 4;
+
+  // Error reason if invalid.
+  // Possible values: "expired", "exhausted", "revoked", "not_found"
+  // Only returned when valid = false.
+  optional string error_reason = 5;
+}
+
+// Request to revoke an invite code.
+message RevokeInviteCodeRequest {
+  // The invite code to revoke (URL-safe, 16-32 characters).
+  string code = 1;
+}
+
+// Response after revoking an invite code.
+message RevokeInviteCodeResponse {
+  // Always true if the operation succeeded (including if already revoked).
+  bool success = 1;
+}
