@@ -647,6 +647,30 @@ impl StorageFacade {
             .await
     }
 
+    /// List all members with optional filtering (Phase 4).
+    ///
+    /// Returns unified member information including identity and status.
+    pub async fn list_all_members(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        limit: usize,
+        page_token: Option<String>,
+        filter_source: Option<&str>,
+        filter_status: Option<&str>,
+    ) -> Result<(Vec<crate::storage::MemberInfo>, Option<String>, u32), StorageError> {
+        self.pending_members
+            .list_all_members(
+                tenant,
+                group_id,
+                limit,
+                page_token,
+                filter_source,
+                filter_status,
+            )
+            .await
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Key blob methods
     // ─────────────────────────────────────────────────────────────────────────

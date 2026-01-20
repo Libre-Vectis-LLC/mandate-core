@@ -1,7 +1,8 @@
 /// In-memory pending member storage.
+use crate::event::MemberIdentity;
 use crate::ids::{GroupId, MasterPublicKey, TenantId};
 use crate::storage::{
-    NotFound, PendingMember, PendingMemberStatus, PendingMemberStore, StorageError,
+    MemberInfo, NotFound, PendingMember, PendingMemberStatus, PendingMemberStore, StorageError,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -275,5 +276,67 @@ impl PendingMemberStore for InMemoryPendingMembers {
         list.push(record);
 
         Ok((pending_id, group_id))
+    }
+
+    async fn list_all_members(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        limit: usize,
+        _page_token: Option<String>,
+        filter_source: Option<&str>,
+        filter_status: Option<&str>,
+    ) -> Result<(Vec<MemberInfo>, Option<String>, u32), StorageError> {
+        let map = self.members.lock();
+        if let Some(list) = map.get(&(tenant, group_id)) {
+            // Apply filters
+            let status_filter = filter_status.unwrap_or("approved");
+            let filtered: Vec<_> = list
+                .iter()
+                .filter(|record| {
+                    // Status filter
+                    let status_match = record.status.as_str() == status_filter;
+
+                    // Source filter (inmemory doesn't store source, so we simulate based on tg_user_id)
+                    let source_match = if let Some(source) = filter_source {
+                        match source {
+                            "telegram" => !record.member.tg_user_id.is_empty(),
+                            "standalone" => record.member.tg_user_id.is_empty(),
+                            _ => true,
+                        }
+                    } else {
+                        true
+                    };
+
+                    status_match && source_match
+                })
+                .take(limit)
+                .collect();
+
+            let total_count = filtered.len() as u32;
+
+            let members: Vec<MemberInfo> = filtered
+                .into_iter()
+                .map(|record| {
+                    // Construct identity based on whether tg_user_id is present
+                    let identity = if !record.member.tg_user_id.is_empty() {
+                        MemberIdentity::telegram(record.member.tg_user_id.clone(), None)
+                    } else {
+                        MemberIdentity::standalone(record.member.pending_id.clone(), None, None)
+                    };
+
+                    MemberInfo {
+                        nazgul_pub: record.member.nazgul_pub,
+                        identity,
+                        status: record.status.as_str().to_string(),
+                        joined_at_ms: record.member.submitted_at_ms,
+                    }
+                })
+                .collect();
+
+            Ok((members, None, total_count))
+        } else {
+            Ok((Vec::new(), None, 0))
+        }
     }
 }

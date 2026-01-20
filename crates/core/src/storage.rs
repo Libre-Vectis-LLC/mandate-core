@@ -1033,6 +1033,16 @@ impl PendingMemberStatus {
     }
 }
 
+/// Phase 4: Complete member information including identity and status.
+/// This struct is returned by `list_all_members` for unified member listing.
+#[derive(Clone, Debug)]
+pub struct MemberInfo {
+    pub nazgul_pub: MasterPublicKey,
+    pub identity: crate::event::MemberIdentity,
+    pub status: String, // "pending", "approved", "banned"
+    pub joined_at_ms: i64,
+}
+
 #[derive(Clone, Debug)]
 pub struct PendingMember {
     pub pending_id: String,
@@ -1166,4 +1176,37 @@ pub trait PendingMemberStore {
         display_name: Option<String>,
         organization_id: Option<String>,
     ) -> Result<(String, GroupId), StorageError>;
+
+    /// List all members in a group with optional filtering (Phase 4).
+    ///
+    /// This method returns unified member information including identity and status,
+    /// supporting both Telegram and Standalone members.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `group_id` - The group identifier
+    /// * `limit` - Maximum number of members to return
+    /// * `page_token` - Optional continuation token from a previous call
+    /// * `filter_source` - Optional filter by identity source
+    /// * `filter_status` - Optional filter by status (if None, returns only "approved")
+    ///
+    /// # Returns
+    /// A tuple of `(members, next_page_token, total_count)` where `next_page_token` is `None`
+    /// if no more results exist. `total_count` is the total number of members matching criteria.
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Invariants
+    /// * Results are ordered by `submitted_at_ms` (oldest first)
+    /// * If `filter_status` is None, only approved members are returned (backward compatibility)
+    async fn list_all_members(
+        &self,
+        tenant: TenantId,
+        group_id: GroupId,
+        limit: usize,
+        page_token: Option<String>,
+        filter_source: Option<&str>,
+        filter_status: Option<&str>,
+    ) -> Result<(Vec<MemberInfo>, Option<String>, u32), StorageError>;
 }
