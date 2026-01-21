@@ -94,6 +94,27 @@ service EventService {
   // - PERMISSION_DENIED: invalid poll_key
   // - INVALID_ARGUMENT: malformed group_id or event_ulid
   rpc GetPollResults (GetPollResultsRequest) returns (GetPollResultsResponse);
+
+  // GetPollBundle fetches complete poll data for external audit.
+  //
+  // Returns the complete poll event, all vote events, and cryptographic metadata
+  // needed for independent verification. This enables external auditors to verify
+  // ring signatures and vote tallying without trusting the server.
+  //
+  // ## Authentication
+  // Requires the poll_key (same as GetPollResults). The poll_key serves as a
+  // capability token - anyone with this key can download the complete bundle.
+  //
+  // ## Use Cases
+  // - External cryptographic verification of poll results
+  // - Archival and offline analysis
+  // - Independent auditing by third parties
+  //
+  // ## Errors
+  // - NOT_FOUND: event_ulid doesn't exist or is not a poll event
+  // - PERMISSION_DENIED: invalid poll_key
+  // - INVALID_ARGUMENT: malformed group_id or event_ulid
+  rpc GetPollBundle (GetPollBundleRequest) returns (GetPollBundleResponse);
 }
 
 // Request to push a signed event.
@@ -239,4 +260,71 @@ message PollOption {
 
   // Number of votes received for this option.
   uint32 vote_count = 3;
+}
+
+// Request to download complete poll bundle for external audit.
+message GetPollBundleRequest {
+  // Group ID (ULID format) containing the poll event.
+  string group_id = 1;
+
+  // Event ID (ULID format) of the poll to download bundle for.
+  Ulid event_ulid = 2;
+
+  // Capability token for bundle access (derived from creator's shared secret).
+  // Same authentication as GetPollResults.
+  string poll_key = 3;
+}
+
+// Response containing complete poll data for external verification.
+message GetPollBundleResponse {
+  // Group ID (ULID format).
+  string group_id = 1;
+
+  // Poll event ID (ULID format).
+  string poll_id = 2;
+
+  // Poll event ULID in string format.
+  string poll_event_ulid = 3;
+
+  // SHA3-256 hash of the poll event (hex-encoded).
+  string poll_hash_hex = 4;
+
+  // Ring hash at poll creation time (hex-encoded).
+  string ring_hash_hex = 5;
+
+  // Poll access key (hex-encoded, for re-verification).
+  string poll_key_hex = 6;
+
+  // Poll key in age-secret format (for decryption tools).
+  string poll_key_age_secret = 7;
+
+  // Total number of votes in this bundle.
+  uint32 vote_count = 8;
+
+  // Canonical poll event bytes (same format as PushEventRequest).
+  bytes poll_event_bytes = 9;
+
+  // JSON representation of poll event (for human readability).
+  string poll_event_json = 10;
+
+  // All vote events for this poll, ordered by sequence number.
+  repeated PollVoteData votes = 11;
+}
+
+// Single vote event data within a poll bundle.
+message PollVoteData {
+  // Vote event ID (ULID format).
+  string event_ulid = 1;
+
+  // Sequence number of this vote event in the group.
+  int64 sequence_no = 2;
+
+  // Key image from ring signature (hex-encoded, for double-vote detection).
+  string key_image_hex = 3;
+
+  // Canonical vote event bytes.
+  bytes event_bytes = 4;
+
+  // JSON representation of vote event (for human readability).
+  string event_json = 5;
 }
