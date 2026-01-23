@@ -8,6 +8,7 @@
 //!   `(master_pubkey, created_at)`, keyset pagination.
 
 pub mod facade;
+pub use facade::{StorageFacade, StorageFacadeBuilder, StorageFacadeBuilderError};
 
 pub mod billing;
 pub mod event;
