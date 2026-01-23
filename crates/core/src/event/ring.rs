@@ -113,3 +113,199 @@ pub enum RingOperation {
         public_key: MasterPublicKey,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to create a test public key
+    fn test_public_key() -> MasterPublicKey {
+        MasterPublicKey([1u8; 32])
+    }
+
+    /// Helper to create a second test public key (different from first)
+    fn test_public_key_2() -> MasterPublicKey {
+        MasterPublicKey([2u8; 32])
+    }
+
+    #[test]
+    fn test_ring_operation_old_format_deserialize() {
+        // Old format: AddMember without identity field
+        let old_json = r#"{
+            "AddMember": {
+                "public_key": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+            }
+        }"#;
+
+        let operation: RingOperation =
+            serde_json::from_str(old_json).expect("Should deserialize old format successfully");
+
+        match operation {
+            RingOperation::AddMember {
+                public_key,
+                identity,
+            } => {
+                assert_eq!(public_key, test_public_key());
+                // Should default to legacy identity
+                assert_eq!(identity, MemberIdentity::legacy());
+                assert_eq!(identity.source, IdentitySource::Telegram);
+                assert!(identity.external_id.is_none());
+                assert!(identity.display_name.is_none());
+                assert!(identity.organization_id.is_none());
+                assert!(identity.credential_ref.is_none());
+            }
+            _ => panic!("Expected AddMember variant"),
+        }
+    }
+
+    #[test]
+    fn test_ring_operation_new_format_roundtrip() {
+        // Test Telegram identity
+        let telegram_op = RingOperation::AddMember {
+            public_key: test_public_key(),
+            identity: MemberIdentity::telegram("123456789", Some("alice".to_string())),
+        };
+
+        let json = serde_json::to_string(&telegram_op).expect("Should serialize");
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("Should deserialize");
+        assert_eq!(telegram_op, deserialized);
+
+        // Test Standalone identity
+        let standalone_op = RingOperation::AddMember {
+            public_key: test_public_key_2(),
+            identity: MemberIdentity::standalone(
+                "01HN12J345678M9ABCDEFGHJK0".to_string(),
+                Some("Bob".to_string()),
+                Some("org_123".to_string()),
+            ),
+        };
+
+        let json = serde_json::to_string(&standalone_op).expect("Should serialize");
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("Should deserialize");
+        assert_eq!(standalone_op, deserialized);
+
+        // Verify identity fields are preserved
+        if let RingOperation::AddMember { identity, .. } = deserialized {
+            assert_eq!(identity.source, IdentitySource::Standalone);
+            assert_eq!(
+                identity.external_id,
+                Some("01HN12J345678M9ABCDEFGHJK0".to_string())
+            );
+            assert_eq!(identity.display_name, Some("Bob".to_string()));
+            assert_eq!(identity.organization_id, Some("org_123".to_string()));
+        } else {
+            panic!("Expected AddMember variant");
+        }
+    }
+
+    #[test]
+    fn test_ring_operation_identity_serializes_all_fields() {
+        // Create identity with all fields including credential_ref
+        let credential = CredentialRef {
+            credential_id: "01HN12J345678M9ABCDEFGHJK0".to_string(),
+            credential_type: "government_id".to_string(),
+            verified_at: 1704067200000, // 2024-01-01 00:00:00 UTC
+        };
+
+        let mut identity = MemberIdentity::standalone(
+            "01HN12J345678M9ABCDEFGHJK1".to_string(),
+            Some("Carol".to_string()),
+            Some("org_456".to_string()),
+        );
+        identity.credential_ref = Some(credential.clone());
+
+        let operation = RingOperation::AddMember {
+            public_key: test_public_key(),
+            identity: identity.clone(),
+        };
+
+        let json = serde_json::to_string_pretty(&operation).expect("Should serialize");
+
+        // Verify all fields are present in JSON
+        assert!(json.contains("\"external_id\""));
+        assert!(json.contains("\"01HN12J345678M9ABCDEFGHJK1\""));
+        assert!(json.contains("\"display_name\""));
+        assert!(json.contains("\"Carol\""));
+        assert!(json.contains("\"organization_id\""));
+        assert!(json.contains("\"org_456\""));
+        assert!(json.contains("\"credential_ref\""));
+        assert!(json.contains("\"credential_id\""));
+        assert!(json.contains("\"01HN12J345678M9ABCDEFGHJK0\""));
+        assert!(json.contains("\"credential_type\""));
+        assert!(json.contains("\"government_id\""));
+        assert!(json.contains("\"verified_at\""));
+        assert!(json.contains("1704067200000"));
+        assert!(json.contains("\"source\""));
+        assert!(json.contains("\"Standalone\""));
+
+        // Roundtrip test
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("Should deserialize");
+        assert_eq!(operation, deserialized);
+
+        // Verify credential_ref is preserved
+        if let RingOperation::AddMember { identity, .. } = deserialized {
+            assert!(identity.credential_ref.is_some());
+            let cred = identity.credential_ref.unwrap();
+            assert_eq!(cred.credential_id, credential.credential_id);
+            assert_eq!(cred.credential_type, credential.credential_type);
+            assert_eq!(cred.verified_at, credential.verified_at);
+        } else {
+            panic!("Expected AddMember variant");
+        }
+    }
+
+    #[test]
+    fn test_remove_member_unchanged() {
+        // RemoveMember should work as before (no identity field)
+        let operation = RingOperation::RemoveMember {
+            public_key: test_public_key(),
+        };
+
+        let json = serde_json::to_string(&operation).expect("Should serialize");
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("Should deserialize");
+
+        assert_eq!(operation, deserialized);
+
+        // Verify it only has public_key field
+        assert!(json.contains("\"RemoveMember\""));
+        assert!(json.contains("\"public_key\""));
+        assert!(!json.contains("\"identity\""));
+    }
+
+    #[test]
+    fn test_identity_source_variants() {
+        // Test all IdentitySource variants serialize/deserialize correctly
+        let telegram = IdentitySource::Telegram;
+        let standalone = IdentitySource::Standalone;
+        let other = IdentitySource::Other("github".to_string());
+
+        let telegram_json = serde_json::to_string(&telegram).expect("Should serialize");
+        let standalone_json = serde_json::to_string(&standalone).expect("Should serialize");
+        let other_json = serde_json::to_string(&other).expect("Should serialize");
+
+        assert_eq!(telegram_json, "\"Telegram\"");
+        assert_eq!(standalone_json, "\"Standalone\"");
+        assert!(other_json.contains("\"Other\""));
+        assert!(other_json.contains("\"github\""));
+
+        // Roundtrip
+        let deserialized: IdentitySource =
+            serde_json::from_str(&telegram_json).expect("Should deserialize");
+        assert_eq!(deserialized, telegram);
+
+        let deserialized: IdentitySource =
+            serde_json::from_str(&standalone_json).expect("Should deserialize");
+        assert_eq!(deserialized, standalone);
+
+        let deserialized: IdentitySource =
+            serde_json::from_str(&other_json).expect("Should deserialize");
+        assert_eq!(deserialized, other);
+    }
+
+    #[test]
+    fn test_member_identity_default() {
+        // Test that IdentitySource::Telegram is the default
+        let identity: IdentitySource = Default::default();
+        assert_eq!(identity, IdentitySource::Telegram);
+    }
+}
