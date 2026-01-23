@@ -776,4 +776,167 @@ mod tests {
             _ => panic!("expected AddMember"),
         }
     }
+
+    #[test]
+    fn test_ring_update_signature_covers_identity_field() {
+        // Test that changing identity field invalidates the signature
+        // This ensures the signature covers the identity field and prevents tampering
+
+        let (signer, ring) = make_ring(3);
+        let group = test_group_id();
+        let ring_hash = ring_hash_sha3_256(&ring);
+
+        let identity1 = MemberIdentity::telegram("12345".to_string(), Some("alice".to_string()));
+        let identity2 = MemberIdentity::standalone(
+            "user789".to_string(),
+            Some("bob".to_string()),
+            Some("ORG001".to_string()),
+        );
+
+        // Create event with identity1 and sign it
+        let mut event = Event {
+            event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
+            previous_event_hash: EventId([0u8; 32]),
+            group_id: group,
+            sequence_no: None,
+            processed_at: 100,
+            serialization_version: 1,
+            event_type: EventType::RingUpdate(RingUpdate {
+                group_id: group,
+                ring_hash,
+                operations: vec![RingOperation::AddMember {
+                    public_key: MasterPublicKey([42u8; 32]),
+                    identity: identity1,
+                }],
+            }),
+            signature: None,
+        };
+
+        // Sign the event with identity1
+        let signing_bytes = event.to_signing_bytes().expect("signing bytes");
+        let sig = sign_contextual(
+            SignatureKind::Authoritative,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            &signing_bytes,
+        )
+        .expect("sign event");
+        event.signature = Some(sig.clone());
+
+        // Modify the identity to identity2
+        if let EventType::RingUpdate(ref mut ru) = event.event_type {
+            ru.operations[0] = RingOperation::AddMember {
+                public_key: MasterPublicKey([42u8; 32]),
+                identity: identity2,
+            };
+        }
+
+        // Verify that the signature is now invalid for the modified event
+        let modified_signing_bytes = event.to_signing_bytes().expect("modified signing bytes");
+        let verification_result = sig.verify(Some(&ring), &modified_signing_bytes);
+
+        assert!(
+            verification_result.is_ok() && !verification_result.unwrap(),
+            "Signature should be invalid after identity modification (signature must cover identity field)"
+        );
+    }
+
+    #[test]
+    fn test_ring_update_signature_covers_identity_changes() {
+        // Test that modifying different fields of identity invalidates the signature
+        // This is a more granular test to ensure all identity fields are covered
+
+        let (signer, ring) = make_ring(3);
+        let group = test_group_id();
+        let ring_hash = ring_hash_sha3_256(&ring);
+
+        let base_identity = MemberIdentity::standalone(
+            "user123".to_string(),
+            Some("Alice".to_string()),
+            Some("ORG001".to_string()),
+        );
+
+        let create_event = |identity: MemberIdentity| -> Event {
+            Event {
+                event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
+                previous_event_hash: EventId([0u8; 32]),
+                group_id: group,
+                sequence_no: None,
+                processed_at: 100,
+                serialization_version: 1,
+                event_type: EventType::RingUpdate(RingUpdate {
+                    group_id: group,
+                    ring_hash,
+                    operations: vec![RingOperation::AddMember {
+                        public_key: MasterPublicKey([42u8; 32]),
+                        identity,
+                    }],
+                }),
+                signature: None,
+            }
+        };
+
+        // Create and sign the base event
+        let base_event = create_event(base_identity.clone());
+        let base_bytes = base_event.to_signing_bytes().expect("base signing bytes");
+        let base_sig = sign_contextual(
+            SignatureKind::Authoritative,
+            StorageMode::Compact,
+            &signer,
+            &ring,
+            &base_bytes,
+        )
+        .expect("sign base event");
+
+        // Test 1: Change external_id
+        let mut modified = base_identity.clone();
+        modified.external_id = Some("different_id".to_string());
+        let modified_event = create_event(modified);
+        let modified_bytes = modified_event
+            .to_signing_bytes()
+            .expect("modified external_id");
+        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        assert!(
+            result.is_ok() && !result.unwrap(),
+            "Signature should be invalid after changing external_id"
+        );
+
+        // Test 2: Change display_name
+        let mut modified = base_identity.clone();
+        modified.display_name = Some("Bob".to_string());
+        let modified_event = create_event(modified);
+        let modified_bytes = modified_event
+            .to_signing_bytes()
+            .expect("modified display_name");
+        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        assert!(
+            result.is_ok() && !result.unwrap(),
+            "Signature should be invalid after changing display_name"
+        );
+
+        // Test 3: Change organization_id
+        let mut modified = base_identity.clone();
+        modified.organization_id = Some("ORG999".to_string());
+        let modified_event = create_event(modified);
+        let modified_bytes = modified_event
+            .to_signing_bytes()
+            .expect("modified organization_id");
+        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        assert!(
+            result.is_ok() && !result.unwrap(),
+            "Signature should be invalid after changing organization_id"
+        );
+
+        // Test 4: Change source
+        let mut modified = base_identity.clone();
+        modified.source = IdentitySource::Telegram;
+        let modified_event = create_event(modified);
+        let modified_bytes = modified_event.to_signing_bytes().expect("modified source");
+        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        assert!(
+            result.is_ok() && !result.unwrap(),
+            "Signature should be invalid after changing source"
+        );
+    }
 }
