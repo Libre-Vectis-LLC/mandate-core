@@ -84,6 +84,26 @@ service InviteService {
   // - NOT_FOUND: code doesn't exist
   // - PERMISSION_DENIED: caller is not a tenant admin
   rpc RevokeInviteCode(RevokeInviteCodeRequest) returns (RevokeInviteCodeResponse);
+
+  // RegisterWithInviteCode creates a new member using an invite code.
+  //
+  // This is the final step in the standalone registration flow.
+  // The invite code is validated and its usage count is incremented.
+  // A new member is created in PENDING status awaiting admin approval.
+  //
+  // ## Validation
+  // The invite code must be:
+  // - Valid (is_active = true)
+  // - Not expired (current time <= expires_at)
+  // - Not exhausted (current_uses < max_uses)
+  //
+  // ## Errors
+  // - NOT_FOUND: invite code doesn't exist
+  // - FAILED_PRECONDITION: invite code is invalid (expired/exhausted/revoked)
+  // - INVALID_ARGUMENT: display_name or organization_id validation failed
+  // - ALREADY_EXISTS: member with same organization_id already exists in group
+  // - INTERNAL: database error or member creation failure
+  rpc RegisterWithInviteCode(RegisterWithInviteCodeRequest) returns (RegisterWithInviteCodeResponse);
 }
 
 // Request to create a new invite code.
@@ -219,4 +239,32 @@ message RevokeInviteCodeRequest {
 message RevokeInviteCodeResponse {
   // Always true if the operation succeeded (including if already revoked).
   bool success = 1;
+}
+
+// Request to register a new member using an invite code.
+message RegisterWithInviteCodeRequest {
+  // The invite code to use for registration (URL-safe, 16-32 characters).
+  string invite_code = 1;
+
+  // Optional display name for the new member.
+  // If not provided, a default display name may be assigned.
+  // Maximum length: 255 characters.
+  optional string display_name = 2;
+
+  // Optional organization identifier for the new member.
+  // Used for tracking purposes or mapping to external systems.
+  // Maximum length: 255 characters.
+  optional string organization_id = 3;
+}
+
+// Response after successfully registering with an invite code.
+message RegisterWithInviteCodeResponse {
+  // Newly created member ID (ULID format).
+  string member_id = 1;
+
+  // Group ID (ULID format) the member was added to.
+  string group_id = 2;
+
+  // Current member status (typically "pending" awaiting admin approval).
+  string status = 3;
 }

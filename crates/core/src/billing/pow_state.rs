@@ -25,7 +25,7 @@
 //!
 //! Each strategy supports linear or exponential growth modes.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::VecDeque;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -33,6 +33,34 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_arch = "wasm32")]
 use js_sys;
+
+/// Default maximum POW multiplier to prevent unbounded difficulty growth.
+const DEFAULT_MAX_MULTIPLIER: f64 = 1000.0;
+
+/// Provides default value for max_multiplier field.
+fn default_max_multiplier() -> f64 {
+    DEFAULT_MAX_MULTIPLIER
+}
+
+/// Normalizes max_multiplier: treats 0 or negative as default.
+fn normalize_max_multiplier(value: f64) -> f64 {
+    if value <= 0.0 {
+        DEFAULT_MAX_MULTIPLIER
+    } else {
+        value
+    }
+}
+
+/// Custom deserializer for max_multiplier to handle backward compatibility.
+///
+/// Treats 0 or negative values as default (1000.0).
+fn deserialize_max_multiplier<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = f64::deserialize(deserializer)?;
+    Ok(normalize_max_multiplier(value))
+}
 
 /// Group POW configuration (set by group owner).
 ///
@@ -51,6 +79,7 @@ use js_sys;
 ///         growth: EscalationStrategy::Linear { step: 1.0 },
 ///     },
 ///     initial_multiplier: 3.0,
+///     max_multiplier: 1000.0,
 ///     recovery_success_count: 10,
 ///     recovery_strategy: RecoveryStrategy::Gradual { steps: 3 },
 ///     max_event_history: 1000,
@@ -65,6 +94,7 @@ use js_sys;
 ///         growth: EscalationStrategy::Linear { step: 1.0 },
 ///     },
 ///     initial_multiplier: 3.0,
+///     max_multiplier: 1000.0,
 ///     recovery_success_count: 10,
 ///     recovery_strategy: RecoveryStrategy::Immediate,
 ///     max_event_history: 1000,
@@ -79,6 +109,15 @@ pub struct GroupPowConfig {
     ///
     /// Meaning: POW cost = verification cost × initial_multiplier
     pub initial_multiplier: f64,
+
+    /// Maximum POW multiplier allowed before capping escalation (default: 1000.0).
+    ///
+    /// Prevents unbounded difficulty growth. If 0 or negative, defaults to 1000.0.
+    #[serde(
+        default = "default_max_multiplier",
+        deserialize_with = "deserialize_max_multiplier"
+    )]
+    pub max_multiplier: f64,
 
     /// Number of consecutive successes needed to recover (de-escalate or disable POW).
     pub recovery_success_count: u32,
@@ -303,6 +342,7 @@ impl Default for GroupPowConfig {
         Self {
             upgrade_strategy: UpgradeStrategy::default(),
             initial_multiplier: 3.0,
+            max_multiplier: default_max_multiplier(),
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
             max_event_history: 1000,
@@ -524,12 +564,16 @@ impl GroupPowState {
     }
 
     /// Escalates POW difficulty based on upgrade strategy's growth mode.
+    ///
+    /// The multiplier is capped at `config.max_multiplier` to prevent unbounded growth.
     fn escalate(&mut self, config: &GroupPowConfig) {
         let growth = config.upgrade_strategy.growth();
-        self.current_multiplier = match growth {
+        let new_multiplier = match growth {
             EscalationStrategy::Linear { step } => self.current_multiplier + step,
             EscalationStrategy::Exponential { base } => self.current_multiplier * base,
         };
+        // Cap at max_multiplier to prevent DoS via infinite difficulty growth
+        self.current_multiplier = new_multiplier.min(config.max_multiplier);
     }
 
     /// Recovers from POW mode based on recovery strategy.
@@ -618,6 +662,7 @@ mod tests {
                 growth: EscalationStrategy::Linear { step: 1.5 },
             },
             initial_multiplier: 3.0,
+            max_multiplier: 1000.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
             max_event_history: 1000,
@@ -648,6 +693,7 @@ mod tests {
                 growth: EscalationStrategy::Exponential { base: 2.0 },
             },
             initial_multiplier: 3.0,
+            max_multiplier: 1000.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
             max_event_history: 1000,
@@ -678,6 +724,7 @@ mod tests {
                 growth: EscalationStrategy::Linear { step: 1.0 },
             },
             initial_multiplier: 3.0,
+            max_multiplier: 1000.0,
             recovery_success_count: 2,
             recovery_strategy: RecoveryStrategy::Immediate,
             max_event_history: 1000,
@@ -711,6 +758,7 @@ mod tests {
                 growth: EscalationStrategy::Linear { step: 3.0 },
             },
             initial_multiplier: 3.0,
+            max_multiplier: 1000.0,
             recovery_success_count: 2,
             recovery_strategy: RecoveryStrategy::Gradual { steps: 3 },
             max_event_history: 1000,
@@ -780,6 +828,7 @@ mod tests {
                 growth: EscalationStrategy::Linear { step: 1.0 },
             },
             initial_multiplier: 3.0,
+            max_multiplier: 1000.0,
             recovery_success_count: 3,
             recovery_strategy: RecoveryStrategy::Immediate,
             max_event_history: 1000,
@@ -812,9 +861,80 @@ mod tests {
             }
         );
         assert_eq!(config.initial_multiplier, 3.0);
+        assert_eq!(config.max_multiplier, 1000.0);
         assert_eq!(config.recovery_success_count, 10);
         assert_eq!(config.recovery_strategy, RecoveryStrategy::Immediate);
         assert_eq!(config.max_event_history, 1000);
+    }
+
+    #[test]
+    fn test_max_multiplier_enforced() {
+        let config = GroupPowConfig {
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 1,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 100.0 },
+            },
+            initial_multiplier: 3.0,
+            max_multiplier: 50.0, // Set low cap for testing
+            recovery_success_count: 10,
+            recovery_strategy: RecoveryStrategy::Immediate,
+            max_event_history: 1000,
+        };
+
+        let mut state = GroupPowState::new();
+
+        // First failure triggers POW at initial_multiplier
+        state.on_verification_failure(&config);
+        assert!(state.pow_required);
+        assert_eq!(state.current_multiplier, 3.0);
+
+        // Second failure escalates, but should be capped at max_multiplier
+        state.on_verification_failure(&config);
+        // Without cap, would be 3.0 + 100.0 = 103.0
+        // With cap, should be limited to 50.0
+        assert_eq!(state.current_multiplier, 50.0);
+
+        // Further failures should not increase beyond cap
+        state.on_verification_failure(&config);
+        assert_eq!(state.current_multiplier, 50.0);
+    }
+
+    #[test]
+    fn test_max_multiplier_default_normalization() {
+        // Test that 0 or negative max_multiplier defaults to 1000.0
+        let json_with_zero = r#"{
+            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 3, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
+            "initial_multiplier": 3.0,
+            "max_multiplier": 0.0,
+            "recovery_success_count": 10,
+            "recovery_strategy": "Immediate",
+            "max_event_history": 1000
+        }"#;
+        let config: GroupPowConfig = serde_json::from_str(json_with_zero).unwrap();
+        assert_eq!(config.max_multiplier, 1000.0);
+
+        let json_with_negative = r#"{
+            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 3, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
+            "initial_multiplier": 3.0,
+            "max_multiplier": -5.0,
+            "recovery_success_count": 10,
+            "recovery_strategy": "Immediate",
+            "max_event_history": 1000
+        }"#;
+        let config: GroupPowConfig = serde_json::from_str(json_with_negative).unwrap();
+        assert_eq!(config.max_multiplier, 1000.0);
+
+        // Test that missing max_multiplier uses default
+        let json_without_field = r#"{
+            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 3, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
+            "initial_multiplier": 3.0,
+            "recovery_success_count": 10,
+            "recovery_strategy": "Immediate",
+            "max_event_history": 1000
+        }"#;
+        let config: GroupPowConfig = serde_json::from_str(json_without_field).unwrap();
+        assert_eq!(config.max_multiplier, 1000.0);
     }
 
     #[test]
