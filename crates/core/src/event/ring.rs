@@ -308,4 +308,123 @@ mod tests {
         let identity: IdentitySource = Default::default();
         assert_eq!(identity, IdentitySource::Telegram);
     }
+
+    #[test]
+    fn test_ring_operation_identity_affects_signature_bytes() {
+        // Create two RingOperations with same public_key but different identity fields
+        let public_key = test_public_key();
+
+        let op1 = RingOperation::AddMember {
+            public_key,
+            identity: MemberIdentity::telegram("user1", Some("alice".to_string())),
+        };
+
+        let op2 = RingOperation::AddMember {
+            public_key,
+            identity: MemberIdentity::telegram("user2", Some("bob".to_string())),
+        };
+
+        // Serialize both to JSON (which is used for signing via canonical_json)
+        let json1 = serde_json::to_string(&op1).expect("Should serialize op1");
+        let json2 = serde_json::to_string(&op2).expect("Should serialize op2");
+
+        // The serialized bytes MUST be different because identity differs
+        assert_ne!(
+            json1, json2,
+            "Different identity fields must produce different serialized bytes"
+        );
+
+        // Verify the difference is due to identity, not public_key
+        assert!(json1.contains("\"user1\""));
+        assert!(json1.contains("\"alice\""));
+        assert!(json2.contains("\"user2\""));
+        assert!(json2.contains("\"bob\""));
+    }
+
+    #[test]
+    fn test_identity_source_other_roundtrip() {
+        // Test IdentitySource::Other(String) variant roundtrip
+        let mut identity = MemberIdentity::legacy();
+        identity.source = IdentitySource::Other("custom_source".to_string());
+        identity.external_id = Some("custom_id_123".to_string());
+        identity.display_name = Some("Custom User".to_string());
+
+        let operation = RingOperation::AddMember {
+            public_key: test_public_key(),
+            identity: identity.clone(),
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&operation).expect("Should serialize");
+
+        // Verify JSON contains the custom source
+        assert!(json.contains("\"Other\""));
+        assert!(json.contains("\"custom_source\""));
+
+        // Deserialize back
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("Should deserialize");
+
+        // Verify fields match
+        if let RingOperation::AddMember {
+            identity: deserialized_identity,
+            ..
+        } = deserialized
+        {
+            assert_eq!(
+                deserialized_identity.source,
+                IdentitySource::Other("custom_source".to_string())
+            );
+            assert_eq!(
+                deserialized_identity.external_id,
+                Some("custom_id_123".to_string())
+            );
+            assert_eq!(
+                deserialized_identity.display_name,
+                Some("Custom User".to_string())
+            );
+        } else {
+            panic!("Expected AddMember variant");
+        }
+    }
+
+    #[test]
+    fn test_ring_operation_empty_optional_fields() {
+        // Create MemberIdentity with all optional fields as None
+        let identity = MemberIdentity {
+            external_id: None,
+            display_name: None,
+            organization_id: None,
+            credential_ref: None,
+            source: IdentitySource::Standalone, // Only required field
+        };
+
+        let operation = RingOperation::AddMember {
+            public_key: test_public_key(),
+            identity: identity.clone(),
+        };
+
+        // Verify serialization works
+        let json = serde_json::to_string(&operation).expect("Should serialize");
+
+        // Verify deserialization works
+        let deserialized: RingOperation = serde_json::from_str(&json).expect("Should deserialize");
+
+        // Verify comparison works (PartialEq)
+        assert_eq!(operation, deserialized);
+
+        // Verify all None fields are preserved
+        if let RingOperation::AddMember {
+            identity: deserialized_identity,
+            ..
+        } = deserialized
+        {
+            assert!(deserialized_identity.external_id.is_none());
+            assert!(deserialized_identity.display_name.is_none());
+            assert!(deserialized_identity.organization_id.is_none());
+            assert!(deserialized_identity.credential_ref.is_none());
+            assert_eq!(deserialized_identity.source, IdentitySource::Standalone);
+        } else {
+            panic!("Expected AddMember variant");
+        }
+    }
 }
