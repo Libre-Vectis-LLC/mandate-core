@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::StorageFacade;
 use crate::ids::{GroupId, Nanos, TenantId};
-use crate::storage::{BillingStore, GiftCard, IdempotencyResult, StorageError};
+use crate::storage::{BillingStore, GiftCard, IdempotencyResult, StorageError, TenantBalanceInfo};
 
 impl StorageFacade {
     // ─────────────────────────────────────────────────────────────────────────
@@ -56,8 +56,11 @@ impl StorageFacade {
         self.billing.get_group_balance(group_id).await
     }
 
-    /// Retrieve the current balance for a tenant.
-    pub async fn get_tenant_balance(&self, tenant: TenantId) -> Result<Nanos, StorageError> {
+    /// Retrieve the current balance for a tenant with metadata.
+    pub async fn get_tenant_balance(
+        &self,
+        tenant: TenantId,
+    ) -> Result<TenantBalanceInfo, StorageError> {
         self.billing.get_tenant_balance(tenant).await
     }
 

@@ -218,18 +218,22 @@ impl BillingService for BillingServiceImpl {
                 reason: "missing x-api-token header".into(),
             })?;
 
-        let balance = self
+        let balance_info = self
             .store
             .get_tenant_balance(tenant_id)
             .await
             .map_err(to_status)?;
-        let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
-            operation: "get_tenant_balance",
-            details: "balance exceeds i64::MAX".into(),
-        })?;
+        let balance_i64 = balance_info
+            .balance
+            .try_as_i64()
+            .ok_or_else(|| RpcError::Internal {
+                operation: "get_tenant_balance",
+                details: "balance exceeds i64::MAX".into(),
+            })?;
+        let updated_at_u64 = u64::try_from(balance_info.updated_at_ms).unwrap_or(0);
         Ok(Response::new(GetTenantBalanceResponse {
             balance_nanos: balance_i64,
-            updated_at: 0, // TODO: Track actual update timestamp in storage layer
+            updated_at: updated_at_u64,
         }))
     }
 

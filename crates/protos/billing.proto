@@ -124,7 +124,7 @@ message GetTenantBalanceResponse {
   // Current tenant balance in nanoUnits.
   int64 balance_nanos = 1;
 
-  // Timestamp of last balance update (Unix seconds).
+  // Timestamp of last balance update (Unix milliseconds).
   uint64 updated_at = 2;
 }
 

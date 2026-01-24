@@ -5,6 +5,15 @@ use async_trait::async_trait;
 
 use super::types::{IdempotencyResult, StorageError};
 
+/// Tenant balance information with metadata.
+#[derive(Debug, Clone, Copy)]
+pub struct TenantBalanceInfo {
+    /// Current balance.
+    pub balance: Nanos,
+    /// Unix timestamp (milliseconds) when balance was last updated.
+    pub updated_at_ms: i64,
+}
+
 #[async_trait]
 pub trait BillingStore: Send + Sync {
     /// Credit a tenant's balance, creating the tenant record if it does not exist.
@@ -73,18 +82,19 @@ pub trait BillingStore: Send + Sync {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError>;
 
-    /// Retrieve the current balance for a tenant.
+    /// Retrieve the current balance for a tenant with metadata.
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
     ///
     /// # Returns
-    /// The tenant's current balance.
+    /// Tenant balance information including the balance and last update timestamp.
     ///
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Tenant)` - When the tenant does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn get_tenant_balance(&self, tenant: TenantId) -> Result<Nanos, StorageError>;
+    async fn get_tenant_balance(&self, tenant: TenantId)
+        -> Result<TenantBalanceInfo, StorageError>;
 
     /// Deduct funds from a group's operational budget.
     ///

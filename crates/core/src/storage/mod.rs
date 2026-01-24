@@ -37,7 +37,7 @@ pub use group::{
     GroupMetadataStore, MemberInfo, PendingMember, PendingMemberStatus, PendingMemberStore,
 };
 
-pub use billing::{BillingStore, GiftCard, GiftCardStore};
+pub use billing::{BillingStore, GiftCard, GiftCardStore, TenantBalanceInfo};
 
 pub use index::{
     BanIndex, BannedOperation, PollRingHashIndex, VoteKeyImageIndex, MAX_BANS_PER_RING_HASH,

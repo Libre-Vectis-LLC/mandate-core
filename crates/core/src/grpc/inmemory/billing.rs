@@ -11,7 +11,22 @@ use std::time::{Duration, Instant};
 
 use super::group::GroupMap;
 
-type TenantBalanceMap = HashMap<TenantId, i64>;
+/// Tenant balance record with timestamp.
+#[derive(Debug, Clone, Copy)]
+struct TenantBalance {
+    balance: i64,
+    updated_at_ms: i64,
+}
+
+type TenantBalanceMap = HashMap<TenantId, TenantBalance>;
+
+/// Get current Unix timestamp in milliseconds.
+fn current_timestamp_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before UNIX epoch")
+        .as_millis() as i64
+}
 
 /// Cached idempotency result with expiration.
 struct IdempotencyEntry {
@@ -96,11 +111,16 @@ impl BillingStore for InMemoryBilling {
         drop(tg_map); // Release lock before acquiring tenants lock
 
         let mut map = self.tenants.lock();
-        let balance = map.entry(tenant).or_insert(0);
-        *balance = balance
+        let record = map.entry(tenant).or_insert(TenantBalance {
+            balance: 0,
+            updated_at_ms: current_timestamp_ms(),
+        });
+        record.balance = record
+            .balance
             .checked_add(delta)
             .ok_or_else(|| StorageError::PreconditionFailed("balance overflow".into()))?;
-        let balance_u64 = u64::try_from(*balance)
+        record.updated_at_ms = current_timestamp_ms();
+        let balance_u64 = u64::try_from(record.balance)
             .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
         Ok(Nanos::new(balance_u64))
     }
@@ -114,8 +134,11 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
         let mut tenants = self.tenants.lock();
-        let tenant_balance = tenants.entry(tenant).or_insert(0);
-        if *tenant_balance < delta {
+        let tenant_record = tenants.entry(tenant).or_insert(TenantBalance {
+            balance: 0,
+            updated_at_ms: current_timestamp_ms(),
+        });
+        if tenant_record.balance < delta {
             return Err(StorageError::PreconditionFailed(
                 "insufficient balance".into(),
             ));
@@ -131,7 +154,8 @@ impl BillingStore for InMemoryBilling {
             ));
         }
 
-        *tenant_balance -= delta;
+        tenant_record.balance -= delta;
+        tenant_record.updated_at_ms = current_timestamp_ms();
         record.balance_nanos = record
             .balance_nanos
             .checked_add(delta)
@@ -152,14 +176,20 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
-    async fn get_tenant_balance(&self, tenant: TenantId) -> Result<Nanos, StorageError> {
+    async fn get_tenant_balance(
+        &self,
+        tenant: TenantId,
+    ) -> Result<crate::storage::TenantBalanceInfo, StorageError> {
         let tenants = self.tenants.lock();
-        let balance = *tenants
+        let record = tenants
             .get(&tenant)
             .ok_or(StorageError::NotFound(NotFound::Tenant { tenant }))?;
-        let balance_u64 = u64::try_from(balance)
+        let balance_u64 = u64::try_from(record.balance)
             .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
-        Ok(Nanos::new(balance_u64))
+        Ok(crate::storage::TenantBalanceInfo {
+            balance: Nanos::new(balance_u64),
+            updated_at_ms: record.updated_at_ms,
+        })
     }
 
     async fn deduct_group_balance(
@@ -286,12 +316,17 @@ impl BillingStore for InMemoryBilling {
 
         // Credit to tenant
         let mut tenants = self.tenants.lock();
-        let tenant_balance = tenants.entry(tenant).or_insert(0);
-        *tenant_balance = tenant_balance
+        let tenant_record = tenants.entry(tenant).or_insert(TenantBalance {
+            balance: 0,
+            updated_at_ms: current_timestamp_ms(),
+        });
+        tenant_record.balance = tenant_record
+            .balance
             .checked_add(delta)
             .ok_or_else(|| StorageError::PreconditionFailed("tenant balance overflow".into()))?;
+        tenant_record.updated_at_ms = current_timestamp_ms();
 
-        let balance_u64 = u64::try_from(*tenant_balance)
+        let balance_u64 = u64::try_from(tenant_record.balance)
             .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
         Ok(Nanos::new(balance_u64))
     }
