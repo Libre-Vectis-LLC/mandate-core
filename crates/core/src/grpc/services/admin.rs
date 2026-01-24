@@ -45,9 +45,10 @@ impl AdminService for AdminServiceImpl {
         &self,
         _request: Request<ConfigUpdateRequest>,
     ) -> Result<Response<ConfigUpdateResponse>, Status> {
-        // TODO: Implement config update logic in Phase 16
+        // Phase 16 feature: Config update logic will be implemented when runtime config
+        // hot-reload is integrated with the gRPC handlers.
         Err(Status::unimplemented(
-            "UpdateConfig not yet implemented - see Phase 16",
+            "UpdateConfig pending Phase 16 implementation",
         ))
     }
 }
