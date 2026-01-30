@@ -148,30 +148,125 @@ impl StorageService for StorageServiceImpl {
 
     async fn upload_access_token_blobs(
         &self,
-        _request: Request<UploadAccessTokenBlobsRequest>,
+        request: Request<UploadAccessTokenBlobsRequest>,
     ) -> Result<Response<UploadAccessTokenBlobsResponse>, Status> {
-        // Implemented in mandate-enterprise (requires DB storage).
-        // Core server returns unimplemented for now.
-        Err(Status::unimplemented(
-            "access token blobs managed by enterprise server",
-        ))
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+
+        if body.blobs.len() > keyblobs_max_count() {
+            return Err(RpcError::InvalidArgument {
+                field: "blobs",
+                reason: format!("too many ({} > {})", body.blobs.len(), keyblobs_max_count()),
+            }
+            .into());
+        }
+        let max_blob_bytes = keyblobs_max_blob_bytes();
+        if body
+            .blobs
+            .iter()
+            .any(|b| b.encrypted_token.len() > max_blob_bytes)
+        {
+            return Err(RpcError::InvalidArgument {
+                field: "blobs",
+                reason: format!("blob too large (max {} bytes)", max_blob_bytes),
+            }
+            .into());
+        }
+
+        let mut entries = Vec::with_capacity(body.blobs.len());
+        for blob in body.blobs {
+            let rage_pub = blob
+                .rage_pub
+                .as_ref()
+                .ok_or_else(|| RpcError::InvalidArgument {
+                    field: "rage_pub",
+                    reason: "missing in blob entry".into(),
+                })?;
+            let rage_pub = crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| {
+                RpcError::InvalidArgument {
+                    field: "rage_pub",
+                    reason: e.to_string(),
+                }
+            })?;
+            entries.push((rage_pub, blob.encrypted_token.into()));
+        }
+
+        // ring_hash is not passed in this RPC — the server determines it internally.
+        // Use a zero hash as placeholder; the storage layer records the current ring_hash.
+        let ring_hash = [0u8; 32];
+
+        self.store
+            .put_access_token_blobs(tenant, group_id, ring_hash, entries)
+            .await
+            .map_err(to_status)?;
+        Ok(Response::new(UploadAccessTokenBlobsResponse {}))
     }
 
     async fn download_my_access_token_blob(
         &self,
-        _request: Request<DownloadMyAccessTokenBlobRequest>,
+        request: Request<DownloadMyAccessTokenBlobRequest>,
     ) -> Result<Response<DownloadMyAccessTokenBlobResponse>, Status> {
-        Err(Status::unimplemented(
-            "access token blobs managed by enterprise server",
-        ))
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+        let rage_pub = body
+            .rage_pub
+            .as_ref()
+            .ok_or_else(|| RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: "missing".into(),
+            })?;
+        let rage_pub =
+            crate::proto::rage_pub_from_proto(rage_pub).map_err(|e| RpcError::InvalidArgument {
+                field: "rage_pub",
+                reason: e.to_string(),
+            })?;
+
+        let blob = self
+            .store
+            .get_access_token_blob(tenant, group_id, rage_pub)
+            .await
+            .map_err(to_status)?;
+
+        Ok(Response::new(DownloadMyAccessTokenBlobResponse {
+            encrypted_token: blob.to_vec(),
+        }))
     }
 
     async fn get_edge_access_token(
         &self,
-        _request: Request<GetEdgeAccessTokenRequest>,
+        request: Request<GetEdgeAccessTokenRequest>,
     ) -> Result<Response<GetEdgeAccessTokenResponse>, Status> {
-        Err(Status::unimplemented(
-            "edge access tokens managed by enterprise server",
-        ))
+        let tenant = extract_tenant_id(&request, &self.store).await?;
+        let body = request.into_inner();
+        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "group_id",
+                reason: e.to_string(),
+            }
+        })?);
+
+        let (current, previous, rotated_at_ms) = self
+            .store
+            .get_edge_access_token(tenant, group_id)
+            .await
+            .map_err(to_status)?;
+
+        Ok(Response::new(GetEdgeAccessTokenResponse {
+            current_token: current.to_vec(),
+            previous_token: previous.map(|t| t.to_vec()).unwrap_or_default(),
+            rotated_at_ms,
+        }))
     }
 }

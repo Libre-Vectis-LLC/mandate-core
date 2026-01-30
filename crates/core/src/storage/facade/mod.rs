@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::storage::{
-    BanIndex, BillingStore, EventReader, EventWriter, GiftCardStore, GroupMetadataStore,
-    KeyBlobStore, PendingMemberStore, PollRingHashIndex, RingView, RingWriter, TenantTokenStore,
-    VoteKeyImageIndex,
+    AccessTokenBlobStore, BanIndex, BillingStore, EdgeAccessTokenStore, EventReader, EventWriter,
+    GiftCardStore, GroupMetadataStore, KeyBlobStore, PendingMemberStore, PollRingHashIndex,
+    RingView, RingWriter, TenantTokenStore, VoteKeyImageIndex,
 };
 
 mod billing;
@@ -32,6 +32,8 @@ pub struct StorageFacade {
     pub(super) gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
     pub(super) groups: Arc<dyn GroupMetadataStore + Send + Sync>,
     pub(super) pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
+    pub(super) access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
+    pub(super) edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
 }
 
 /// Error returned when building a `StorageFacade` with missing components.
@@ -87,6 +89,8 @@ pub struct StorageFacadeBuilder {
     gift_cards: Option<Arc<dyn GiftCardStore + Send + Sync>>,
     groups: Option<Arc<dyn GroupMetadataStore + Send + Sync>>,
     pending_members: Option<Arc<dyn PendingMemberStore + Send + Sync>>,
+    access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
+    edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
 }
 
 impl StorageFacadeBuilder {
@@ -171,6 +175,24 @@ impl StorageFacadeBuilder {
         self
     }
 
+    /// Set the access token blob store (optional, enterprise-only).
+    pub fn access_token_blobs(
+        mut self,
+        store: Arc<dyn AccessTokenBlobStore + Send + Sync>,
+    ) -> Self {
+        self.access_token_blobs = Some(store);
+        self
+    }
+
+    /// Set the edge access token store (optional, enterprise-only).
+    pub fn edge_access_tokens(
+        mut self,
+        store: Arc<dyn EdgeAccessTokenStore + Send + Sync>,
+    ) -> Self {
+        self.edge_access_tokens = Some(store);
+        self
+    }
+
     /// Build the `StorageFacade`, returning an error if any required field is missing.
     pub fn build(self) -> Result<StorageFacade, StorageFacadeBuilderError> {
         Ok(StorageFacade {
@@ -213,6 +235,8 @@ impl StorageFacadeBuilder {
             pending_members: self.pending_members.ok_or(StorageFacadeBuilderError {
                 missing_field: "pending_members",
             })?,
+            access_token_blobs: self.access_token_blobs,
+            edge_access_tokens: self.edge_access_tokens,
         })
     }
 }
