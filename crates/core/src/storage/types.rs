@@ -93,6 +93,14 @@ pub enum NotFound {
     GiftCard { code: String },
     #[error("invite code {code}")]
     InviteCode { code: String },
+    #[error("access token blob for tenant {tenant:?} group {group_id:?} rage_pub {rage_pub:?}")]
+    AccessTokenBlob {
+        tenant: TenantId,
+        group_id: GroupId,
+        rage_pub: [u8; 32],
+    },
+    #[error("edge access token for tenant {tenant:?} group {group_id:?}")]
+    EdgeAccessToken { tenant: TenantId, group_id: GroupId },
 }
 
 /// Error codes for idempotency results, mapped from gRPC status codes.

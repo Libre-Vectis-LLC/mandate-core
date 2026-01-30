@@ -5,8 +5,10 @@ use crate::ids::GroupId;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
-    storage_service_server::StorageService, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse,
-    UploadKeyBlobsRequest, UploadKeyBlobsResponse,
+    storage_service_server::StorageService, DownloadMyAccessTokenBlobRequest,
+    DownloadMyAccessTokenBlobResponse, DownloadMyKeyBlobRequest, DownloadMyKeyBlobResponse,
+    GetEdgeAccessTokenRequest, GetEdgeAccessTokenResponse, UploadAccessTokenBlobsRequest,
+    UploadAccessTokenBlobsResponse, UploadKeyBlobsRequest, UploadKeyBlobsResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -142,5 +144,34 @@ impl StorageService for StorageServiceImpl {
         Ok(Response::new(DownloadMyKeyBlobResponse {
             blob: blob.to_vec(),
         }))
+    }
+
+    async fn upload_access_token_blobs(
+        &self,
+        _request: Request<UploadAccessTokenBlobsRequest>,
+    ) -> Result<Response<UploadAccessTokenBlobsResponse>, Status> {
+        // Implemented in mandate-enterprise (requires DB storage).
+        // Core server returns unimplemented for now.
+        Err(Status::unimplemented(
+            "access token blobs managed by enterprise server",
+        ))
+    }
+
+    async fn download_my_access_token_blob(
+        &self,
+        _request: Request<DownloadMyAccessTokenBlobRequest>,
+    ) -> Result<Response<DownloadMyAccessTokenBlobResponse>, Status> {
+        Err(Status::unimplemented(
+            "access token blobs managed by enterprise server",
+        ))
+    }
+
+    async fn get_edge_access_token(
+        &self,
+        _request: Request<GetEdgeAccessTokenRequest>,
+    ) -> Result<Response<GetEdgeAccessTokenResponse>, Status> {
+        Err(Status::unimplemented(
+            "edge access tokens managed by enterprise server",
+        ))
     }
 }

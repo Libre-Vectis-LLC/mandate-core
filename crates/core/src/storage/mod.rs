@@ -29,7 +29,7 @@ pub use event::{EventReader, EventStore, EventWriter};
 
 pub use ring::{RingView, RingWriter};
 
-pub use keys::KeyBlobStore;
+pub use keys::{AccessTokenBlobStore, EdgeAccessTokenStore, KeyBlobStore};
 
 pub use tenant::TenantTokenStore;
 

@@ -105,6 +105,7 @@ fn info(label: &[u8], parts: &[&[u8]]) -> Vec<u8> {
 }
 
 const KEY_BLOB_PREFIX: &[u8] = b"mandate:kshared:v1|";
+const ACCESS_TOKEN_BLOB_PREFIX: &[u8] = b"mandate:edge-access:v1|";
 
 /// Long-term master Nazgul keypair (identity), distinct from derived keys.
 #[derive(Clone, Debug)]
@@ -321,6 +322,56 @@ pub fn decrypt_shared_secret(
 
     let mut key = [0u8; 32];
     key.copy_from_slice(&plaintext[KEY_BLOB_PREFIX.len()..]);
+    Ok(key)
+}
+
+/// Encrypt an Edge access token for a specific recipient (one bucket per person).
+///
+/// Uses the same age/X25519 pattern as `encrypt_shared_secret_for_recipient`
+/// but with a distinct prefix to prevent cross-use of key blobs.
+pub fn encrypt_access_token_for_recipient(
+    token: &[u8; 32],
+    recipient: &age::x25519::Recipient,
+) -> Result<Vec<u8>, KeyManagerError> {
+    let mut plaintext = Vec::with_capacity(ACCESS_TOKEN_BLOB_PREFIX.len() + token.len());
+    plaintext.extend_from_slice(ACCESS_TOKEN_BLOB_PREFIX);
+    plaintext.extend_from_slice(token);
+
+    let recipients = [Box::new(recipient.clone()) as Box<dyn age::Recipient>];
+    let encryptor = age::Encryptor::with_recipients(recipients.iter().map(|r| r.as_ref()))
+        .expect("valid recipient");
+
+    let mut ciphertext = Vec::new();
+    {
+        let mut writer = encryptor.wrap_output(&mut ciphertext)?;
+        writer.write_all(&plaintext)?;
+        writer.finish()?;
+    }
+
+    Ok(ciphertext)
+}
+
+/// Decrypt an Edge access token blob; validates the prefix to prevent misuse.
+pub fn decrypt_access_token_blob(
+    identity: &RageIdentity,
+    blob: &[u8],
+) -> Result<[u8; 32], KeyManagerError> {
+    let decryptor = age::Decryptor::new(blob)?;
+    let mut reader = decryptor
+        .decrypt(std::iter::once(identity as &dyn age::Identity))
+        .map_err(|e| KeyManagerError::Decryption(e.to_string()))?;
+
+    let mut plaintext = Vec::new();
+    reader.read_to_end(&mut plaintext)?;
+
+    if plaintext.len() != ACCESS_TOKEN_BLOB_PREFIX.len() + 32
+        || !plaintext.starts_with(ACCESS_TOKEN_BLOB_PREFIX)
+    {
+        return Err(KeyManagerError::InvalidKeyBlob);
+    }
+
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&plaintext[ACCESS_TOKEN_BLOB_PREFIX.len()..]);
     Ok(key)
 }
 
