@@ -9,6 +9,7 @@ use super::types::StorageError;
 pub enum PendingMemberStatus {
     Pending,
     Approved,
+    Removed,
 }
 
 impl PendingMemberStatus {
@@ -16,6 +17,7 @@ impl PendingMemberStatus {
         match self {
             PendingMemberStatus::Pending => "pending",
             PendingMemberStatus::Approved => "approved",
+            PendingMemberStatus::Removed => "removed",
         }
     }
 }
