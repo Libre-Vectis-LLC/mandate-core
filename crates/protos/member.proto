@@ -101,6 +101,15 @@ service MemberService {
   // - INVALID_ARGUMENT: unsupported format or invalid field names
   // - PERMISSION_DENIED: caller is not a tenant admin
   rpc ExportMembers(ExportMembersRequest) returns (ExportMembersResponse);
+
+  // ListMemberGroups retrieves all groups that a member belongs to.
+  //
+  // This is used for wallet restore flow where the client needs to discover
+  // its group memberships by querying with its Nazgul public key.
+  //
+  // ## Errors
+  // - INVALID_ARGUMENT: malformed nazgul_pub (must be exactly 32 bytes)
+  rpc ListMemberGroups(ListMemberGroupsRequest) returns (ListMemberGroupsResponse);
 }
 
 // Request to submit a pending member.
@@ -309,4 +318,51 @@ message ExportMembersResponse {
 
   // Export timestamp (Unix milliseconds).
   uint64 exported_at = 3;
+}
+
+// =============================================================================
+// ListMemberGroups (Wallet Restore)
+// =============================================================================
+
+// Request to list all groups that a member belongs to.
+message ListMemberGroupsRequest {
+  // Member's Nazgul master public key (32 bytes).
+  bytes nazgul_pub = 1;
+
+  // Maximum number of groups to return (server may cap this).
+  uint32 limit = 2;
+
+  // Pagination cursor from previous response.
+  // Pass empty/null for first page.
+  PageToken page_token = 3;
+
+  // Optional filter by membership status.
+  // If not specified, returns only "approved" members.
+  // Possible values: "pending", "approved", "removed", "banned"
+  optional string filter_status = 4;
+}
+
+// Summary of a member's group membership.
+message GroupMembership {
+  // Group ID (ULID format).
+  string group_id = 1;
+
+  // Unix timestamp in milliseconds when the member joined.
+  int64 joined_at = 2;
+
+  // Membership status: "pending", "approved", "removed", "banned"
+  string status = 3;
+}
+
+// Response containing list of groups.
+message ListMemberGroupsResponse {
+  // List of groups the member belongs to.
+  repeated GroupMembership groups = 1;
+
+  // Pagination cursor for next page.
+  // Empty if no more pages.
+  PageToken next_page_token = 2;
+
+  // Total count of groups matching criteria.
+  uint32 total_count = 3;
 }

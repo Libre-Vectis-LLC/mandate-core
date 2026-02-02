@@ -136,4 +136,27 @@ impl StorageFacade {
             )
             .await
     }
+
+    /// List all groups that a member belongs to, by their Nazgul public key.
+    ///
+    /// Used for wallet restore flow to discover group memberships.
+    pub async fn list_groups_for_member(
+        &self,
+        tenant: TenantId,
+        nazgul_pub: &[u8],
+        limit: usize,
+        page_token: Option<String>,
+        filter_status: Option<&str>,
+    ) -> Result<
+        (
+            Vec<crate::storage::GroupMembershipInfo>,
+            Option<String>,
+            u32,
+        ),
+        StorageError,
+    > {
+        self.pending_members
+            .list_groups_for_member(tenant, nazgul_pub, limit, page_token, filter_status)
+            .await
+    }
 }

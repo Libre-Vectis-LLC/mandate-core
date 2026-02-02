@@ -32,6 +32,15 @@ pub struct MemberInfo {
     pub joined_at_ms: i64,
 }
 
+/// Summary of a member's group membership.
+/// This struct is returned by `list_groups_for_member` for wallet restore flow.
+#[derive(Clone, Debug)]
+pub struct GroupMembershipInfo {
+    pub group_id: GroupId,
+    pub joined_at_ms: i64,
+    pub status: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct PendingMember {
     pub pending_id: String,
@@ -274,4 +283,35 @@ pub trait PendingMemberStore {
         filter_source: Option<&str>,
         filter_status: Option<&str>,
     ) -> Result<(Vec<MemberInfo>, Option<String>, u32), StorageError>;
+
+    /// List all groups that a member belongs to, by their Nazgul public key.
+    ///
+    /// This method is used for wallet restore flow where the client needs to discover
+    /// its group memberships after recovering from a seed phrase.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `nazgul_pub` - The member's Nazgul master public key (32 bytes)
+    /// * `limit` - Maximum number of groups to return
+    /// * `page_token` - Optional continuation token from a previous call
+    /// * `filter_status` - Optional filter by membership status (if None, returns only "approved")
+    ///
+    /// # Returns
+    /// A tuple of `(groups, next_page_token, total_count)` where `next_page_token` is `None`
+    /// if no more results exist. `total_count` is the total number of groups matching criteria.
+    ///
+    /// # Errors
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    ///
+    /// # Invariants
+    /// * Results are ordered by `joined_at_ms` (oldest first)
+    /// * If `filter_status` is None, only approved memberships are returned
+    async fn list_groups_for_member(
+        &self,
+        tenant: TenantId,
+        nazgul_pub: &[u8],
+        limit: usize,
+        page_token: Option<String>,
+        filter_status: Option<&str>,
+    ) -> Result<(Vec<GroupMembershipInfo>, Option<String>, u32), StorageError>;
 }

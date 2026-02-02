@@ -2,7 +2,8 @@
 use crate::event::MemberIdentity;
 use crate::ids::{GroupId, MasterPublicKey, TenantId};
 use crate::storage::{
-    MemberInfo, NotFound, PendingMember, PendingMemberStatus, PendingMemberStore, StorageError,
+    GroupMembershipInfo, MemberInfo, NotFound, PendingMember, PendingMemberStatus,
+    PendingMemberStore, StorageError,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -338,5 +339,49 @@ impl PendingMemberStore for InMemoryPendingMembers {
         } else {
             Ok((Vec::new(), None, 0))
         }
+    }
+
+    async fn list_groups_for_member(
+        &self,
+        tenant: TenantId,
+        nazgul_pub: &[u8],
+        limit: usize,
+        _page_token: Option<String>,
+        filter_status: Option<&str>,
+    ) -> Result<(Vec<GroupMembershipInfo>, Option<String>, u32), StorageError> {
+        let members = self.members.lock();
+
+        let status_filter = filter_status.unwrap_or("approved");
+
+        let mut results = Vec::new();
+
+        // Iterate all (tenant, group_id) pairs
+        for ((t, g), records) in members.iter() {
+            // Skip if tenant doesn't match
+            if *t != tenant {
+                continue;
+            }
+
+            // Check if this group contains a member with matching nazgul_pub and status
+            for record in records {
+                if record.member.nazgul_pub.0.as_slice() == nazgul_pub
+                    && record.status.as_str() == status_filter
+                {
+                    results.push(GroupMembershipInfo {
+                        group_id: *g,
+                        joined_at_ms: record.member.submitted_at_ms,
+                        status: record.status.as_str().to_string(),
+                    });
+                    break; // One match per group is enough
+                }
+            }
+        }
+
+        // Sort by joined_at_ms (oldest first) for deterministic ordering
+        results.sort_by_key(|r| r.joined_at_ms);
+
+        let total = results.len() as u32;
+        results.truncate(limit);
+        Ok((results, None, total))
     }
 }

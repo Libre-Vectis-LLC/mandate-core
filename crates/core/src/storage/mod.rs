@@ -34,7 +34,8 @@ pub use keys::{AccessTokenBlobStore, EdgeAccessTokenStore, KeyBlobStore};
 pub use tenant::TenantTokenStore;
 
 pub use group::{
-    GroupMetadataStore, MemberInfo, PendingMember, PendingMemberStatus, PendingMemberStore,
+    GroupMembershipInfo, GroupMetadataStore, MemberInfo, PendingMember, PendingMemberStatus,
+    PendingMemberStore,
 };
 
 pub use billing::{BillingStore, GiftCard, GiftCardStore, TenantBalanceInfo};
