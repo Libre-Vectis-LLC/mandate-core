@@ -82,11 +82,32 @@ pub(crate) fn clamp_ring_limit(client_limit: u32) -> usize {
 
 pub(crate) fn to_status(err: crate::storage::StorageError) -> Status {
     match err {
-        crate::storage::StorageError::NotFound(not_found) => RpcError::NotFound {
-            resource: "storage_item",
-            id: not_found.to_string(),
+        crate::storage::StorageError::NotFound(not_found) => {
+            // Never return internal debug identifiers (tenant/group/key bytes) to callers.
+            // Keep user-facing errors stable and non-enumerable.
+            let (resource, id) = match not_found {
+                crate::storage::NotFound::Event { .. } => ("event", "not found"),
+                crate::storage::NotFound::Tenant { .. } => ("tenant", "not found"),
+                crate::storage::NotFound::Group { .. } => ("group", "not found"),
+                crate::storage::NotFound::Tail { .. } => ("event_tail", "not found"),
+                crate::storage::NotFound::Ring { .. } => ("ring", "not found"),
+                crate::storage::NotFound::RingDeltaPath { .. } => ("ring_delta_path", "not found"),
+                crate::storage::NotFound::KeyBlob { .. } => ("key_blob", "not found"),
+                crate::storage::NotFound::GiftCard { .. } => ("gift_card", "not found"),
+                crate::storage::NotFound::InviteCode { .. } => ("invite_code", "not found"),
+                crate::storage::NotFound::AccessTokenBlob { .. } => {
+                    ("access_token_blob", "not found")
+                }
+                crate::storage::NotFound::EdgeAccessToken { .. } => {
+                    ("edge_access_token", "not found")
+                }
+            };
+            RpcError::NotFound {
+                resource,
+                id: id.into(),
+            }
+            .into()
         }
-        .into(),
         crate::storage::StorageError::Backend(msg) => RpcError::Internal {
             operation: "storage_backend",
             details: msg,
@@ -341,5 +362,23 @@ mod tests {
         let err = services.event.push_event(req).await.expect_err("reject");
         assert_eq!(err.code(), Code::InvalidArgument);
         assert!(err.message().contains("message_content"));
+    }
+
+    #[test]
+    fn to_status_not_found_does_not_leak_internal_ids() {
+        use crate::ids::{GroupId, TenantId, Ulid};
+        use crate::storage::{NotFound, StorageError};
+
+        let status = to_status(StorageError::NotFound(NotFound::KeyBlob {
+            tenant: TenantId(Ulid::new()),
+            group_id: GroupId(Ulid::new()),
+            rage_pub: [7u8; 32],
+        }));
+
+        assert_eq!(status.code(), Code::NotFound);
+        assert!(status.message().contains("key_blob not found"));
+        assert!(!status.message().contains("TenantId"));
+        assert!(!status.message().contains("GroupId"));
+        assert!(!status.message().contains("rage_pub"));
     }
 }
