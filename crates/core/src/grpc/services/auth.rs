@@ -10,6 +10,16 @@ use tonic::{Request, Response, Status};
 
 use super::to_status;
 
+fn ensure_payments_enabled() -> Result<(), Status> {
+    if cfg!(feature = "payments") {
+        Ok(())
+    } else {
+        Err(Status::unimplemented(
+            "payment features are disabled; rebuild with --features payments",
+        ))
+    }
+}
+
 #[derive(Clone)]
 pub struct AuthServiceImpl {
     store: StorageFacade,
@@ -27,6 +37,7 @@ impl AuthService for AuthServiceImpl {
         &self,
         request: Request<RedeemGiftCardRequest>,
     ) -> Result<Response<RedeemGiftCardResponse>, Status> {
+        ensure_payments_enabled()?;
         let body = request.into_inner();
 
         let existing = self

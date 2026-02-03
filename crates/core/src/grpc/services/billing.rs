@@ -49,6 +49,16 @@ fn storage_error_to_idempotency(err: &crate::storage::StorageError) -> Idempoten
     }
 }
 
+fn ensure_payments_enabled() -> Result<(), Status> {
+    if cfg!(feature = "payments") {
+        Ok(())
+    } else {
+        Err(Status::unimplemented(
+            "payment features are disabled; rebuild with --features payments",
+        ))
+    }
+}
+
 #[derive(Clone)]
 pub struct BillingServiceImpl {
     store: StorageFacade,
@@ -76,6 +86,7 @@ impl BillingService for BillingServiceImpl {
         &self,
         request: Request<TransferToGroupRequest>,
     ) -> Result<Response<TransferToGroupResponse>, Status> {
+        ensure_payments_enabled()?;
         // Extract tenant_id from authenticated context (set by interceptor from x-tenant-id header).
         // This is a defense-in-depth measure: even if Bot is compromised, it can only
         // transfer from the tenant it authenticated as, not arbitrary tenants.
@@ -182,6 +193,7 @@ impl BillingService for BillingServiceImpl {
         &self,
         request: Request<GetGroupBalanceRequest>,
     ) -> Result<Response<GetGroupBalanceResponse>, Status> {
+        ensure_payments_enabled()?;
         let body = request.into_inner();
         let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
             RpcError::InvalidArgument {
@@ -207,6 +219,7 @@ impl BillingService for BillingServiceImpl {
         &self,
         request: Request<GetTenantBalanceRequest>,
     ) -> Result<Response<GetTenantBalanceResponse>, Status> {
+        ensure_payments_enabled()?;
         // Extract tenant_id from authenticated context (set by interceptor from x-api-token header).
         // The request body is empty - tenant is identified by the API token.
         let tenant_id = request
@@ -241,6 +254,7 @@ impl BillingService for BillingServiceImpl {
         &self,
         request: Request<WithdrawFromGroupRequest>,
     ) -> Result<Response<WithdrawFromGroupResponse>, Status> {
+        ensure_payments_enabled()?;
         // Extract tenant_id from authenticated context (set by interceptor from x-tenant-id header).
         let tenant_id = request
             .extensions()
@@ -297,6 +311,7 @@ impl BillingService for BillingServiceImpl {
         &self,
         request: Request<TransferBetweenGroupsRequest>,
     ) -> Result<Response<TransferBetweenGroupsResponse>, Status> {
+        ensure_payments_enabled()?;
         // Extract tenant_id from authenticated context (set by interceptor from x-tenant-id header).
         let tenant_id = request
             .extensions()

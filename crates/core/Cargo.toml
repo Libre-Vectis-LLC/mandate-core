@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+# Enable payment-related capabilities (gift cards, balance transfer, billing RPC paths).
+payments = []
+# Backward-compatible explicit alias for deployments that specifically gate XMR-like flows.
+xmr-payments = ["payments"]
+
 [dependencies]
 arc-swap.workspace = true
 serde.workspace = true
