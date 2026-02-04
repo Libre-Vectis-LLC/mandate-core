@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::StorageFacade;
-use crate::ids::{OrganizationId, KeyImage, RingHash, TenantId};
+use crate::ids::{KeyImage, OrganizationId, RingHash, TenantId};
 use crate::ring_log::RingDelta;
 use crate::storage::{BannedOperation, RingDeltaPath, StorageError};
 use nazgul::ring::Ring;

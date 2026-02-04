@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::StorageFacade;
-use crate::ids::{OrganizationId, Nanos, TenantId};
+use crate::ids::{Nanos, OrganizationId, TenantId};
 use crate::storage::{BillingStore, GiftCard, IdempotencyResult, StorageError, TenantBalanceInfo};
 
 impl StorageFacade {
@@ -52,7 +52,10 @@ impl StorageFacade {
     }
 
     /// Get a group's current budget balance.
-    pub async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError> {
+    pub async fn get_organization_balance(
+        &self,
+        org_id: OrganizationId,
+    ) -> Result<Nanos, StorageError> {
         self.billing.get_organization_balance(org_id).await
     }
 

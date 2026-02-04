@@ -72,12 +72,8 @@ impl InMemoryEvents {
                     .signature
                     .as_ref()
                     .ok_or_else(|| StorageError::PreconditionFailed("missing signature".into()))?;
-                self.vote_key_images.record_vote(
-                    tenant,
-                    org_id,
-                    &vote.poll_id,
-                    sig.key_image(),
-                )?;
+                self.vote_key_images
+                    .record_vote(tenant, org_id, &vote.poll_id, sig.key_image())?;
             }
             EventType::RingUpdate(update) => {
                 for operation in &update.operations {
@@ -150,13 +146,14 @@ impl EventReader for InMemoryEvents {
         id: &EventId,
     ) -> Result<EventRecord, StorageError> {
         let inner = self.inner();
-        let events = inner
-            .get(&(tenant, org_id))
-            .ok_or(StorageError::NotFound(NotFound::Event {
-                id: *id,
-                tenant,
-                org_id,
-            }))?;
+        let events =
+            inner
+                .get(&(tenant, org_id))
+                .ok_or(StorageError::NotFound(NotFound::Event {
+                    id: *id,
+                    tenant,
+                    org_id,
+                }))?;
         events
             .iter()
             .find(|(ev_id, _, _)| ev_id == id)
@@ -168,7 +165,11 @@ impl EventReader for InMemoryEvents {
             }))
     }
 
-    async fn tail(&self, tenant: TenantId, org_id: OrganizationId) -> Result<EventRecord, StorageError> {
+    async fn tail(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+    ) -> Result<EventRecord, StorageError> {
         let inner = self.inner();
         let events = inner
             .get(&(tenant, org_id))

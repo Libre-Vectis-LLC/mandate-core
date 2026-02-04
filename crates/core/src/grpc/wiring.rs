@@ -5,16 +5,17 @@ use crate::grpc::inmemory::{
 };
 use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};
 use crate::grpc::services::{
-    AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, OrganizationServiceImpl,
-    MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
+    AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, MemberServiceImpl,
+    OrganizationServiceImpl, RingServiceImpl, StorageServiceImpl,
 };
 use crate::ids::{BotSecret, TenantId, TenantToken};
 use crate::storage::facade::{StorageFacade, StorageFacadeBuilderError};
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
     billing_service_server::BillingServiceServer, event_service_server::EventServiceServer,
-    organization_service_server::OrganizationServiceServer, member_service_server::MemberServiceServer,
-    ring_service_server::RingServiceServer, storage_service_server::StorageServiceServer,
+    member_service_server::MemberServiceServer,
+    organization_service_server::OrganizationServiceServer, ring_service_server::RingServiceServer,
+    storage_service_server::StorageServiceServer,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;

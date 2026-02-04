@@ -1,5 +1,5 @@
 /// In-memory billing store and gift card management.
-use crate::ids::{OrganizationId, Nanos, TenantId};
+use crate::ids::{Nanos, OrganizationId, TenantId};
 use crate::storage::{
     BillingStore, GiftCard, GiftCardStore, IdempotencyResult, NotFound, StorageError,
 };
@@ -170,7 +170,10 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
-    async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError> {
+    async fn get_organization_balance(
+        &self,
+        org_id: OrganizationId,
+    ) -> Result<Nanos, StorageError> {
         let groups = self.groups.lock();
         let record = groups
             .get(&org_id)

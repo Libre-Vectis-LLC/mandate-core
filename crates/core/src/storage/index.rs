@@ -1,6 +1,6 @@
 //! Specialized lookup indices (bans, votes, polls).
 
-use crate::ids::{OrganizationId, KeyImage, RingHash, TenantId};
+use crate::ids::{KeyImage, OrganizationId, RingHash, TenantId};
 use async_trait::async_trait;
 
 use super::types::StorageError;

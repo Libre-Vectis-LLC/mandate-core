@@ -36,8 +36,6 @@ impl StorageFacade {
         org_id: OrganizationId,
         event_bytes: EventBytes,
     ) -> Result<(crate::ids::EventId, SequenceNo), StorageError> {
-        self.event_writer
-            .append(tenant, org_id, event_bytes)
-            .await
+        self.event_writer.append(tenant, org_id, event_bytes).await
     }
 }

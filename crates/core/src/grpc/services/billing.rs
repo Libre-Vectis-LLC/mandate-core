@@ -1,14 +1,15 @@
 //! BillingService gRPC implementation.
 
-use crate::ids::{OrganizationId, Nanos, TenantId};
+use crate::ids::{Nanos, OrganizationId, TenantId};
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use crate::storage::{IdempotencyErrorCode, IdempotencyResult};
 use mandate_proto::mandate::v1::{
-    billing_service_server::BillingService, GetOrganizationBalanceRequest, GetOrganizationBalanceResponse,
-    GetTenantBalanceRequest, GetTenantBalanceResponse, TransferBetweenOrganizationsRequest,
-    TransferBetweenOrganizationsResponse, TransferToOrganizationRequest, TransferToOrganizationResponse,
-    WithdrawFromOrganizationRequest, WithdrawFromOrganizationResponse,
+    billing_service_server::BillingService, GetOrganizationBalanceRequest,
+    GetOrganizationBalanceResponse, GetTenantBalanceRequest, GetTenantBalanceResponse,
+    TransferBetweenOrganizationsRequest, TransferBetweenOrganizationsResponse,
+    TransferToOrganizationRequest, TransferToOrganizationResponse, WithdrawFromOrganizationRequest,
+    WithdrawFromOrganizationResponse,
 };
 use tonic::{Code, Request, Response, Status};
 
@@ -342,12 +343,13 @@ impl BillingService for BillingServiceImpl {
                     reason: e.to_string(),
                 }
             })?);
-        let dest_org_id = OrganizationId(crate::proto::parse_ulid(&body.to_org_id).map_err(|e| {
-            RpcError::InvalidArgument {
-                field: "to_org_id",
-                reason: e.to_string(),
-            }
-        })?);
+        let dest_org_id =
+            OrganizationId(crate::proto::parse_ulid(&body.to_org_id).map_err(|e| {
+                RpcError::InvalidArgument {
+                    field: "to_org_id",
+                    reason: e.to_string(),
+                }
+            })?);
         if body.amount_nanos <= 0 {
             return Err(RpcError::InvalidArgument {
                 field: "amount_nanos",
@@ -363,12 +365,7 @@ impl BillingService for BillingServiceImpl {
         // Execute the transfer
         let (_source_balance, _dest_balance) = self
             .store
-            .transfer_between_groups(
-                tenant_id,
-                source_org_id,
-                dest_org_id,
-                Nanos::new(amount),
-            )
+            .transfer_between_groups(tenant_id, source_org_id, dest_org_id, Nanos::new(amount))
             .await
             .map_err(to_status)?;
 

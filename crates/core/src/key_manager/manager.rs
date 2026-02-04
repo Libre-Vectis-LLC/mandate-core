@@ -143,7 +143,8 @@ impl SessionNazgulKeyPair {
 /// full and public-only keypairs can reuse the same API.
 pub trait MandateDerivable {
     fn derive_delegate(&self, org_id: &OrganizationId) -> DelegateNazgulKeyPair;
-    fn derive_session(&self, org_id: &OrganizationId, ring_hash: &RingHash) -> SessionNazgulKeyPair;
+    fn derive_session(&self, org_id: &OrganizationId, ring_hash: &RingHash)
+        -> SessionNazgulKeyPair;
 }
 
 impl MandateDerivable for NazgulKeyPair {
@@ -152,7 +153,11 @@ impl MandateDerivable for NazgulKeyPair {
         DelegateNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
     }
 
-    fn derive_session(&self, org_id: &OrganizationId, ring_hash: &RingHash) -> SessionNazgulKeyPair {
+    fn derive_session(
+        &self,
+        org_id: &OrganizationId,
+        ring_hash: &RingHash,
+    ) -> SessionNazgulKeyPair {
         let ctx = info(LABEL_MEMBER_SESSION, &[&org_id.to_bytes(), &ring_hash.0]);
         SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
     }
@@ -574,8 +579,7 @@ mod tests {
     fn key_blob_roundtrip() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let shared =
-            km.derive_org_shared_secret(&org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+        let shared = km.derive_org_shared_secret(&org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
 
         let recipient = km.derive_rage_identity().to_public();
         let blob = encrypt_shared_secret_for_recipient(&shared, &recipient).expect("encrypt");

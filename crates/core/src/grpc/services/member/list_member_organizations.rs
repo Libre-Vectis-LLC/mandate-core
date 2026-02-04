@@ -2,7 +2,8 @@
 
 use crate::grpc::services::{clamp_events_limit, extract_tenant_id, to_status};
 use mandate_proto::mandate::v1::{
-    OrganizationMembership, ListMemberOrganizationsRequest, ListMemberOrganizationsResponse, PageToken,
+    ListMemberOrganizationsRequest, ListMemberOrganizationsResponse, OrganizationMembership,
+    PageToken,
 };
 use tonic::{Request, Response, Status};
 

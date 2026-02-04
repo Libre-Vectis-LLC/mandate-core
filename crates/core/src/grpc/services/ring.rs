@@ -51,13 +51,12 @@ impl RingService for RingServiceImpl {
     ) -> Result<Response<GetRingHeadResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let group = request.into_inner().org_id;
-        let org_id =
-            OrganizationId(
-                crate::proto::parse_ulid(&group).map_err(|e| RpcError::InvalidArgument {
-                    field: "org_id",
-                    reason: e.to_string(),
-                })?,
-            );
+        let org_id = OrganizationId(crate::proto::parse_ulid(&group).map_err(|e| {
+            RpcError::InvalidArgument {
+                field: "org_id",
+                reason: e.to_string(),
+            }
+        })?);
 
         // Current ring for the requested group.
         let ring = self

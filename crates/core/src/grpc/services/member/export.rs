@@ -22,7 +22,11 @@ pub(super) async fn export_members(
     })?);
 
     // Verify tenant owns the group
-    let (org_tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    let (org_tenant, _) = service
+        .store
+        .get_organization(org_id)
+        .await
+        .map_err(to_status)?;
     if org_tenant != tenant {
         return Err(RpcError::NotFound {
             resource: "group",

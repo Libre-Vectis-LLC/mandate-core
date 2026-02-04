@@ -108,11 +108,8 @@ pub trait EgressMeter: Send + Sync {
     /// * `Ok(())` - Sufficient balance for the transfer
     /// * `Err(MeteringError::InsufficientBalance)` - Not enough credits
     /// * `Err(MeteringError::OrgNotFound)` - Unknown group
-    async fn check_egress(
-        &self,
-        org_id: &str,
-        estimated_bytes: usize,
-    ) -> Result<(), MeteringError>;
+    async fn check_egress(&self, org_id: &str, estimated_bytes: usize)
+        -> Result<(), MeteringError>;
 
     /// Record and charge for actual egress after successful transfer.
     ///
@@ -125,8 +122,7 @@ pub trait EgressMeter: Send + Sync {
     /// # Returns
     /// * `Ok(())` - Charge recorded successfully
     /// * `Err(MeteringError)` - Failed to record (balance issue or store error)
-    async fn record_egress(&self, org_id: &str, actual_bytes: usize)
-        -> Result<(), MeteringError>;
+    async fn record_egress(&self, org_id: &str, actual_bytes: usize) -> Result<(), MeteringError>;
 }
 
 /// No-op egress meter for community edition or when metering is disabled.
@@ -189,7 +185,7 @@ mod tests {
         assert_eq!(err.to_string(), "tenant not found: tenant_123");
 
         let err = MeteringError::OrgNotFound("org_abc".to_string());
-        assert_eq!(err.to_string(), "org not found: group_abc");
+        assert_eq!(err.to_string(), "org not found: org_abc");
     }
 
     #[test]

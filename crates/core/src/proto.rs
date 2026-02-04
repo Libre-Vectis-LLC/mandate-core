@@ -1,7 +1,7 @@
 //! Helpers to convert between generated gRPC types and core newtypes.
 //! Keep these minimal to avoid leaking prost/tonic details into the rest of the crate.
 
-use crate::ids::{ContentHash, EventId, OrganizationId, MasterPublicKey, RingHash};
+use crate::ids::{ContentHash, EventId, MasterPublicKey, OrganizationId, RingHash};
 use crate::ring_log::RingDelta;
 use mandate_proto::mandate::v1::{Hash32, NazgulMasterPublicKey, RagePublicKey, Ulid as ProtoUlid};
 use thiserror::Error;

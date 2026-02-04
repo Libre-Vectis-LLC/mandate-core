@@ -33,9 +33,7 @@ mod types;
 
 // Re-export public types for backward compatibility
 pub use event::VerificationEvent;
-pub use types::{
-    EscalationStrategy, OrgPowConfig, OrgPowState, RecoveryStrategy, UpgradeStrategy,
-};
+pub use types::{EscalationStrategy, OrgPowConfig, OrgPowState, RecoveryStrategy, UpgradeStrategy};
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
 /// In-memory group metadata storage.
-use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
-use crate::storage::{OrganizationMetadataStore, NotFound, StorageError};
+use crate::ids::{MasterPublicKey, OrganizationId, TenantId};
+use crate::storage::{NotFound, OrganizationMetadataStore, StorageError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -63,7 +63,10 @@ impl OrganizationMetadataStore for InMemoryGroups {
         Ok(org_id)
     }
 
-    async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError> {
+    async fn get_organization(
+        &self,
+        org_id: OrganizationId,
+    ) -> Result<(TenantId, String), StorageError> {
         let map = self.groups.lock();
         map.get(&org_id)
             .map(|record| (record.tenant, record.tg_group_id.clone()))

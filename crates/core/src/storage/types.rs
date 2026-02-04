@@ -69,7 +69,10 @@ pub enum NotFound {
     #[error("organization {org_id:?}")]
     Organization { org_id: OrganizationId },
     #[error("tail for tenant {tenant:?} group {org_id:?}")]
-    Tail { tenant: TenantId, org_id: OrganizationId },
+    Tail {
+        tenant: TenantId,
+        org_id: OrganizationId,
+    },
     #[error("ring {hash:?} for tenant {tenant:?} group {org_id:?}")]
     Ring {
         hash: RingHash,
@@ -100,7 +103,10 @@ pub enum NotFound {
         rage_pub: [u8; 32],
     },
     #[error("edge access token for tenant {tenant:?} group {org_id:?}")]
-    EdgeAccessToken { tenant: TenantId, org_id: OrganizationId },
+    EdgeAccessToken {
+        tenant: TenantId,
+        org_id: OrganizationId,
+    },
 }
 
 /// Error codes for idempotency results, mapped from gRPC status codes.

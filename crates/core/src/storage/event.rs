@@ -110,5 +110,9 @@ pub trait EventReader {
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Tail)` - When the group has no events yet
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn tail(&self, tenant: TenantId, org_id: OrganizationId) -> Result<EventRecord, StorageError>;
+    async fn tail(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+    ) -> Result<EventRecord, StorageError>;
 }

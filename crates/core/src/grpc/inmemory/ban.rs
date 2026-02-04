@@ -1,6 +1,6 @@
 /// In-memory ban index tracking using DashMap for lock-free concurrent access.
 use crate::event::BanScope;
-use crate::ids::{EventId, OrganizationId, KeyImage, RingHash, TenantId};
+use crate::ids::{EventId, KeyImage, OrganizationId, RingHash, TenantId};
 use crate::storage::{BanIndex, BannedOperation, StorageError};
 use async_trait::async_trait;
 use dashmap::DashMap;

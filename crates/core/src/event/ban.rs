@@ -1,4 +1,4 @@
-use crate::ids::{EventId, OrganizationId, KeyImage, RingHash};
+use crate::ids::{EventId, KeyImage, OrganizationId, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -25,7 +25,11 @@ pub(super) async fn submit_pending_member(
         }
     })?);
 
-    let (tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    let (tenant, _) = service
+        .store
+        .get_organization(org_id)
+        .await
+        .map_err(to_status)?;
 
     let nazgul_pub = body
         .nazgul_pub
@@ -75,7 +79,11 @@ pub(super) async fn list_pending_members(
         }
     })?);
 
-    let (org_tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    let (org_tenant, _) = service
+        .store
+        .get_organization(org_id)
+        .await
+        .map_err(to_status)?;
     if org_tenant != tenant {
         return Err(RpcError::NotFound {
             resource: "group",
@@ -123,7 +131,11 @@ pub(super) async fn get_approved_member_by_tg_user_id(
     })?);
 
     // Verify tenant owns the group
-    let (org_tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    let (org_tenant, _) = service
+        .store
+        .get_organization(org_id)
+        .await
+        .map_err(to_status)?;
     if org_tenant != tenant {
         return Err(RpcError::NotFound {
             resource: "group",

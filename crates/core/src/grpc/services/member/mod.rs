@@ -78,8 +78,10 @@ impl MemberService for MemberServiceImpl {
     async fn list_member_organizations(
         &self,
         request: tonic::Request<mandate_proto::mandate::v1::ListMemberOrganizationsRequest>,
-    ) -> Result<tonic::Response<mandate_proto::mandate::v1::ListMemberOrganizationsResponse>, tonic::Status>
-    {
+    ) -> Result<
+        tonic::Response<mandate_proto::mandate::v1::ListMemberOrganizationsResponse>,
+        tonic::Status,
+    > {
         list_member_organizations::list_member_organizations(self, request).await
     }
 }

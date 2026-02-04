@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use crate::storage::{
     AccessTokenBlobStore, BanIndex, BillingStore, EdgeAccessTokenStore, EventReader, EventWriter,
-    GiftCardStore, OrganizationMetadataStore, KeyBlobStore, PendingMemberStore, PollRingHashIndex,
+    GiftCardStore, KeyBlobStore, OrganizationMetadataStore, PendingMemberStore, PollRingHashIndex,
     RingView, RingWriter, TenantTokenStore, VoteKeyImageIndex,
 };
 
 mod billing;
 mod event;
-mod organization;
 mod keys;
+mod organization;
 mod ring;
 mod token;
 

@@ -1,6 +1,6 @@
 //! Group metadata and member management.
 
-use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
+use crate::ids::{MasterPublicKey, OrganizationId, TenantId};
 use async_trait::async_trait;
 
 use super::types::StorageError;
@@ -88,7 +88,10 @@ pub trait OrganizationMetadataStore {
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError>;
+    async fn get_organization(
+        &self,
+        org_id: OrganizationId,
+    ) -> Result<(TenantId, String), StorageError>;
 
     /// Set the owner's Nazgul master public key for a group.
     ///

@@ -1,8 +1,8 @@
 /// In-memory pending member storage.
 use crate::event::MemberIdentity;
-use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
+use crate::ids::{MasterPublicKey, OrganizationId, TenantId};
 use crate::storage::{
-    OrganizationMembershipInfo, MemberInfo, NotFound, PendingMember, PendingMemberStatus,
+    MemberInfo, NotFound, OrganizationMembershipInfo, PendingMember, PendingMemberStatus,
     PendingMemberStore, StorageError,
 };
 use async_trait::async_trait;

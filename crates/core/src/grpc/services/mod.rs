@@ -4,8 +4,8 @@ mod admin;
 mod auth;
 mod billing;
 mod event;
-mod organization;
 mod member;
+mod organization;
 mod ring;
 mod storage;
 
@@ -13,8 +13,8 @@ pub use admin::AdminServiceImpl;
 pub use auth::AuthServiceImpl;
 pub use billing::BillingServiceImpl;
 pub use event::EventServiceImpl;
-pub use organization::OrganizationServiceImpl;
 pub use member::MemberServiceImpl;
+pub use organization::OrganizationServiceImpl;
 pub use ring::RingServiceImpl;
 pub use storage::StorageServiceImpl;
 

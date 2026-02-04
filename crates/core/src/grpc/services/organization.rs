@@ -5,8 +5,9 @@ use crate::ring_log::RingDelta;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
-    organization_service_server::OrganizationService, CreateOrganizationRequest, CreateOrganizationResponse, GetOrganizationRequest,
-    GetOrganizationResponse, SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
+    organization_service_server::OrganizationService, CreateOrganizationRequest,
+    CreateOrganizationResponse, GetOrganizationRequest, GetOrganizationResponse,
+    SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
 };
 use nazgul::traits::LocalByteConvertible;
 use tonic::{Request, Response, Status};
@@ -93,7 +94,11 @@ impl OrganizationService for OrganizationServiceImpl {
             }
         })?);
 
-        let (org_tenant, _) = self.store.get_organization(org_id).await.map_err(to_status)?;
+        let (org_tenant, _) = self
+            .store
+            .get_organization(org_id)
+            .await
+            .map_err(to_status)?;
 
         // Authorization check: verify authenticated tenant owns the group
         if authenticated_tenant != org_tenant {
@@ -168,7 +173,11 @@ impl OrganizationService for OrganizationServiceImpl {
             }
         })?);
 
-        let (tenant_id, _tg_group_id) = self.store.get_organization(org_id).await.map_err(to_status)?;
+        let (tenant_id, _tg_group_id) = self
+            .store
+            .get_organization(org_id)
+            .await
+            .map_err(to_status)?;
         let owner_pubkey = self
             .store
             .get_owner_pubkey(org_id)

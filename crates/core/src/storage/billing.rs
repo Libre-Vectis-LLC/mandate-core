@@ -1,6 +1,6 @@
 //! Billing, idempotency, and gift cards.
 
-use crate::ids::{OrganizationId, Nanos, TenantId};
+use crate::ids::{Nanos, OrganizationId, TenantId};
 use async_trait::async_trait;
 
 use super::types::{IdempotencyResult, StorageError};
@@ -80,7 +80,8 @@ pub trait BillingStore: Send + Sync {
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError>;
+    async fn get_organization_balance(&self, org_id: OrganizationId)
+        -> Result<Nanos, StorageError>;
 
     /// Retrieve the current balance for a tenant with metadata.
     ///

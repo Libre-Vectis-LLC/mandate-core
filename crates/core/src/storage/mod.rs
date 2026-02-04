@@ -12,9 +12,9 @@ pub use facade::{StorageFacade, StorageFacadeBuilder, StorageFacadeBuilderError}
 
 pub mod billing;
 pub mod event;
-pub mod organization;
 pub mod index;
 pub mod keys;
+pub mod organization;
 pub mod ring;
 pub mod tenant;
 pub mod types;
@@ -34,8 +34,8 @@ pub use keys::{AccessTokenBlobStore, EdgeAccessTokenStore, KeyBlobStore};
 pub use tenant::TenantTokenStore;
 
 pub use organization::{
-    OrganizationMembershipInfo, OrganizationMetadataStore, MemberInfo, PendingMember, PendingMemberStatus,
-    PendingMemberStore,
+    MemberInfo, OrganizationMembershipInfo, OrganizationMetadataStore, PendingMember,
+    PendingMemberStatus, PendingMemberStore,
 };
 
 pub use billing::{BillingStore, GiftCard, GiftCardStore, TenantBalanceInfo};

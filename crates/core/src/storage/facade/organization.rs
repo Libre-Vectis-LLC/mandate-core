@@ -1,5 +1,5 @@
 use super::StorageFacade;
-use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
+use crate::ids::{MasterPublicKey, OrganizationId, TenantId};
 use crate::storage::{PendingMember, StorageError};
 
 impl StorageFacade {
@@ -17,7 +17,10 @@ impl StorageFacade {
     }
 
     /// Get a group's metadata (tenant ID and Telegram group ID).
-    pub async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError> {
+    pub async fn get_organization(
+        &self,
+        org_id: OrganizationId,
+    ) -> Result<(TenantId, String), StorageError> {
         self.groups.get_organization(org_id).await
     }
 

@@ -1,5 +1,5 @@
 /// In-memory vote key image deduplication.
-use crate::ids::{OrganizationId, KeyImage, TenantId};
+use crate::ids::{KeyImage, OrganizationId, TenantId};
 use crate::storage::{StorageError, VoteKeyImageIndex};
 use async_trait::async_trait;
 use parking_lot::Mutex;

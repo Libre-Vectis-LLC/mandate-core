@@ -19,9 +19,9 @@
 pub mod ban;
 pub mod billing;
 pub mod event;
-pub mod organization;
 pub mod key_blob;
 pub mod member;
+pub mod organization;
 pub mod poll;
 pub mod ring;
 pub mod tenant;
@@ -31,9 +31,9 @@ pub mod vote;
 pub use ban::{InMemoryBanIndex, NoopBanIndex};
 pub use billing::{InMemoryBilling, InMemoryGiftCards};
 pub use event::InMemoryEvents;
-pub use organization::InMemoryGroups;
 pub use key_blob::InMemoryKeyBlobs;
 pub use member::InMemoryPendingMembers;
+pub use organization::InMemoryGroups;
 pub use poll::{InMemoryPollRingHashes, NoopPollRingHashes};
 pub use ring::InMemoryRings;
 pub use tenant::InMemoryTenantTokens;
@@ -44,7 +44,9 @@ mod tests {
     use super::*;
     use crate::event::{Event, EventType, MemberIdentity, RingOperation, RingUpdate};
     use crate::hashing::ring_hash_sha3_256;
-    use crate::ids::{EventId, EventUlid, OrganizationId, MasterPublicKey, Nanos, RingHash, TenantId};
+    use crate::ids::{
+        EventId, EventUlid, MasterPublicKey, Nanos, OrganizationId, RingHash, TenantId,
+    };
     use crate::key_manager::KeyManager;
     use crate::storage::{
         BanIndex, BannedOperation, BillingStore, EventWriter, OrganizationMetadataStore,
