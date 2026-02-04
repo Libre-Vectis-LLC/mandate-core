@@ -237,7 +237,7 @@ message MemberInfo {
   bytes nazgul_pub = 1;
 
   // Unified identity information.
-  // Contains external_id, display_name, organization_id, credential_ref, and source.
+  // Contains external_id, display_name, credential_ref, and source.
   MemberIdentity identity = 2;
 
   // Member status.
@@ -293,7 +293,7 @@ message ExportMembersRequest {
   string format = 2;
 
   // Fields to include in export.
-  // Available fields: "external_id", "display_name", "organization_id",
+  // Available fields: "external_id", "display_name",
   // "credential_status", "joined_at", "status", "identity_source"
   // If empty, exports all available fields.
   repeated string include_fields = 3;

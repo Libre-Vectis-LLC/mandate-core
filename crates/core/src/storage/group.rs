@@ -226,7 +226,6 @@ pub trait PendingMemberStore {
     /// * `nazgul_pub` - The member's Nazgul master public key (for ring signatures)
     /// * `rage_pub` - The member's Rage public key (for encrypted key distribution)
     /// * `display_name` - Optional user-provided display name
-    /// * `organization_id` - Optional organization-assigned identifier
     ///
     /// # Returns
     /// A tuple of `(pending_id, group_id)` on success.
@@ -248,7 +247,6 @@ pub trait PendingMemberStore {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
         display_name: Option<String>,
-        organization_id: Option<String>,
     ) -> Result<(String, GroupId), StorageError>;
 
     /// List all members in a group with optional filtering (Phase 4).

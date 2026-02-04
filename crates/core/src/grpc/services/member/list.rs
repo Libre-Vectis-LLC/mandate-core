@@ -78,7 +78,6 @@ pub(super) async fn list_members(
             identity: Some(mandate_proto::mandate::v1::MemberIdentity {
                 external_id: m.identity.external_id,
                 display_name: m.identity.display_name,
-                organization_id: m.identity.organization_id,
                 credential_ref: m.identity.credential_ref.map(|c| {
                     mandate_proto::mandate::v1::CredentialRef {
                         credential_id: c.credential_id,

@@ -66,7 +66,6 @@ pub(super) async fn export_members(
         vec![
             "external_id",
             "display_name",
-            "organization_id",
             "credential_status",
             "joined_at",
             "status",
@@ -77,7 +76,6 @@ pub(super) async fn export_members(
         let valid_fields = [
             "external_id",
             "display_name",
-            "organization_id",
             "credential_status",
             "joined_at",
             "status",
@@ -123,12 +121,6 @@ pub(super) async fn export_members(
                             "display_name" => {
                                 m.identity.display_name.as_deref().unwrap_or("").to_string()
                             }
-                            "organization_id" => m
-                                .identity
-                                .organization_id
-                                .as_deref()
-                                .unwrap_or("")
-                                .to_string(),
                             "credential_status" => m
                                 .identity
                                 .credential_ref
@@ -176,9 +168,6 @@ pub(super) async fn export_members(
                             ),
                             "display_name" => serde_json::Value::String(
                                 m.identity.display_name.clone().unwrap_or_default(),
-                            ),
-                            "organization_id" => serde_json::Value::String(
-                                m.identity.organization_id.clone().unwrap_or_default(),
                             ),
                             "credential_status" => serde_json::Value::String(
                                 m.identity

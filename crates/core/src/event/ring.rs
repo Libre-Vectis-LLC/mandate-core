@@ -45,9 +45,6 @@ pub struct MemberIdentity {
     /// - Standalone: user-defined name
     pub display_name: Option<String>,
 
-    /// Organization internal ID (applicable to both modes)
-    pub organization_id: Option<String>,
-
     /// Credential reference (if verified)
     pub credential_ref: Option<CredentialRef>,
 
@@ -62,7 +59,6 @@ impl MemberIdentity {
         MemberIdentity {
             external_id: None,
             display_name: None,
-            organization_id: None,
             credential_ref: None,
             source: IdentitySource::Telegram, // Old data was all Telegram
         }
@@ -73,22 +69,16 @@ impl MemberIdentity {
         MemberIdentity {
             external_id: Some(tg_user_id.into()),
             display_name: tg_username,
-            organization_id: None,
             credential_ref: None,
             source: IdentitySource::Telegram,
         }
     }
 
     /// Create a Standalone identity
-    pub fn standalone(
-        user_id: impl Into<String>,
-        display_name: Option<String>,
-        organization_id: Option<String>,
-    ) -> Self {
+    pub fn standalone(user_id: impl Into<String>, display_name: Option<String>) -> Self {
         MemberIdentity {
             external_id: Some(user_id.into()),
             display_name,
-            organization_id,
             credential_ref: None,
             source: IdentitySource::Standalone,
         }
@@ -151,7 +141,6 @@ mod tests {
                 assert_eq!(identity.source, IdentitySource::Telegram);
                 assert!(identity.external_id.is_none());
                 assert!(identity.display_name.is_none());
-                assert!(identity.organization_id.is_none());
                 assert!(identity.credential_ref.is_none());
             }
             _ => panic!("Expected AddMember variant"),
@@ -176,7 +165,6 @@ mod tests {
             identity: MemberIdentity::standalone(
                 "01HN12J345678M9ABCDEFGHJK0".to_string(),
                 Some("Bob".to_string()),
-                Some("org_123".to_string()),
             ),
         };
 
@@ -192,7 +180,6 @@ mod tests {
                 Some("01HN12J345678M9ABCDEFGHJK0".to_string())
             );
             assert_eq!(identity.display_name, Some("Bob".to_string()));
-            assert_eq!(identity.organization_id, Some("org_123".to_string()));
         } else {
             panic!("Expected AddMember variant");
         }
@@ -210,7 +197,6 @@ mod tests {
         let mut identity = MemberIdentity::standalone(
             "01HN12J345678M9ABCDEFGHJK1".to_string(),
             Some("Carol".to_string()),
-            Some("org_456".to_string()),
         );
         identity.credential_ref = Some(credential.clone());
 
@@ -226,8 +212,6 @@ mod tests {
         assert!(json.contains("\"01HN12J345678M9ABCDEFGHJK1\""));
         assert!(json.contains("\"display_name\""));
         assert!(json.contains("\"Carol\""));
-        assert!(json.contains("\"organization_id\""));
-        assert!(json.contains("\"org_456\""));
         assert!(json.contains("\"credential_ref\""));
         assert!(json.contains("\"credential_id\""));
         assert!(json.contains("\"01HN12J345678M9ABCDEFGHJK0\""));
@@ -393,7 +377,6 @@ mod tests {
         let identity = MemberIdentity {
             external_id: None,
             display_name: None,
-            organization_id: None,
             credential_ref: None,
             source: IdentitySource::Standalone, // Only required field
         };
@@ -420,7 +403,6 @@ mod tests {
         {
             assert!(deserialized_identity.external_id.is_none());
             assert!(deserialized_identity.display_name.is_none());
-            assert!(deserialized_identity.organization_id.is_none());
             assert!(deserialized_identity.credential_ref.is_none());
             assert_eq!(deserialized_identity.source, IdentitySource::Standalone);
         } else {

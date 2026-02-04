@@ -29,7 +29,7 @@ message MemberIdentity {
                                         // - Telegram: tg_user_id (e.g., "123456789")
                                         // - Standalone: standalone_user_id (ULID)
   optional string display_name = 2;     // User's display name (tg_username or custom name)
-  optional string organization_id = 3;  // Organization internal ID (applicable to both modes)
+  reserved 3;                           // was: organization_id (merged into external_id)
   optional CredentialRef credential_ref = 4; // Reference to verified credential (if any)
   IdentitySource source = 5;            // Required: identity source (Telegram, Standalone, or Other)
 }

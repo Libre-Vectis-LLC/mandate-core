@@ -194,7 +194,6 @@ impl PendingMemberStore for InMemoryPendingMembers {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
         _display_name: Option<String>,
-        _organization_id: Option<String>,
     ) -> Result<(String, GroupId), StorageError> {
         // Validate and consume invite code atomically
         let (group_id, code_tenant) = {
@@ -323,7 +322,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
                     let identity = if !record.member.tg_user_id.is_empty() {
                         MemberIdentity::telegram(record.member.tg_user_id.clone(), None)
                     } else {
-                        MemberIdentity::standalone(record.member.pending_id.clone(), None, None)
+                        MemberIdentity::standalone(record.member.pending_id.clone(), None)
                     };
 
                     MemberInfo {

@@ -418,7 +418,6 @@ mod tests {
                 assert_eq!(identity.source, IdentitySource::Telegram);
                 assert!(identity.external_id.is_none());
                 assert!(identity.display_name.is_none());
-                assert!(identity.organization_id.is_none());
                 assert!(identity.credential_ref.is_none());
             }
             _ => panic!("expected AddMember"),
@@ -431,7 +430,6 @@ mod tests {
         let identity = MemberIdentity {
             external_id: Some("123456".to_string()),
             display_name: Some("Alice".to_string()),
-            organization_id: Some("ORG001".to_string()),
             credential_ref: None,
             source: IdentitySource::Standalone,
         };
@@ -453,7 +451,6 @@ mod tests {
                 assert_eq!(public_key.0, [42u8; 32]);
                 assert_eq!(id.external_id, Some("123456".to_string()));
                 assert_eq!(id.display_name, Some("Alice".to_string()));
-                assert_eq!(id.organization_id, Some("ORG001".to_string()));
                 assert_eq!(id.source, IdentitySource::Standalone);
             }
             _ => panic!("expected AddMember"),
@@ -485,7 +482,6 @@ mod tests {
         assert_eq!(id.external_id, Some("12345".to_string()));
         assert_eq!(id.display_name, Some("alice".to_string()));
         assert_eq!(id.source, IdentitySource::Telegram);
-        assert!(id.organization_id.is_none());
         assert!(id.credential_ref.is_none());
     }
 
@@ -503,7 +499,6 @@ mod tests {
         let id = MemberIdentity::standalone(
             "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string(),
             Some("Bob".to_string()),
-            Some("ORG002".to_string()),
         );
 
         assert_eq!(
@@ -511,7 +506,6 @@ mod tests {
             Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string())
         );
         assert_eq!(id.display_name, Some("Bob".to_string()));
-        assert_eq!(id.organization_id, Some("ORG002".to_string()));
         assert_eq!(id.source, IdentitySource::Standalone);
         assert!(id.credential_ref.is_none());
     }
@@ -519,14 +513,13 @@ mod tests {
     #[test]
     fn test_member_identity_standalone_constructor_minimal() {
         // Standalone identity with only user_id
-        let id = MemberIdentity::standalone("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string(), None, None);
+        let id = MemberIdentity::standalone("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string(), None);
 
         assert_eq!(
             id.external_id,
             Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string())
         );
         assert!(id.display_name.is_none());
-        assert!(id.organization_id.is_none());
         assert_eq!(id.source, IdentitySource::Standalone);
     }
 
@@ -536,7 +529,6 @@ mod tests {
 
         assert!(id.external_id.is_none());
         assert!(id.display_name.is_none());
-        assert!(id.organization_id.is_none());
         assert!(id.credential_ref.is_none());
         assert_eq!(id.source, IdentitySource::Telegram);
     }
@@ -553,7 +545,6 @@ mod tests {
         let identity = MemberIdentity {
             external_id: Some("user123".to_string()),
             display_name: Some("Charlie".to_string()),
-            organization_id: Some("ORG003".to_string()),
             credential_ref: Some(credential.clone()),
             source: IdentitySource::Standalone,
         };
@@ -588,11 +579,7 @@ mod tests {
         let ring_hash = ring_hash_sha3_256(&ring);
 
         let identity1 = MemberIdentity::telegram("12345".to_string(), Some("alice".to_string()));
-        let identity2 = MemberIdentity::standalone(
-            "user789".to_string(),
-            Some("bob".to_string()),
-            Some("ORG001".to_string()),
-        );
+        let identity2 = MemberIdentity::standalone("user789".to_string(), Some("bob".to_string()));
 
         // Create event with identity1 and sign it
         let mut event = Event {
@@ -652,11 +639,8 @@ mod tests {
         let group = test_group_id();
         let ring_hash = ring_hash_sha3_256(&ring);
 
-        let base_identity = MemberIdentity::standalone(
-            "user123".to_string(),
-            Some("Alice".to_string()),
-            Some("ORG001".to_string()),
-        );
+        let base_identity =
+            MemberIdentity::standalone("user123".to_string(), Some("Alice".to_string()));
 
         let create_event = |identity: MemberIdentity| -> Event {
             Event {
@@ -716,20 +700,7 @@ mod tests {
             "Signature should be invalid after changing display_name"
         );
 
-        // Test 3: Change organization_id
-        let mut modified = base_identity.clone();
-        modified.organization_id = Some("ORG999".to_string());
-        let modified_event = create_event(modified);
-        let modified_bytes = modified_event
-            .to_signing_bytes()
-            .expect("modified organization_id");
-        let result = base_sig.verify(Some(&ring), &modified_bytes);
-        assert!(
-            result.is_ok() && !result.unwrap(),
-            "Signature should be invalid after changing organization_id"
-        );
-
-        // Test 4: Change source
+        // Test 3: Change source
         let mut modified = base_identity.clone();
         modified.source = IdentitySource::Telegram;
         let modified_event = create_event(modified);

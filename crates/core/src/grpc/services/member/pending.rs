@@ -203,10 +203,10 @@ pub(super) async fn register_member(
         })?;
 
     // Extract optional identity fields
-    let (display_name, organization_id) = if let Some(identity) = body.identity {
-        (identity.display_name, identity.organization_id)
+    let display_name = if let Some(identity) = body.identity {
+        identity.display_name
     } else {
-        (None, None)
+        None
     };
 
     // Register via invite code
@@ -218,7 +218,6 @@ pub(super) async fn register_member(
             nazgul_pub,
             rage_pub,
             display_name,
-            organization_id,
         )
         .await
         .map_err(to_status)?;

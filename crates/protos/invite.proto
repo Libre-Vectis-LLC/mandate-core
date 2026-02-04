@@ -100,8 +100,7 @@ service InviteService {
   // ## Errors
   // - NOT_FOUND: invite code doesn't exist
   // - FAILED_PRECONDITION: invite code is invalid (expired/exhausted/revoked)
-  // - INVALID_ARGUMENT: display_name or organization_id validation failed
-  // - ALREADY_EXISTS: member with same organization_id already exists in group
+  // - INVALID_ARGUMENT: display_name validation failed
   // - INTERNAL: database error or member creation failure
   rpc RegisterWithInviteCode(RegisterWithInviteCodeRequest) returns (RegisterWithInviteCodeResponse);
 }
@@ -251,10 +250,7 @@ message RegisterWithInviteCodeRequest {
   // Maximum length: 255 characters.
   optional string display_name = 2;
 
-  // Optional organization identifier for the new member.
-  // Used for tracking purposes or mapping to external systems.
-  // Maximum length: 255 characters.
-  optional string organization_id = 3;
+  reserved 3;  // was: organization_id (merged into external_id)
 }
 
 // Response after successfully registering with an invite code.

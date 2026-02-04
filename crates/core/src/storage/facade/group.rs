@@ -99,17 +99,9 @@ impl StorageFacade {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
         display_name: Option<String>,
-        organization_id: Option<String>,
     ) -> Result<(String, GroupId), StorageError> {
         self.pending_members
-            .register_standalone(
-                tenant,
-                invite_code,
-                nazgul_pub,
-                rage_pub,
-                display_name,
-                organization_id,
-            )
+            .register_standalone(tenant, invite_code, nazgul_pub, rage_pub, display_name)
             .await
     }
 
