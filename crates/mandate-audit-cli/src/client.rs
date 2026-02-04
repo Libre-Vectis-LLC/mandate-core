@@ -52,14 +52,14 @@ impl AuditClient {
 
     pub async fn stream_events(
         &mut self,
-        group_id: &str,
+        org_id: &str,
         start_seq: i64,
         limit: u32,
     ) -> Result<Vec<EventRecord>> {
         let channel = self.edge_channel().await?;
         let mut client = EventServiceClient::new(channel);
         let req = self.with_token(Request::new(StreamEventsRequest {
-            group_id: group_id.to_string(),
+            org_id: org_id.to_string(),
             start_sequence_no: start_seq,
             limit,
         }))?;
@@ -85,14 +85,14 @@ impl AuditClient {
 
     pub async fn stream_ring(
         &mut self,
-        group_id: &str,
+        org_id: &str,
         after_ring_hash: Vec<u8>,
         limit: u32,
     ) -> Result<StreamRingResponse> {
         let channel = self.edge_channel().await?;
         let mut client = RingServiceClient::new(channel);
         let req = self.with_token(Request::new(StreamRingRequest {
-            group_id: group_id.to_string(),
+            org_id: org_id.to_string(),
             after_ring_hash,
             limit,
         }))?;
