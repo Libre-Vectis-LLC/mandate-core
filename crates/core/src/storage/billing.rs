@@ -61,7 +61,7 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Invariants
     /// * Transfers are atomic (tenant debit and group credit happen together)
-    /// * Group balance is always non-negative
+    /// * Organization balance is always non-negative
     async fn transfer_to_organization(
         &self,
         tenant: TenantId,
@@ -78,7 +78,7 @@ pub trait BillingStore: Send + Sync {
     /// The group's current balance.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError>;
 
@@ -108,7 +108,7 @@ pub trait BillingStore: Send + Sync {
     /// The updated group balance after deduction.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::PreconditionFailed` - When group has insufficient balance
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///

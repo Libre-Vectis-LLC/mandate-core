@@ -66,8 +66,8 @@ pub enum NotFound {
     },
     #[error("tenant {tenant:?}")]
     Tenant { tenant: TenantId },
-    #[error("group {org_id:?}")]
-    Group { org_id: OrganizationId },
+    #[error("organization {org_id:?}")]
+    Organization { org_id: OrganizationId },
     #[error("tail for tenant {tenant:?} group {org_id:?}")]
     Tail { tenant: TenantId, org_id: OrganizationId },
     #[error("ring {hash:?} for tenant {tenant:?} group {org_id:?}")]

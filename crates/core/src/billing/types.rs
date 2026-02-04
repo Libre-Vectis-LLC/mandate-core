@@ -70,14 +70,14 @@ impl Add for AbstractResourceUnits {
 /// use mandate_core::billing::BalanceHolder;
 ///
 /// let tenant = BalanceHolder::Tenant("tenant_123".to_string());
-/// let group = BalanceHolder::Group("org_abc".to_string());
+/// let group = BalanceHolder::Organization("org_abc".to_string());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BalanceHolder {
     /// Tenant account balance.
     Tenant(String),
     /// Group project balance.
-    Group(String),
+    Organization(String),
 }
 
 impl BalanceHolder {
@@ -88,13 +88,13 @@ impl BalanceHolder {
 
     /// Returns true if this is a group balance holder.
     pub fn is_group(&self) -> bool {
-        matches!(self, BalanceHolder::Group(_))
+        matches!(self, BalanceHolder::Organization(_))
     }
 
     /// Returns the ID as a string reference.
     pub fn id(&self) -> &str {
         match self {
-            BalanceHolder::Tenant(id) | BalanceHolder::Group(id) => id,
+            BalanceHolder::Tenant(id) | BalanceHolder::Organization(id) => id,
         }
     }
 }
@@ -111,7 +111,7 @@ impl BalanceHolder {
 /// let receipt = TransferReceipt {
 ///     transfer_id: "uuid-1234".to_string(),
 ///     from: BalanceHolder::Tenant("tenant_1".to_string()),
-///     to: BalanceHolder::Group("group_a".to_string()),
+///     to: BalanceHolder::Organization("group_a".to_string()),
 ///     amount: Nanos::from_dollars(10.0),
 ///     timestamp_ms: 1609459200000,
 ///     reason: Some("Initial funding".to_string()),
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_balance_holder_group() {
-        let holder = BalanceHolder::Group("org_abc".to_string());
+        let holder = BalanceHolder::Organization("org_abc".to_string());
         assert!(!holder.is_tenant());
         assert!(holder.is_group());
         assert_eq!(holder.id(), "org_abc");
@@ -280,7 +280,7 @@ mod tests {
         let receipt = TransferReceipt {
             transfer_id: "uuid-1234".to_string(),
             from: BalanceHolder::Tenant("tenant_1".to_string()),
-            to: BalanceHolder::Group("group_a".to_string()),
+            to: BalanceHolder::Organization("group_a".to_string()),
             amount: Nanos::from_dollars(10.0),
             timestamp_ms: 1609459200000,
             reason: Some("Initial funding".to_string()),

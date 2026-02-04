@@ -86,7 +86,7 @@ pub trait OrganizationMetadataStore {
     /// A tuple of `(TenantId, tg_group_id)` containing the owning tenant and Telegram group ID.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError>;
 
@@ -101,7 +101,7 @@ pub trait OrganizationMetadataStore {
     /// * `owner_pubkey` - The owner's Nazgul master public key
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn set_owner_pubkey(
         &self,
@@ -118,7 +118,7 @@ pub trait OrganizationMetadataStore {
     /// The owner's `MasterPublicKey` if set, `None` if not yet configured.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_owner_pubkey(
         &self,

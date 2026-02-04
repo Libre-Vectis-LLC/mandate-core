@@ -15,7 +15,7 @@ pub struct RingLogCache {
 }
 
 impl RingLogCache {
-    pub async fn build(client: &mut AuditClient, group_id: &str, limit: u32) -> Result<Self> {
+    pub async fn build(client: &mut AuditClient, org_id: &str, limit: u32) -> Result<Self> {
         let mut log = RingDeltaLog::default();
         let mut ring = Ring::new(Vec::new());
         let mut cache: HashMap<RingHash, Ring> = HashMap::new();
@@ -23,7 +23,7 @@ impl RingLogCache {
         let mut cursor: Vec<u8> = Vec::new();
         loop {
             let response = client
-                .stream_ring(group_id, cursor.clone(), limit)
+                .stream_ring(org_id, cursor.clone(), limit)
                 .await
                 .context("stream_ring failed")?;
             if response.entries.is_empty() {

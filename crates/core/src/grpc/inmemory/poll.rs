@@ -54,7 +54,7 @@ impl PollRingHashIndex for InMemoryPollRingHashes {
         hashes
             .get(&key)
             .copied()
-            .ok_or(StorageError::NotFound(crate::storage::NotFound::Group {
+            .ok_or(StorageError::NotFound(crate::storage::NotFound::Organization {
                 org_id,
             }))
     }
@@ -84,7 +84,7 @@ impl PollRingHashIndex for NoopPollRingHashes {
     ) -> Result<RingHash, StorageError> {
         // Return a zero hash for noop - this should only be used in tests
         // where poll ring hash verification is not being tested
-        Err(StorageError::NotFound(crate::storage::NotFound::Group {
+        Err(StorageError::NotFound(crate::storage::NotFound::Organization {
             org_id,
         }))
     }

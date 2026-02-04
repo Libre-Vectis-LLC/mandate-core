@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::VerifyEvents {
-            group_id,
+            org_id,
             start_seq,
             limit,
             report,
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         } => {
             let report_data = verify_events(
                 &mut client,
-                &group_id,
+                &org_id,
                 start_seq,
                 limit,
                 ignore_legacy_hash_mismatches,
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
             }
         }
         Command::ExportPollBundle {
-            group_id,
+            org_id,
             poll_id,
             poll_event_ulid,
             k_shared_hex,
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             limit,
         } => {
             let options = PollBundleOptions {
-                group_id,
+                org_id,
                 poll_id,
                 poll_event_ulid,
                 k_shared_hex,

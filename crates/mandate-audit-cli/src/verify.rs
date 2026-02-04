@@ -18,7 +18,7 @@ pub struct VerificationIssue {
 
 #[derive(Debug, Serialize)]
 pub struct VerificationReport {
-    pub group_id: String,
+    pub org_id: String,
     pub total_events: usize,
     pub event_type_counts: BTreeMap<String, usize>,
     pub chain_verified: bool,
@@ -30,12 +30,12 @@ pub struct VerificationReport {
 
 pub async fn verify_events(
     client: &mut AuditClient,
-    group_id: &str,
+    org_id: &str,
     start_seq: i64,
     limit: u32,
     ignore_legacy_hash_mismatches: bool,
 ) -> Result<VerificationReport> {
-    let mut ring_cache = RingLogCache::build(client, group_id, limit)
+    let mut ring_cache = RingLogCache::build(client, org_id, limit)
         .await
         .context("build ring log")?;
 
@@ -55,7 +55,7 @@ pub async fn verify_events(
 
     loop {
         let records = client
-            .stream_events(group_id, last_seq, limit)
+            .stream_events(org_id, last_seq, limit)
             .await
             .context("stream events")?;
         if records.is_empty() {
@@ -98,7 +98,7 @@ pub async fn verify_events(
     }
 
     Ok(VerificationReport {
-        group_id: group_id.to_string(),
+        org_id: org_id.to_string(),
         total_events,
         event_type_counts,
         chain_verified,

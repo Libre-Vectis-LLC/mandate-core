@@ -88,7 +88,7 @@ pub(crate) fn to_status(err: crate::storage::StorageError) -> Status {
             let (resource, id) = match not_found {
                 crate::storage::NotFound::Event { .. } => ("event", "not found"),
                 crate::storage::NotFound::Tenant { .. } => ("tenant", "not found"),
-                crate::storage::NotFound::Group { .. } => ("group", "not found"),
+                crate::storage::NotFound::Organization { .. } => ("group", "not found"),
                 crate::storage::NotFound::Tail { .. } => ("event_tail", "not found"),
                 crate::storage::NotFound::Ring { .. } => ("ring", "not found"),
                 crate::storage::NotFound::RingDeltaPath { .. } => ("ring_delta_path", "not found"),

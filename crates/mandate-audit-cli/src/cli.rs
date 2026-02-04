@@ -28,7 +28,7 @@ pub enum Command {
     VerifyEvents {
         /// Group ID (ULID).
         #[arg(long)]
-        group_id: String,
+        org_id: String,
         /// Start sequence number (exclusive). Use -1 for full history.
         #[arg(long, default_value_t = -1)]
         start_seq: i64,
@@ -51,7 +51,7 @@ pub enum Command {
     ExportPollBundle {
         /// Group ID (ULID).
         #[arg(long)]
-        group_id: String,
+        org_id: String,
         /// Poll ID (from PollCreate payload). Requires full event history scan.
         #[arg(long)]
         poll_id: Option<String>,

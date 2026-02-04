@@ -113,8 +113,8 @@ pub trait BalanceTransferService: Send + Sync {
     /// # Arguments
     ///
     /// * `tenant_id` - Owning tenant ID
-    /// * `from_group` - Source group ID
-    /// * `to_group` - Destination group ID
+    /// * `from_org` - Source group ID
+    /// * `to_org` - Destination group ID
     /// * `amount` - Amount to transfer (must be > 0)
     ///
     /// # Errors
@@ -142,8 +142,8 @@ pub trait BalanceTransferService: Send + Sync {
     async fn transfer_between_groups(
         &self,
         tenant_id: &str,
-        from_group: &str,
-        to_group: &str,
+        from_org: &str,
+        to_org: &str,
         amount: Nanos,
     ) -> Result<TransferReceipt, TransferError>;
 }

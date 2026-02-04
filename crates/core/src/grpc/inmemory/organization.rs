@@ -67,7 +67,7 @@ impl OrganizationMetadataStore for InMemoryGroups {
         let map = self.groups.lock();
         map.get(&org_id)
             .map(|record| (record.tenant, record.tg_group_id.clone()))
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))
     }
 
     async fn set_owner_pubkey(
@@ -78,7 +78,7 @@ impl OrganizationMetadataStore for InMemoryGroups {
         let mut map = self.groups.lock();
         let record = map
             .get_mut(&org_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         record.owner_pubkey = Some(owner_pubkey);
         Ok(())
     }
@@ -90,7 +90,7 @@ impl OrganizationMetadataStore for InMemoryGroups {
         let map = self.groups.lock();
         let record = map
             .get(&org_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         Ok(record.owner_pubkey)
     }
 }

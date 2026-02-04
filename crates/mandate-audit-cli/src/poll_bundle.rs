@@ -12,7 +12,7 @@ use crate::client::AuditClient;
 
 #[derive(Debug, serde::Serialize)]
 pub struct PollBundleManifest {
-    pub group_id: String,
+    pub org_id: String,
     pub poll_id: String,
     pub poll_event_ulid: String,
     pub poll_hash_hex: String,
@@ -33,7 +33,7 @@ pub struct PollVoteEntry {
 }
 
 pub struct PollBundleOptions {
-    pub group_id: String,
+    pub org_id: String,
     pub poll_id: Option<String>,
     pub poll_event_ulid: Option<String>,
     pub k_shared_hex: String,
@@ -54,7 +54,7 @@ pub async fn export_poll_bundle(
     let mut start_seq = -1;
     loop {
         let records = client
-            .stream_events(&options.group_id, start_seq, options.limit)
+            .stream_events(&options.org_id, start_seq, options.limit)
             .await
             .context("stream events")?;
         if records.is_empty() {
@@ -136,7 +136,7 @@ pub async fn export_poll_bundle(
     }
 
     let manifest = PollBundleManifest {
-        group_id: options.group_id.clone(),
+        org_id: options.org_id.clone(),
         poll_id: poll.poll_id.clone(),
         poll_event_ulid: poll_event.event_ulid.to_string(),
         poll_hash_hex: hex::encode(poll_hash.0),

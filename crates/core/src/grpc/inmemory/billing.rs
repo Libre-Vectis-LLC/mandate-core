@@ -151,7 +151,7 @@ impl BillingStore for InMemoryBilling {
         let mut groups = self.groups.lock();
         let record = groups
             .get_mut(&org_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         if record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
                 "group does not belong to tenant".into(),
@@ -174,7 +174,7 @@ impl BillingStore for InMemoryBilling {
         let groups = self.groups.lock();
         let record = groups
             .get(&org_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         let balance_u64 = u64::try_from(record.balance_nanos)
             .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
         Ok(Nanos::new(balance_u64))
@@ -207,7 +207,7 @@ impl BillingStore for InMemoryBilling {
         let mut groups = self.groups.lock();
         let record = groups
             .get_mut(&org_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
 
         if record.balance_nanos < delta {
             return Err(StorageError::PreconditionFailed(
@@ -296,7 +296,7 @@ impl BillingStore for InMemoryBilling {
         let mut groups = self.groups.lock();
         let org_record = groups
             .get_mut(&org_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
+            .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
 
         // Verify group belongs to tenant
         if org_record.tenant != tenant {
@@ -351,7 +351,7 @@ impl BillingStore for InMemoryBilling {
         let source_record =
             groups
                 .get(&source_group)
-                .ok_or(StorageError::NotFound(NotFound::Group {
+                .ok_or(StorageError::NotFound(NotFound::Organization {
                     org_id: source_group,
                 }))?;
 
@@ -366,7 +366,7 @@ impl BillingStore for InMemoryBilling {
         let dest_record =
             groups
                 .get(&dest_group)
-                .ok_or(StorageError::NotFound(NotFound::Group {
+                .ok_or(StorageError::NotFound(NotFound::Organization {
                     org_id: dest_group,
                 }))?;
 

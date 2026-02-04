@@ -32,7 +32,7 @@ pub enum MeteringError {
     #[error("tenant not found: {0}")]
     TenantNotFound(String),
 
-    /// Group not found in billing system.
+    /// Organization not found in billing system.
     #[error("org not found: {0}")]
     OrgNotFound(String),
 }
