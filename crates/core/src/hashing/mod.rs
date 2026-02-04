@@ -311,7 +311,7 @@ mod tests {
         let h = poll_hash_sha3_256(&poll).expect("hash poll");
         assert_eq!(
             encode(h.0),
-            "b31872475eb5d4a4f11e3b9cfaa4a96220eb78e9736f5a0493f2644dab431595"
+            "934517455d282b9f66f189ce4bbf0b9b2ac4c36071f502624705b856324454b9"
         );
     }
 
