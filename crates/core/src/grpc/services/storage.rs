@@ -1,7 +1,7 @@
 //! StorageService gRPC implementation.
 
 use crate::billing::{default_egress_meter, SharedEgressMeter};
-use crate::ids::GroupId;
+use crate::ids::OrganizationId;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
@@ -46,9 +46,9 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<UploadKeyBlobsResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -88,7 +88,7 @@ impl StorageService for StorageServiceImpl {
         }
 
         self.store
-            .put_key_blobs(tenant, group_id, entries)
+            .put_key_blobs(tenant, org_id, entries)
             .await
             .map_err(to_status)?;
         Ok(Response::new(UploadKeyBlobsResponse {}))
@@ -100,9 +100,9 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<DownloadMyKeyBlobResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -121,24 +121,24 @@ impl StorageService for StorageServiceImpl {
 
         let blob = self
             .store
-            .get_key_blob(tenant, group_id, rage_pub)
+            .get_key_blob(tenant, org_id, rage_pub)
             .await
             .map_err(to_status)?;
 
         // Calculate egress bytes for billing
         let total_bytes = blob.len();
-        let group_id_str = group_id.to_string();
+        let org_id_str = org_id.to_string();
 
         // Check egress balance before sending data
         self.egress_meter
-            .check_egress(&group_id_str, total_bytes)
+            .check_egress(&org_id_str, total_bytes)
             .await
             .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
 
         // Record egress after preparing response
         let _ = self
             .egress_meter
-            .record_egress(&group_id_str, total_bytes)
+            .record_egress(&org_id_str, total_bytes)
             .await;
 
         Ok(Response::new(DownloadMyKeyBlobResponse {
@@ -152,9 +152,9 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<UploadAccessTokenBlobsResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -202,7 +202,7 @@ impl StorageService for StorageServiceImpl {
         let ring_hash = [0u8; 32];
 
         self.store
-            .put_access_token_blobs(tenant, group_id, ring_hash, entries)
+            .put_access_token_blobs(tenant, org_id, ring_hash, entries)
             .await
             .map_err(to_status)?;
         Ok(Response::new(UploadAccessTokenBlobsResponse {}))
@@ -214,9 +214,9 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<DownloadMyAccessTokenBlobResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -235,7 +235,7 @@ impl StorageService for StorageServiceImpl {
 
         let blob = self
             .store
-            .get_access_token_blob(tenant, group_id, rage_pub)
+            .get_access_token_blob(tenant, org_id, rage_pub)
             .await
             .map_err(to_status)?;
 
@@ -250,16 +250,16 @@ impl StorageService for StorageServiceImpl {
     ) -> Result<Response<GetEdgeAccessTokenResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
 
         let (current, previous, rotated_at_ms) = self
             .store
-            .get_edge_access_token(tenant, group_id)
+            .get_edge_access_token(tenant, org_id)
             .await
             .map_err(to_status)?;
 

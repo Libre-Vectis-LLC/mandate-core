@@ -1,12 +1,12 @@
-//! GroupService gRPC implementation.
+//! OrganizationService gRPC implementation.
 
-use crate::ids::{GroupId, TenantId};
+use crate::ids::{OrganizationId, TenantId};
 use crate::ring_log::RingDelta;
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use mandate_proto::mandate::v1::{
-    group_service_server::GroupService, CreateGroupRequest, CreateGroupResponse, GetGroupRequest,
-    GetGroupResponse, SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
+    organization_service_server::OrganizationService, CreateOrganizationRequest, CreateOrganizationResponse, GetOrganizationRequest,
+    GetOrganizationResponse, SetOwnerPublicKeyRequest, SetOwnerPublicKeyResponse,
 };
 use nazgul::traits::LocalByteConvertible;
 use tonic::{Request, Response, Status};
@@ -14,22 +14,22 @@ use tonic::{Request, Response, Status};
 use super::to_status;
 
 #[derive(Clone)]
-pub struct GroupServiceImpl {
+pub struct OrganizationServiceImpl {
     store: StorageFacade,
 }
 
-impl GroupServiceImpl {
+impl OrganizationServiceImpl {
     pub fn new(store: StorageFacade) -> Self {
         Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl GroupService for GroupServiceImpl {
-    async fn create_group(
+impl OrganizationService for OrganizationServiceImpl {
+    async fn create_organization(
         &self,
-        request: Request<CreateGroupRequest>,
-    ) -> Result<Response<CreateGroupResponse>, Status> {
+        request: Request<CreateOrganizationRequest>,
+    ) -> Result<Response<CreateOrganizationResponse>, Status> {
         // Extract authenticated tenant from interceptor
         let authenticated_tenant =
             request
@@ -59,14 +59,14 @@ impl GroupService for GroupServiceImpl {
             .into());
         }
 
-        let group_id = self
+        let org_id = self
             .store
-            .create_group(authenticated_tenant, &body.tg_group_id)
+            .create_organization(authenticated_tenant, &body.tg_group_id)
             .await
             .map_err(to_status)?;
 
-        Ok(Response::new(CreateGroupResponse {
-            group_id: group_id.to_string(),
+        Ok(Response::new(CreateOrganizationResponse {
+            org_id: org_id.to_string(),
         }))
     }
 
@@ -86,17 +86,17 @@ impl GroupService for GroupServiceImpl {
                 })?;
 
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
 
-        let (group_tenant, _) = self.store.get_group(group_id).await.map_err(to_status)?;
+        let (org_tenant, _) = self.store.get_organization(org_id).await.map_err(to_status)?;
 
         // Authorization check: verify authenticated tenant owns the group
-        if authenticated_tenant != group_tenant {
+        if authenticated_tenant != org_tenant {
             return Err(RpcError::PermissionDenied {
                 resource: "group",
                 reason: "not authorized for requested group".into(),
@@ -104,7 +104,7 @@ impl GroupService for GroupServiceImpl {
             .into());
         }
 
-        let tenant = group_tenant;
+        let tenant = org_tenant;
 
         let owner_pubkey = body
             .owner_pubkey
@@ -120,7 +120,7 @@ impl GroupService for GroupServiceImpl {
             }
         })?;
 
-        match self.store.current_ring(tenant, group_id).await {
+        match self.store.current_ring(tenant, org_id).await {
             Ok(ring) => {
                 let is_idempotent = ring.members().len() == 1
                     && ring
@@ -143,40 +143,40 @@ impl GroupService for GroupServiceImpl {
 
         // Store owner pubkey in group metadata for delegate key derivation
         self.store
-            .set_owner_pubkey(group_id, crate::ids::MasterPublicKey(owner_pubkey.0))
+            .set_owner_pubkey(org_id, crate::ids::MasterPublicKey(owner_pubkey.0))
             .await
             .map_err(to_status)?;
 
         // Add owner pubkey to ring as first member
         self.store
-            .append_ring_delta(tenant, group_id, RingDelta::Add(owner_pubkey))
+            .append_ring_delta(tenant, org_id, RingDelta::Add(owner_pubkey))
             .await
             .map_err(to_status)?;
 
         Ok(Response::new(SetOwnerPublicKeyResponse {}))
     }
 
-    async fn get_group(
+    async fn get_organization(
         &self,
-        request: Request<GetGroupRequest>,
-    ) -> Result<Response<GetGroupResponse>, Status> {
+        request: Request<GetOrganizationRequest>,
+    ) -> Result<Response<GetOrganizationResponse>, Status> {
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
 
-        let (tenant_id, _tg_group_id) = self.store.get_group(group_id).await.map_err(to_status)?;
+        let (tenant_id, _tg_group_id) = self.store.get_organization(org_id).await.map_err(to_status)?;
         let owner_pubkey = self
             .store
-            .get_owner_pubkey(group_id)
+            .get_owner_pubkey(org_id)
             .await
             .map_err(to_status)?;
 
-        Ok(Response::new(GetGroupResponse {
-            group_id: group_id.to_string(),
+        Ok(Response::new(GetOrganizationResponse {
+            org_id: org_id.to_string(),
             tenant_id: tenant_id.0.to_string(),
             owner_pubkey: owner_pubkey.map(|pk| crate::proto::master_pub_to_proto(&pk)),
         }))

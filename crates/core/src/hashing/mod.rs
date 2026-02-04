@@ -21,7 +21,7 @@ pub use primitives::{
 mod tests {
     use super::*;
     use crate::crypto::ciphertext::Ciphertext;
-    use crate::test_utils::test_group_id;
+    use crate::test_utils::test_org_id;
     use curve25519_dalek::ristretto::RistrettoPoint;
     use hex::encode;
     use nazgul::ring::{Ring, RingHash};
@@ -321,7 +321,7 @@ mod tests {
     impl PollFixture {
         fn poll() -> crate::event::Poll {
             crate::event::Poll {
-                group_id: test_group_id(),
+                org_id: test_org_id(),
                 ring_hash: RingHash([0x11; 32]),
                 poll_id: "poll-1".into(),
                 created_at: 42,

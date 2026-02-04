@@ -8,11 +8,11 @@ package mandate.v1;
 // This service should be exposed only on internal interfaces.
 //
 // ## Use Cases
-// - Configuring POW recovery strategies per group
-// - Monitoring POW state for groups under attack
-// - Manual POW reset (force recovery) for stuck groups
+// - Configuring POW recovery strategies per organization
+// - Monitoring POW state for organizations under attack
+// - Manual POW reset (force recovery) for stuck organizations
 service EdgeAdminService {
-  // SetPowConfig configures POW parameters for a specific group.
+  // SetPowConfig configures POW parameters for a specific organization.
   //
   // Allows operators to customize POW behavior including:
   // - Recovery strategy (time-based, consecutive-success, or rate-based)
@@ -21,33 +21,33 @@ service EdgeAdminService {
   //
   // ## Errors
   // - INVALID_ARGUMENT: invalid config values
-  // - NOT_FOUND: group_id doesn't exist in cache
+  // - NOT_FOUND: org_id doesn't exist in cache
   rpc SetPowConfig (SetPowConfigRequest) returns (SetPowConfigResponse);
 
-  // GetPowState retrieves current POW state for a group.
+  // GetPowState retrieves current POW state for an organization.
   //
   // Returns the current POW requirements and escalation status.
-  // Useful for monitoring groups under attack.
+  // Useful for monitoring organizations under attack.
   //
   // ## Errors
-  // - NOT_FOUND: group has no POW state (never triggered)
+  // - NOT_FOUND: organization has no POW state (never triggered)
   rpc GetPowState (GetPowStateRequest) returns (GetPowStateResponse);
 
-  // ResetPowState forces POW recovery for a group.
+  // ResetPowState forces POW recovery for an organization.
   //
-  // Immediately disables POW requirement for the group and resets
-  // all escalation counters. Use when a group is stuck in POW mode
+  // Immediately disables POW requirement for the organization and resets
+  // all escalation counters. Use when an organization is stuck in POW mode
   // after an attack has subsided.
   //
   // ## Errors
-  // - NOT_FOUND: group has no POW state to reset
+  // - NOT_FOUND: organization has no POW state to reset
   rpc ResetPowState (ResetPowStateRequest) returns (ResetPowStateResponse);
 }
 
-// Request to configure POW settings for a group.
+// Request to configure POW settings for an organization.
 message SetPowConfigRequest {
-  // Group ID (ULID format) to configure.
-  string group_id = 1;
+  // Organization ID (ULID format) to configure.
+  string org_id = 1;
 
   // POW configuration settings.
   EdgePowConfig config = 2;
@@ -89,15 +89,15 @@ message SetPowConfigResponse {
   bool success = 1;
 }
 
-// Request to get POW state for a group.
+// Request to get POW state for an organization.
 message GetPowStateRequest {
-  // Group ID (ULID format) to query.
-  string group_id = 1;
+  // Organization ID (ULID format) to query.
+  string org_id = 1;
 }
 
 // Response containing current POW state.
 message GetPowStateResponse {
-  // Whether POW is currently required for this group.
+  // Whether POW is currently required for this organization.
   bool pow_required = 1;
 
   // Current difficulty multiplier (increases during escalation).
@@ -119,10 +119,10 @@ message GetPowStateResponse {
   uint64 total_successes_since_trigger = 7;
 }
 
-// Request to reset POW state for a group.
+// Request to reset POW state for an organization.
 message ResetPowStateRequest {
-  // Group ID (ULID format) to reset.
-  string group_id = 1;
+  // Organization ID (ULID format) to reset.
+  string org_id = 1;
 }
 
 // Response after POW state reset.

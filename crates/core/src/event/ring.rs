@@ -1,9 +1,9 @@
-use crate::ids::{GroupId, MasterPublicKey, RingHash};
+use crate::ids::{OrganizationId, MasterPublicKey, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RingUpdate {
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     pub ring_hash: RingHash,
     pub operations: Vec<RingOperation>,
 }

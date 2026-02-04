@@ -9,7 +9,7 @@ package mandate.v1;
 // allowing legitimate usage without payment.
 //
 // ## Workflow
-// 1. Client requests operation (e.g., create group)
+// 1. Client requests operation (e.g., create organization)
 // 2. Server returns POW challenge in PowParams
 // 3. Client computes proofs and submits via PowSubmission
 // 4. Server verifies and proceeds or rejects
@@ -34,7 +34,7 @@ message PowParams {
   uint64 time_window_secs = 3;
 
   // Server-generated deterministic nonce (32 bytes).
-  // Derived from tenant ID, group ID, operation type, and server secret.
+  // Derived from tenant ID, organization ID, operation type, and server secret.
   // Prevents cross-operation proof reuse.
   bytes deterministic_nonce = 4;
 

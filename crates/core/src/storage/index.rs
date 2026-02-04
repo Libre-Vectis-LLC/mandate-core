@@ -1,6 +1,6 @@
 //! Specialized lookup indices (bans, votes, polls).
 
-use crate::ids::{GroupId, KeyImage, RingHash, TenantId};
+use crate::ids::{OrganizationId, KeyImage, RingHash, TenantId};
 use async_trait::async_trait;
 
 use super::types::StorageError;
@@ -38,7 +38,7 @@ pub trait BanIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `key_image` - The key image to check
     /// * `operation` - The operation type being attempted
     ///
@@ -49,12 +49,12 @@ pub trait BanIndex {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
-    /// * Bans are scoped per `(group_id, operation)` pair
+    /// * Bans are scoped per `(org_id, operation)` pair
     /// * A banned key image for `PostMessage` does not affect `CastVote` unless separately banned
     async fn is_banned(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         key_image: &KeyImage,
         operation: BannedOperation,
     ) -> Result<bool, StorageError>;
@@ -66,7 +66,7 @@ pub trait BanIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `ring_hash` - The ring hash to count bans for
     ///
     /// # Returns
@@ -77,7 +77,7 @@ pub trait BanIndex {
     async fn count_bans_for_ring(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: &RingHash,
     ) -> Result<usize, StorageError>;
 }
@@ -92,7 +92,7 @@ pub trait VoteKeyImageIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `poll_id` - The poll identifier
     /// * `key_image` - The key image to check
     ///
@@ -103,12 +103,12 @@ pub trait VoteKeyImageIndex {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
-    /// * Key images are scoped per `(poll_id, group_id)` pair
+    /// * Key images are scoped per `(poll_id, org_id)` pair
     /// * A key image used in Poll A does not affect eligibility in Poll B
     async fn is_used(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         poll_id: &str,
         key_image: &KeyImage,
     ) -> Result<bool, StorageError>;
@@ -130,7 +130,7 @@ pub trait PollRingHashIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `poll_id` - The poll identifier (unique within the group)
     /// * `ring_hash` - The ring hash at poll creation time
     ///
@@ -143,11 +143,11 @@ pub trait PollRingHashIndex {
     ///
     /// # Invariants
     /// * Each poll has exactly one associated ring hash (immutable after creation)
-    /// * The ring hash is scoped per `(tenant, group_id, poll_id)` tuple
+    /// * The ring hash is scoped per `(tenant, org_id, poll_id)` tuple
     async fn store(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         poll_id: &str,
         ring_hash: RingHash,
     ) -> Result<(), StorageError>;
@@ -159,7 +159,7 @@ pub trait PollRingHashIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `poll_id` - The poll identifier
     ///
     /// # Returns
@@ -171,7 +171,7 @@ pub trait PollRingHashIndex {
     async fn get(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         poll_id: &str,
     ) -> Result<RingHash, StorageError>;
 }

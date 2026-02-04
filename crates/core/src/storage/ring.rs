@@ -1,6 +1,6 @@
 //! Ring topology state and reconstruction.
 
-use crate::ids::{GroupId, RingHash, TenantId};
+use crate::ids::{OrganizationId, RingHash, TenantId};
 use crate::ring_log::RingDelta;
 use async_trait::async_trait;
 use nazgul::ring::Ring;
@@ -19,7 +19,7 @@ pub trait RingView {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `hash` - The content-addressed hash of the ring
     ///
     /// # Returns
@@ -34,7 +34,7 @@ pub trait RingView {
     async fn ring_by_hash(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         hash: &RingHash,
     ) -> Result<Arc<Ring>, StorageError>;
 
@@ -44,7 +44,7 @@ pub trait RingView {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     ///
     /// # Returns
     /// An `Arc<Ring>` representing the current group membership ring.
@@ -55,7 +55,7 @@ pub trait RingView {
     async fn current_ring(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<Arc<Ring>, StorageError>;
 
     /// Compute the shortest delta path from one ring to another.
@@ -67,7 +67,7 @@ pub trait RingView {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `ring_hash_current` - Optional starting ring hash; `None` means start from genesis
     /// * `ring_hash_target` - Target ring hash
     ///
@@ -84,7 +84,7 @@ pub trait RingView {
     async fn ring_delta_path(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash_current: Option<RingHash>,
         ring_hash_target: RingHash,
     ) -> Result<RingDeltaPath, StorageError>;
@@ -101,7 +101,7 @@ pub trait RingWriter {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `delta` - The ring delta to apply (Add or Remove variant)
     ///
     /// # Returns
@@ -117,7 +117,7 @@ pub trait RingWriter {
     async fn append_delta(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         delta: RingDelta,
     ) -> Result<RingHash, StorageError>;
 }

@@ -1,7 +1,7 @@
 use crate::crypto::signature::Signature;
 use crate::hashing::event_hash_sha3_256;
 use crate::hashing::CanonicalHashError;
-use crate::ids::{ContentHash, EventId, EventUlid, GroupId, RingHash};
+use crate::ids::{ContentHash, EventId, EventUlid, OrganizationId, RingHash};
 use serde::{Deserialize, Serialize};
 
 // Submodules
@@ -22,7 +22,7 @@ pub use vote::{Vote, VoteSelection};
 pub struct Event {
     pub event_ulid: EventUlid,
     pub previous_event_hash: EventId,
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     /// Monotonic sequence assigned by storage; not part of content hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence_no: Option<i64>,
@@ -95,7 +95,7 @@ mod tests {
     use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
     use crate::hashing::ring_hash_sha3_256;
     use crate::ids::{KeyImage, MasterPublicKey};
-    use crate::test_utils::test_group_id;
+    use crate::test_utils::test_org_id;
     use nazgul::keypair::KeyPair;
     use nazgul::ring::Ring;
     use rand::rngs::OsRng;
@@ -127,12 +127,12 @@ mod tests {
         let event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            group_id: test_group_id(),
+            org_id: test_org_id(),
             sequence_no: Some(0),
             processed_at: 123,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: test_group_id(),
+                org_id: test_org_id(),
                 ring_hash: ring_hash_sha3_256(&ring),
                 message_id: "m1".into(),
                 content: Ciphertext(b"hello".to_vec()),
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn poll_hash_sorts_questions_and_options() {
         let poll_unsorted = Poll {
-            group_id: test_group_id(),
+            org_id: test_org_id(),
             ring_hash: RingHash([1u8; 32]),
             poll_id: "poll".into(),
             created_at: 1,
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn vote_hash_sorts_selections_and_option_ids() {
         let vote_unsorted = Vote {
-            group_id: test_group_id(),
+            org_id: test_org_id(),
             ring_hash: RingHash([2u8; 32]),
             poll_id: "p".into(),
             poll_hash: ContentHash([3u8; 32]),
@@ -236,12 +236,12 @@ mod tests {
         let base_event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([8u8; 32]),
-            group_id: test_group_id(),
+            org_id: test_org_id(),
             sequence_no: Some(1),
             processed_at: 10,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: test_group_id(),
+                org_id: test_org_id(),
                 ring_hash: RingHash([7u8; 32]),
                 message_id: "m".into(),
                 content: Ciphertext(b"hi".to_vec()),
@@ -271,12 +271,12 @@ mod tests {
         let base_event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([9u8; 32]),
-            group_id: test_group_id(),
+            org_id: test_org_id(),
             sequence_no: None,
             processed_at: 42,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: test_group_id(),
+                org_id: test_org_id(),
                 ring_hash: RingHash([7u8; 32]),
                 message_id: "m".into(),
                 content: Ciphertext(b"hi".to_vec()),
@@ -297,11 +297,11 @@ mod tests {
     fn event_type_ring_hash_extraction() {
         let ring_hash = RingHash([42u8; 32]);
         let historical_hash = RingHash([99u8; 32]);
-        let group = test_group_id();
+        let org = test_org_id();
 
         // Test each event type returns correct ring_hash
         let poll = EventType::PollCreate(Poll {
-            group_id: group,
+            org_id: group,
             ring_hash,
             poll_id: "p1".into(),
             questions: vec![],
@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(poll.ring_hash(), Some(ring_hash));
 
         let vote = EventType::VoteCast(Vote {
-            group_id: group,
+            org_id: group,
             ring_hash,
             poll_id: "p1".into(),
             poll_hash: ContentHash([0u8; 32]),
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(vote.ring_hash(), Some(ring_hash));
 
         let msg = EventType::MessageCreate(AnonymousMessage {
-            group_id: group,
+            org_id: group,
             ring_hash,
             message_id: "m1".into(),
             content: Ciphertext(b"test".to_vec()),
@@ -331,14 +331,14 @@ mod tests {
         assert_eq!(msg.ring_hash(), Some(ring_hash));
 
         let ring_update = EventType::RingUpdate(RingUpdate {
-            group_id: group,
+            org_id: group,
             ring_hash,
             operations: vec![],
         });
         assert_eq!(ring_update.ring_hash(), Some(ring_hash));
 
         let ban_create = EventType::BanCreate(BanCreate {
-            group_id: group,
+            org_id: group,
             ring_hash,
             target: KeyImage::default(),
             reason: "test".into(),
@@ -347,14 +347,14 @@ mod tests {
         assert_eq!(ban_create.ring_hash(), Some(ring_hash));
 
         let ban_revoke = EventType::BanRevoke(BanRevoke {
-            group_id: group,
+            org_id: group,
             ban_event_id: EventId([0u8; 32]),
         });
         assert_eq!(ban_revoke.ring_hash(), None);
 
         // ProofOfInnocence uses historical_ring_hash
         let proof = EventType::ProofOfInnocence(ProofOfInnocence {
-            group_id: group,
+            org_id: group,
             historical_ring_hash: historical_hash,
         });
         assert_eq!(proof.ring_hash(), Some(historical_hash));
@@ -366,12 +366,12 @@ mod tests {
         let event1 = Event {
             event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
             previous_event_hash: EventId([1u8; 32]),
-            group_id: test_group_id(),
+            org_id: test_org_id(),
             sequence_no: None,
             processed_at: 100,
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
-                group_id: test_group_id(),
+                org_id: test_org_id(),
                 ring_hash: RingHash([7u8; 32]),
                 message_id: "m1".into(),
                 content: Ciphertext(b"test message".to_vec()),
@@ -575,7 +575,7 @@ mod tests {
         // This ensures the signature covers the identity field and prevents tampering
 
         let (signer, ring) = make_ring(3);
-        let group = test_group_id();
+        let org = test_org_id();
         let ring_hash = ring_hash_sha3_256(&ring);
 
         let identity1 = MemberIdentity::telegram("12345".to_string(), Some("alice".to_string()));
@@ -585,12 +585,12 @@ mod tests {
         let mut event = Event {
             event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
             previous_event_hash: EventId([0u8; 32]),
-            group_id: group,
+            org_id: group,
             sequence_no: None,
             processed_at: 100,
             serialization_version: 1,
             event_type: EventType::RingUpdate(RingUpdate {
-                group_id: group,
+                org_id: group,
                 ring_hash,
                 operations: vec![RingOperation::AddMember {
                     public_key: MasterPublicKey([42u8; 32]),
@@ -636,7 +636,7 @@ mod tests {
         // This is a more granular test to ensure all identity fields are covered
 
         let (signer, ring) = make_ring(3);
-        let group = test_group_id();
+        let org = test_org_id();
         let ring_hash = ring_hash_sha3_256(&ring);
 
         let base_identity =
@@ -646,12 +646,12 @@ mod tests {
             Event {
                 event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
                 previous_event_hash: EventId([0u8; 32]),
-                group_id: group,
+                org_id: group,
                 sequence_no: None,
                 processed_at: 100,
                 serialization_version: 1,
                 event_type: EventType::RingUpdate(RingUpdate {
-                    group_id: group,
+                    org_id: group,
                     ring_hash,
                     operations: vec![RingOperation::AddMember {
                         public_key: MasterPublicKey([42u8; 32]),

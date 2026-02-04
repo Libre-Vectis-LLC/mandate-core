@@ -1,4 +1,4 @@
-use crate::ids::{EventUlid, GroupId, RingHash};
+use crate::ids::{EventUlid, OrganizationId, RingHash};
 use age::x25519::Identity as RageIdentity;
 use bip39::{Language, Mnemonic};
 use hkdf::Hkdf;
@@ -37,7 +37,7 @@ pub enum KeyManagerError {
 
 const LABEL_IDENTITY: &[u8] = b"mandate-identity-v1";
 const LABEL_RAGE_MASTER: &[u8] = b"mandate-rage-master";
-const LABEL_GROUP_SHARED: &[u8] = b"mandate-group-shared-v1";
+const LABEL_GROUP_SHARED: &[u8] = b"mandate-org-shared-v1";
 const LABEL_DELEGATE: &[u8] = b"mandate-delegate-signer-v1";
 const LABEL_MEMBER_SESSION: &[u8] = b"mandate-member-session-v1";
 const LABEL_EVENT_KEY: &[u8] = b"mandate-event-key-v1";
@@ -142,18 +142,18 @@ impl SessionNazgulKeyPair {
 /// Derivation helpers implemented directly on `NazgulKeyPair` so both
 /// full and public-only keypairs can reuse the same API.
 pub trait MandateDerivable {
-    fn derive_delegate(&self, group_id: &GroupId) -> DelegateNazgulKeyPair;
-    fn derive_session(&self, group_id: &GroupId, ring_hash: &RingHash) -> SessionNazgulKeyPair;
+    fn derive_delegate(&self, org_id: &OrganizationId) -> DelegateNazgulKeyPair;
+    fn derive_session(&self, org_id: &OrganizationId, ring_hash: &RingHash) -> SessionNazgulKeyPair;
 }
 
 impl MandateDerivable for NazgulKeyPair {
-    fn derive_delegate(&self, group_id: &GroupId) -> DelegateNazgulKeyPair {
-        let ctx = info(LABEL_DELEGATE, &[&group_id.to_bytes()]);
+    fn derive_delegate(&self, org_id: &OrganizationId) -> DelegateNazgulKeyPair {
+        let ctx = info(LABEL_DELEGATE, &[&org_id.to_bytes()]);
         DelegateNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
     }
 
-    fn derive_session(&self, group_id: &GroupId, ring_hash: &RingHash) -> SessionNazgulKeyPair {
-        let ctx = info(LABEL_MEMBER_SESSION, &[&group_id.to_bytes(), &ring_hash.0]);
+    fn derive_session(&self, org_id: &OrganizationId, ring_hash: &RingHash) -> SessionNazgulKeyPair {
+        let ctx = info(LABEL_MEMBER_SESSION, &[&org_id.to_bytes(), &ring_hash.0]);
         SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
     }
 }
@@ -208,30 +208,30 @@ impl KeyManager {
 
     /// (Owner Only) Deterministically derive the Group Shared Secret ($K_{shared}$).
     /// This key is distributed to members via "One Bucket Per Person".
-    /// Path: HKDF(MasterSeed, "mandate-group-shared-v1" || GroupId)
-    pub fn derive_group_shared_secret(&self, group_id: &GroupId) -> [u8; 32] {
-        let info = info(LABEL_GROUP_SHARED, &[&group_id.to_bytes()]);
+    /// Path: HKDF(MasterSeed, "mandate-org-shared-v1" || OrganizationId)
+    pub fn derive_org_shared_secret(&self, org_id: &OrganizationId) -> [u8; 32] {
+        let info = info(LABEL_GROUP_SHARED, &[&org_id.to_bytes()]);
         KdfAlgorithm::Sha3_256.expand::<32>(&self.master_seed, &info)
     }
 
     /// (Owner Only) Derive the Delegate Signing Key using non-hardened derivation.
     /// This allows the server to verify delegation without seeing the private key.
-    /// Child = Parent + Hash("mandate-delegate-signer-v1" || GroupId)
-    pub fn derive_delegate_signing_key(&self, group_id: &GroupId) -> DelegateNazgulKeyPair {
+    /// Child = Parent + Hash("mandate-delegate-signer-v1" || OrganizationId)
+    pub fn derive_delegate_signing_key(&self, org_id: &OrganizationId) -> DelegateNazgulKeyPair {
         let parent = self.derive_nazgul_master_keypair();
-        parent.0.derive_delegate(group_id)
+        parent.0.derive_delegate(org_id)
     }
 
-    /// Derive a member session key (non-hardened) using group_id || ring_hash as context.
+    /// Derive a member session key (non-hardened) using org_id || ring_hash as context.
     /// This aligns with the design where clients sign per-ring with a derived key,
     /// and servers can mirror the public derivation.
     pub fn derive_member_session_key(
         &self,
-        group_id: &GroupId,
+        org_id: &OrganizationId,
         ring_hash: &RingHash,
     ) -> SessionNazgulKeyPair {
         let parent = self.derive_nazgul_master_keypair();
-        parent.0.derive_session(group_id, ring_hash)
+        parent.0.derive_session(org_id, ring_hash)
     }
 }
 
@@ -419,7 +419,7 @@ pub fn decrypt_event_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{event_ulid_from_str, group_id_from_str};
+    use crate::test_utils::{event_ulid_from_str, org_id_from_str};
 
     #[test]
     fn test_mnemonic_roundtrip() {
@@ -448,14 +448,14 @@ mod tests {
     fn test_group_isolation() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let g1 = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-        let g2 = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAY");
+        let g1 = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let g2 = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAY");
         let r1 = RingHash([1u8; 32]);
         let r2 = RingHash([2u8; 32]);
 
         // Shared Secret Isolation
-        let s1 = km.derive_group_shared_secret(&g1);
-        let s2 = km.derive_group_shared_secret(&g2);
+        let s1 = km.derive_org_shared_secret(&g1);
+        let s2 = km.derive_org_shared_secret(&g2);
         assert_ne!(s1, s2);
 
         // Member Session Key Isolation (group + ring)
@@ -475,16 +475,16 @@ mod tests {
     fn test_non_hardened_delegation_verification() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let group_id = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
+        let org_id = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
 
         // Owner derives delegate private key
-        let delegate_sk = km.derive_delegate_signing_key(&group_id);
+        let delegate_sk = km.derive_delegate_signing_key(&org_id);
 
         // Verifier derives delegate public key from Owner Public Key + Context
         let owner_pk = km.derive_nazgul_master_keypair();
         // Public-only derivation using KeyPair::from_public_key_only
         let verifier_kp = NazgulKeyPair::from_public_key_only(*owner_pk.0.public());
-        let derived_pk = verifier_kp.derive_delegate(&group_id);
+        let derived_pk = verifier_kp.derive_delegate(&org_id);
 
         assert_eq!(
             delegate_sk.public(),
@@ -555,7 +555,7 @@ mod tests {
     fn public_derivation_matches_private_for_member_session() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let group = group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB0");
+        let group = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB0");
         let ring = RingHash([7u8; 32]);
 
         let private = km.derive_member_session_key(&group, &ring);
@@ -575,7 +575,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
         let shared =
-            km.derive_group_shared_secret(&group_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+            km.derive_org_shared_secret(&org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
 
         let recipient = km.derive_rage_identity().to_public();
         let blob = encrypt_shared_secret_for_recipient(&shared, &recipient).expect("encrypt");

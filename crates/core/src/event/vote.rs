@@ -1,12 +1,12 @@
 use crate::crypto::ciphertext::Ciphertext;
 use crate::hashing::vote_hash_sha3_256;
 use crate::hashing::CanonicalHashError;
-use crate::ids::{ContentHash, GroupId, RingHash};
+use crate::ids::{ContentHash, OrganizationId, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Vote {
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     pub ring_hash: RingHash,
     pub poll_id: String,
     pub poll_hash: ContentHash,

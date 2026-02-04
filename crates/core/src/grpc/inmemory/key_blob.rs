@@ -1,12 +1,12 @@
 /// In-memory key blob storage.
-use crate::ids::{GroupId, TenantId};
+use crate::ids::{OrganizationId, TenantId};
 use crate::storage::{KeyBlobStore, NotFound, StorageError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-type KeyBlobKey = (TenantId, GroupId, [u8; 32]);
+type KeyBlobKey = (TenantId, OrganizationId, [u8; 32]);
 type KeyBlobMap = HashMap<KeyBlobKey, Arc<[u8]>>;
 
 #[derive(Clone, Default)]
@@ -29,12 +29,12 @@ impl KeyBlobStore for InMemoryKeyBlobs {
     async fn put_many(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         blobs: Vec<([u8; 32], Arc<[u8]>)>,
     ) -> Result<(), StorageError> {
         let mut map = self.inner();
         for (rage_pub, blob) in blobs {
-            map.insert((tenant, group_id, rage_pub), blob);
+            map.insert((tenant, org_id, rage_pub), blob);
         }
         Ok(())
     }
@@ -42,15 +42,15 @@ impl KeyBlobStore for InMemoryKeyBlobs {
     async fn get_one(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     ) -> Result<Arc<[u8]>, StorageError> {
         let map = self.inner();
-        map.get(&(tenant, group_id, rage_pub))
+        map.get(&(tenant, org_id, rage_pub))
             .cloned()
             .ok_or(StorageError::NotFound(NotFound::KeyBlob {
                 tenant,
-                group_id,
+                org_id,
                 rage_pub,
             }))
     }

@@ -1,5 +1,5 @@
 use super::StorageFacade;
-use crate::ids::{GroupId, MasterPublicKey, TenantId};
+use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
 use crate::storage::{PendingMember, StorageError};
 
 impl StorageFacade {
@@ -8,17 +8,17 @@ impl StorageFacade {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Create a new group.
-    pub async fn create_group(
+    pub async fn create_organization(
         &self,
         tenant: TenantId,
         tg_group_id: &str,
-    ) -> Result<GroupId, StorageError> {
-        self.groups.create_group(tenant, tg_group_id).await
+    ) -> Result<OrganizationId, StorageError> {
+        self.groups.create_organization(tenant, tg_group_id).await
     }
 
     /// Get a group's metadata (tenant ID and Telegram group ID).
-    pub async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
-        self.groups.get_group(group_id).await
+    pub async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError> {
+        self.groups.get_organization(org_id).await
     }
 
     /// Set the owner's Nazgul public key for a group.
@@ -26,10 +26,10 @@ impl StorageFacade {
     /// This key is used for verifying owner/delegate signatures on admin events.
     pub async fn set_owner_pubkey(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
         owner_pubkey: MasterPublicKey,
     ) -> Result<(), StorageError> {
-        self.groups.set_owner_pubkey(group_id, owner_pubkey).await
+        self.groups.set_owner_pubkey(org_id, owner_pubkey).await
     }
 
     /// Get the owner's Nazgul public key for a group.
@@ -37,9 +37,9 @@ impl StorageFacade {
     /// Returns `None` if the owner pubkey has not been set yet.
     pub async fn get_owner_pubkey(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<Option<MasterPublicKey>, StorageError> {
-        self.groups.get_owner_pubkey(group_id).await
+        self.groups.get_owner_pubkey(org_id).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -50,13 +50,13 @@ impl StorageFacade {
     pub async fn submit_pending_member(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         tg_user_id: &str,
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
     ) -> Result<String, StorageError> {
         self.pending_members
-            .submit(tenant, group_id, tg_user_id, nazgul_pub, rage_pub)
+            .submit(tenant, org_id, tg_user_id, nazgul_pub, rage_pub)
             .await
     }
 
@@ -64,12 +64,12 @@ impl StorageFacade {
     pub async fn list_pending_members(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         limit: usize,
         page_token: Option<String>,
     ) -> Result<(Vec<PendingMember>, Option<String>), StorageError> {
         self.pending_members
-            .list(tenant, group_id, limit, page_token)
+            .list(tenant, org_id, limit, page_token)
             .await
     }
 
@@ -80,11 +80,11 @@ impl StorageFacade {
     pub async fn get_approved_member_by_tg_user_id(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         tg_user_id: &str,
     ) -> Result<Option<PendingMember>, StorageError> {
         self.pending_members
-            .get_approved_by_tg_user_id(tenant, group_id, tg_user_id)
+            .get_approved_by_tg_user_id(tenant, org_id, tg_user_id)
             .await
     }
 
@@ -99,7 +99,7 @@ impl StorageFacade {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
         display_name: Option<String>,
-    ) -> Result<(String, GroupId), StorageError> {
+    ) -> Result<(String, OrganizationId), StorageError> {
         self.pending_members
             .register_standalone(tenant, invite_code, nazgul_pub, rage_pub, display_name)
             .await
@@ -111,7 +111,7 @@ impl StorageFacade {
     pub async fn list_all_members(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         limit: usize,
         page_token: Option<String>,
         filter_source: Option<&str>,
@@ -120,7 +120,7 @@ impl StorageFacade {
         self.pending_members
             .list_all_members(
                 tenant,
-                group_id,
+                org_id,
                 limit,
                 page_token,
                 filter_source,
@@ -132,7 +132,7 @@ impl StorageFacade {
     /// List all groups that a member belongs to, by their Nazgul public key.
     ///
     /// Used for wallet restore flow to discover group memberships.
-    pub async fn list_groups_for_member(
+    pub async fn list_organizations_for_member(
         &self,
         tenant: TenantId,
         nazgul_pub: &[u8],
@@ -141,14 +141,14 @@ impl StorageFacade {
         filter_status: Option<&str>,
     ) -> Result<
         (
-            Vec<crate::storage::GroupMembershipInfo>,
+            Vec<crate::storage::OrganizationMembershipInfo>,
             Option<String>,
             u32,
         ),
         StorageError,
     > {
         self.pending_members
-            .list_groups_for_member(tenant, nazgul_pub, limit, page_token, filter_status)
+            .list_organizations_for_member(tenant, nazgul_pub, limit, page_token, filter_status)
             .await
     }
 }

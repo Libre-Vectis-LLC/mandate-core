@@ -5,7 +5,7 @@ use crate::grpc::inmemory::{
 };
 use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};
 use crate::grpc::services::{
-    AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, GroupServiceImpl,
+    AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, OrganizationServiceImpl,
     MemberServiceImpl, RingServiceImpl, StorageServiceImpl,
 };
 use crate::ids::{BotSecret, TenantId, TenantToken};
@@ -13,7 +13,7 @@ use crate::storage::facade::{StorageFacade, StorageFacadeBuilderError};
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
     billing_service_server::BillingServiceServer, event_service_server::EventServiceServer,
-    group_service_server::GroupServiceServer, member_service_server::MemberServiceServer,
+    organization_service_server::OrganizationServiceServer, member_service_server::MemberServiceServer,
     ring_service_server::RingServiceServer, storage_service_server::StorageServiceServer,
 };
 use std::net::SocketAddr;
@@ -39,7 +39,7 @@ pub struct CoreServices {
     pub admin: AdminServiceImpl,
     pub auth: AuthServiceImpl,
     pub billing: BillingServiceImpl,
-    pub group: GroupServiceImpl,
+    pub organization: OrganizationServiceImpl,
     pub member: MemberServiceImpl,
 }
 
@@ -97,7 +97,7 @@ impl CoreServices {
             admin: AdminServiceImpl::new(facade.clone()),
             auth: AuthServiceImpl::new(facade.clone()),
             billing: BillingServiceImpl::new(facade.clone()),
-            group: GroupServiceImpl::new(facade.clone()),
+            organization: OrganizationServiceImpl::new(facade.clone()),
             member: MemberServiceImpl::new(facade.clone()),
         })
     }
@@ -141,7 +141,7 @@ pub fn run_internal_server(
     admin: AdminServiceImpl,
     auth: AuthServiceImpl,
     billing: BillingServiceImpl,
-    group: GroupServiceImpl,
+    organization: OrganizationServiceImpl,
     member: MemberServiceImpl,
     bot_secret: BotSecret,
     addr: SocketAddr,
@@ -167,7 +167,7 @@ pub fn run_internal_server(
                 .max_encoding_message_size(max_bytes),
         ))
         .add_service(tonic_web::enable(
-            GroupServiceServer::new(group)
+            OrganizationServiceServer::new(organization)
                 .max_decoding_message_size(max_bytes)
                 .max_encoding_message_size(max_bytes),
         ))

@@ -102,9 +102,9 @@ impl AuthService for AuthServiceImpl {
             .map_err(to_status)?;
 
         match result {
-            Some((tenant_id, group_id)) => Ok(Response::new(ResolveTelegramUserResponse {
+            Some((tenant_id, org_id)) => Ok(Response::new(ResolveTelegramUserResponse {
                 tenant_id: tenant_id.0.to_string(),
-                group_id: group_id.0.to_string(),
+                org_id: org_id.0.to_string(),
             })),
             None => Err(Status::not_found(format!(
                 "No tenant or group found for Telegram user: {}",

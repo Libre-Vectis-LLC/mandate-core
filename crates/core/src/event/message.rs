@@ -1,10 +1,10 @@
 use crate::crypto::ciphertext::Ciphertext;
-use crate::ids::{GroupId, RingHash};
+use crate::ids::{OrganizationId, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnonymousMessage {
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     pub ring_hash: RingHash,
     pub message_id: String,
     pub content: Ciphertext,

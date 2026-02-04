@@ -1,6 +1,6 @@
 //! Event log interfaces (append-only).
 
-use crate::ids::{EventId, GroupId, SequenceNo, TenantId};
+use crate::ids::{EventId, OrganizationId, SequenceNo, TenantId};
 use async_trait::async_trait;
 
 use super::types::{EventBytes, EventRecord, StorageError};
@@ -19,7 +19,7 @@ pub trait EventWriter {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier owning this event
-    /// * `group_id` - The group identifier scoping this event
+    /// * `org_id` - The group identifier scoping this event
     /// * `event_bytes` - Canonical, signed, serialized event bytes
     ///
     /// # Returns
@@ -32,12 +32,12 @@ pub trait EventWriter {
     ///
     /// # Invariants
     /// * Events are immutable once appended
-    /// * Sequence numbers are strictly increasing per `(tenant, group_id)` pair
+    /// * Sequence numbers are strictly increasing per `(tenant, org_id)` pair
     /// * Single-writer assumption: concurrent appends for the same group are undefined
     async fn append(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         event_bytes: EventBytes,
     ) -> Result<(EventId, SequenceNo), StorageError>;
 }
@@ -53,7 +53,7 @@ pub trait EventReader {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `after_sequence` - Optional anchor; if `None`, starts from the first event
     /// * `limit` - Maximum number of events to return
     ///
@@ -70,7 +70,7 @@ pub trait EventReader {
     async fn stream_group(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         after_sequence: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError>;
@@ -79,7 +79,7 @@ pub trait EventReader {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `id` - The event identifier
     ///
     /// # Returns
@@ -91,18 +91,18 @@ pub trait EventReader {
     async fn get(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         id: &EventId,
     ) -> Result<EventRecord, StorageError>;
 
     /// Retrieve the most recent event for a group.
     ///
     /// This is a shortcut for retrieving the event with the highest sequence number
-    /// for the given `(tenant, group_id)` pair.
+    /// for the given `(tenant, org_id)` pair.
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     ///
     /// # Returns
     /// The most recent `EventRecord` in append order.
@@ -110,5 +110,5 @@ pub trait EventReader {
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Tail)` - When the group has no events yet
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError>;
+    async fn tail(&self, tenant: TenantId, org_id: OrganizationId) -> Result<EventRecord, StorageError>;
 }

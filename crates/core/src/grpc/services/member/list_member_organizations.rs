@@ -1,17 +1,17 @@
-//! ListMemberGroups RPC handler.
+//! ListMemberOrganizations RPC handler.
 
 use crate::grpc::services::{clamp_events_limit, extract_tenant_id, to_status};
 use mandate_proto::mandate::v1::{
-    GroupMembership, ListMemberGroupsRequest, ListMemberGroupsResponse, PageToken,
+    OrganizationMembership, ListMemberOrganizationsRequest, ListMemberOrganizationsResponse, PageToken,
 };
 use tonic::{Request, Response, Status};
 
 use super::MemberServiceImpl;
 
-pub(super) async fn list_member_groups(
+pub(super) async fn list_member_organizations(
     service: &MemberServiceImpl,
-    request: Request<ListMemberGroupsRequest>,
-) -> Result<Response<ListMemberGroupsResponse>, Status> {
+    request: Request<ListMemberOrganizationsRequest>,
+) -> Result<Response<ListMemberOrganizationsResponse>, Status> {
     // Extract tenant from authentication context
     let tenant = extract_tenant_id(&request, &service.store).await?;
     let body = request.into_inner();
@@ -33,7 +33,7 @@ pub(super) async fn list_member_groups(
     // Query groups for this member
     let (groups, next_page, total_count) = service
         .store
-        .list_groups_for_member(
+        .list_organizations_for_member(
             tenant,
             &body.nazgul_pub,
             clamp_events_limit(body.limit),
@@ -52,15 +52,15 @@ pub(super) async fn list_member_groups(
     // Convert to proto messages
     let proto_groups = groups
         .into_iter()
-        .map(|g| GroupMembership {
-            group_id: g.group_id.to_string(),
+        .map(|g| OrganizationMembership {
+            org_id: g.org_id.to_string(),
             joined_at: g.joined_at_ms,
             status: g.status,
         })
         .collect();
 
-    Ok(Response::new(ListMemberGroupsResponse {
-        groups: proto_groups,
+    Ok(Response::new(ListMemberOrganizationsResponse {
+        orgs: proto_groups,
         next_page_token: next_page.map(|value| PageToken { value }),
         total_count,
     }))

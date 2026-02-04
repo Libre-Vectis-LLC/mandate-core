@@ -4,7 +4,7 @@
 //! - Single table, multi-tenant, append-only event log (no routine replay; audit-focused).
 //! - Zero-copy reads via `Arc<[u8]>`/slices; deterministic ordering by append sequence.
 //! - Ring reconstruction is the only replay scenario; implementations find a shortest-path delta slice.
-//! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, group_id, ring_hash)`,
+//! - PostgreSQL-friendly: btree/hash indexes on `(ring_hash)`, `(tenant_id, org_id, ring_hash)`,
 //!   `(master_pubkey, created_at)`, keyset pagination.
 
 pub mod facade;
@@ -12,7 +12,7 @@ pub use facade::{StorageFacade, StorageFacadeBuilder, StorageFacadeBuilderError}
 
 pub mod billing;
 pub mod event;
-pub mod group;
+pub mod organization;
 pub mod index;
 pub mod keys;
 pub mod ring;
@@ -33,8 +33,8 @@ pub use keys::{AccessTokenBlobStore, EdgeAccessTokenStore, KeyBlobStore};
 
 pub use tenant::TenantTokenStore;
 
-pub use group::{
-    GroupMembershipInfo, GroupMetadataStore, MemberInfo, PendingMember, PendingMemberStatus,
+pub use organization::{
+    OrganizationMembershipInfo, OrganizationMetadataStore, MemberInfo, PendingMember, PendingMemberStatus,
     PendingMemberStore,
 };
 

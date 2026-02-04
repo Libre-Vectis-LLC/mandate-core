@@ -1,6 +1,6 @@
 //! Key material storage (encrypted blobs).
 
-use crate::ids::{GroupId, TenantId};
+use crate::ids::{OrganizationId, TenantId};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -8,7 +8,7 @@ use super::types::StorageError;
 
 /// Store for member key blobs, indexed by Rage public key.
 ///
-/// Keys are scoped by `(tenant, group_id, rage_pub)` to avoid cross-group and cross-tenant leaks.
+/// Keys are scoped by `(tenant, org_id, rage_pub)` to avoid cross-group and cross-tenant leaks.
 #[async_trait]
 pub trait KeyBlobStore {
     /// Insert multiple encrypted key blobs atomically.
@@ -18,7 +18,7 @@ pub trait KeyBlobStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `blobs` - Vector of `(rage_pub, encrypted_blob)` pairs
     ///
     /// # Returns
@@ -34,7 +34,7 @@ pub trait KeyBlobStore {
     async fn put_many(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         blobs: Vec<([u8; 32], Arc<[u8]>)>,
     ) -> Result<(), StorageError>;
 
@@ -42,7 +42,7 @@ pub trait KeyBlobStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `rage_pub` - The recipient's Rage public key
     ///
     /// # Returns
@@ -54,7 +54,7 @@ pub trait KeyBlobStore {
     async fn get_one(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     ) -> Result<Arc<[u8]>, StorageError>;
 }
@@ -72,13 +72,13 @@ pub trait AccessTokenBlobStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `ring_hash` - The ring hash at the time of generation
     /// * `blobs` - Vector of `(rage_pub, encrypted_token)` pairs
     async fn put_many_access_tokens(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: [u8; 32],
         blobs: Vec<([u8; 32], Arc<[u8]>)>,
     ) -> Result<(), StorageError>;
@@ -87,7 +87,7 @@ pub trait AccessTokenBlobStore {
     async fn get_one_access_token(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     ) -> Result<Arc<[u8]>, StorageError>;
 }
@@ -104,7 +104,7 @@ pub trait EdgeAccessTokenStore {
     async fn upsert(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: [u8; 32],
         current_token: [u8; 32],
         previous_token: Option<[u8; 32]>,
@@ -117,6 +117,6 @@ pub trait EdgeAccessTokenStore {
     async fn get(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<([u8; 32], Option<[u8; 32]>, u64), StorageError>;
 }

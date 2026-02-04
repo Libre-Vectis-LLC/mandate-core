@@ -5,7 +5,7 @@ use mandate_proto::mandate::v1::member_service_server::MemberService;
 
 mod export;
 mod list;
-mod list_member_groups;
+mod list_member_organizations;
 mod pending;
 
 #[derive(Clone)]
@@ -75,11 +75,11 @@ impl MemberService for MemberServiceImpl {
         export::export_members(self, request).await
     }
 
-    async fn list_member_groups(
+    async fn list_member_organizations(
         &self,
-        request: tonic::Request<mandate_proto::mandate::v1::ListMemberGroupsRequest>,
-    ) -> Result<tonic::Response<mandate_proto::mandate::v1::ListMemberGroupsResponse>, tonic::Status>
+        request: tonic::Request<mandate_proto::mandate::v1::ListMemberOrganizationsRequest>,
+    ) -> Result<tonic::Response<mandate_proto::mandate::v1::ListMemberOrganizationsResponse>, tonic::Status>
     {
-        list_member_groups::list_member_groups(self, request).await
+        list_member_organizations::list_member_organizations(self, request).await
     }
 }

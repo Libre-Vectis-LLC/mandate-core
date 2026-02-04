@@ -2,7 +2,7 @@
 
 use super::service::EventServiceImpl;
 use crate::event::Event;
-use crate::ids::GroupId;
+use crate::ids::OrganizationId;
 use crate::key_manager::decrypt_event_content;
 use crate::proto::ring_hash_to_hash32;
 use age::x25519::Identity as RageIdentity;
@@ -26,9 +26,9 @@ impl EventServiceImpl {
         let body = request.into_inner();
 
         // 1. Parse request fields
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| Status::invalid_argument(format!("invalid group_id: {e}")))?,
+        let org_id = OrganizationId(
+            crate::proto::parse_ulid(&body.org_id)
+                .map_err(|e| Status::invalid_argument(format!("invalid org_id: {e}")))?,
         );
 
         let event_ulid_proto = body
@@ -50,7 +50,7 @@ impl EventServiceImpl {
         // 3. Find the Poll event
         let event_records = self
             .store
-            .stream_events(tenant, group_id, None, usize::MAX)
+            .stream_events(tenant, org_id, None, usize::MAX)
             .await
             .map_err(to_status)?;
 
@@ -164,9 +164,9 @@ impl EventServiceImpl {
         let body = request.into_inner();
 
         // 1. Parse request fields
-        let group_id = GroupId(
-            crate::proto::parse_ulid(&body.group_id)
-                .map_err(|e| Status::invalid_argument(format!("invalid group_id: {e}")))?,
+        let org_id = OrganizationId(
+            crate::proto::parse_ulid(&body.org_id)
+                .map_err(|e| Status::invalid_argument(format!("invalid org_id: {e}")))?,
         );
 
         let event_ulid_proto = body
@@ -188,7 +188,7 @@ impl EventServiceImpl {
         // 3. Stream all events for this group
         let event_records = self
             .store
-            .stream_events(tenant, group_id, None, usize::MAX)
+            .stream_events(tenant, org_id, None, usize::MAX)
             .await
             .map_err(to_status)?;
 
@@ -281,7 +281,7 @@ impl EventServiceImpl {
             .map_err(|e| Status::internal(format!("failed to serialize poll event: {e}")))?;
 
         Ok(Response::new(GetPollBundleResponse {
-            group_id: group_id.0.to_string(),
+            org_id: org_id.0.to_string(),
             poll_id: poll.poll_id.to_string(),
             poll_event_ulid: event_ulid.0.to_string(),
             poll_hash_hex,

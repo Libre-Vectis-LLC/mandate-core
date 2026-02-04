@@ -1,16 +1,16 @@
 /// In-memory group metadata storage.
-use crate::ids::{GroupId, MasterPublicKey, TenantId};
-use crate::storage::{GroupMetadataStore, NotFound, StorageError};
+use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
+use crate::storage::{OrganizationMetadataStore, NotFound, StorageError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(crate) type GroupMap = HashMap<GroupId, GroupRecord>;
+pub(crate) type OrgMap = HashMap<OrganizationId, OrganizationRecord>;
 
 #[derive(Clone, Default)]
 pub struct InMemoryGroups {
-    groups: Arc<Mutex<GroupMap>>,
+    groups: Arc<Mutex<OrgMap>>,
 }
 
 impl InMemoryGroups {
@@ -21,7 +21,7 @@ impl InMemoryGroups {
     /// Returns a shared reference to the internal group map.
     ///
     /// This is primarily used for constructing `InMemoryBilling` in tests.
-    pub fn shared(&self) -> Arc<Mutex<GroupMap>> {
+    pub fn shared(&self) -> Arc<Mutex<OrgMap>> {
         Arc::clone(&self.groups)
     }
 }
@@ -31,7 +31,7 @@ impl InMemoryGroups {
 /// This type is exposed publicly to support test infrastructure that needs
 /// to share group maps between `InMemoryGroups` and `InMemoryBilling`.
 #[derive(Clone, Debug)]
-pub struct GroupRecord {
+pub struct OrganizationRecord {
     /// Tenant that owns this group.
     pub tenant: TenantId,
     /// Telegram group ID.
@@ -43,54 +43,54 @@ pub struct GroupRecord {
 }
 
 #[async_trait]
-impl GroupMetadataStore for InMemoryGroups {
-    async fn create_group(
+impl OrganizationMetadataStore for InMemoryGroups {
+    async fn create_organization(
         &self,
         tenant: TenantId,
         tg_group_id: &str,
-    ) -> Result<GroupId, StorageError> {
+    ) -> Result<OrganizationId, StorageError> {
         let mut map = self.groups.lock();
-        let group_id = GroupId(ulid::Ulid::new());
+        let org_id = OrganizationId(ulid::Ulid::new());
         map.insert(
-            group_id,
-            GroupRecord {
+            org_id,
+            OrganizationRecord {
                 tenant,
                 tg_group_id: tg_group_id.to_string(),
                 balance_nanos: 0,
                 owner_pubkey: None,
             },
         );
-        Ok(group_id)
+        Ok(org_id)
     }
 
-    async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError> {
+    async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError> {
         let map = self.groups.lock();
-        map.get(&group_id)
+        map.get(&org_id)
             .map(|record| (record.tenant, record.tg_group_id.clone()))
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))
     }
 
     async fn set_owner_pubkey(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
         owner_pubkey: MasterPublicKey,
     ) -> Result<(), StorageError> {
         let mut map = self.groups.lock();
         let record = map
-            .get_mut(&group_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+            .get_mut(&org_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
         record.owner_pubkey = Some(owner_pubkey);
         Ok(())
     }
 
     async fn get_owner_pubkey(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<Option<MasterPublicKey>, StorageError> {
         let map = self.groups.lock();
         let record = map
-            .get(&group_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+            .get(&org_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
         Ok(record.owner_pubkey)
     }
 }

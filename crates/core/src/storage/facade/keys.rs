@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::StorageFacade;
-use crate::ids::{GroupId, TenantId};
+use crate::ids::{OrganizationId, TenantId};
 use crate::storage::StorageError;
 
 impl StorageFacade {
@@ -13,20 +13,20 @@ impl StorageFacade {
     pub async fn put_key_blobs(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         blobs: Vec<([u8; 32], Arc<[u8]>)>,
     ) -> Result<(), StorageError> {
-        self.key_blobs.put_many(tenant, group_id, blobs).await
+        self.key_blobs.put_many(tenant, org_id, blobs).await
     }
 
     /// Retrieve a single key blob by rage public key.
     pub async fn get_key_blob(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     ) -> Result<Arc<[u8]>, StorageError> {
-        self.key_blobs.get_one(tenant, group_id, rage_pub).await
+        self.key_blobs.get_one(tenant, org_id, rage_pub).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ impl StorageFacade {
     pub async fn put_access_token_blobs(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: [u8; 32],
         blobs: Vec<([u8; 32], Arc<[u8]>)>,
     ) -> Result<(), StorageError> {
@@ -46,7 +46,7 @@ impl StorageFacade {
             .ok_or(StorageError::Backend(
                 "access token blobs not configured".into(),
             ))?
-            .put_many_access_tokens(tenant, group_id, ring_hash, blobs)
+            .put_many_access_tokens(tenant, org_id, ring_hash, blobs)
             .await
     }
 
@@ -54,7 +54,7 @@ impl StorageFacade {
     pub async fn get_access_token_blob(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     ) -> Result<Arc<[u8]>, StorageError> {
         self.access_token_blobs
@@ -62,7 +62,7 @@ impl StorageFacade {
             .ok_or(StorageError::Backend(
                 "access token blobs not configured".into(),
             ))?
-            .get_one_access_token(tenant, group_id, rage_pub)
+            .get_one_access_token(tenant, org_id, rage_pub)
             .await
     }
 
@@ -74,7 +74,7 @@ impl StorageFacade {
     pub async fn upsert_edge_access_token(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: [u8; 32],
         current_token: [u8; 32],
         previous_token: Option<[u8; 32]>,
@@ -87,7 +87,7 @@ impl StorageFacade {
             ))?
             .upsert(
                 tenant,
-                group_id,
+                org_id,
                 ring_hash,
                 current_token,
                 previous_token,
@@ -100,14 +100,14 @@ impl StorageFacade {
     pub async fn get_edge_access_token(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<([u8; 32], Option<[u8; 32]>, u64), StorageError> {
         self.edge_access_tokens
             .as_ref()
             .ok_or(StorageError::Backend(
                 "edge access tokens not configured".into(),
             ))?
-            .get(tenant, group_id)
+            .get(tenant, org_id)
             .await
     }
 }

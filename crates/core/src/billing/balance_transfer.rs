@@ -23,9 +23,9 @@ use crate::billing::{Nanos, TransferError, TransferReceipt};
 /// use mandate_core::billing::{BalanceTransferService, Nanos};
 /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
 /// // Transfer from tenant to group
-/// let receipt = service.transfer_to_group(
+/// let receipt = service.transfer_to_organization(
 ///     "tenant_123",
-///     "group_abc",
+///     "org_abc",
 ///     Nanos::from_dollars(100.0),
 /// ).await?;
 ///
@@ -41,7 +41,7 @@ pub trait BalanceTransferService: Send + Sync {
     /// # Arguments
     ///
     /// * `tenant_id` - Source tenant ID
-    /// * `group_id` - Destination group ID
+    /// * `org_id` - Destination group ID
     /// * `amount` - Amount to transfer (must be > 0)
     ///
     /// # Errors
@@ -57,18 +57,18 @@ pub trait BalanceTransferService: Send + Sync {
     /// ```no_run
     /// # use mandate_core::billing::{BalanceTransferService, Nanos};
     /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
-    /// let receipt = service.transfer_to_group(
+    /// let receipt = service.transfer_to_organization(
     ///     "tenant_123",
-    ///     "group_abc",
+    ///     "org_abc",
     ///     Nanos::from_dollars(50.0),
     /// ).await?;
     /// # Ok(())
     /// # }
     /// ```
-    async fn transfer_to_group(
+    async fn transfer_to_organization(
         &self,
         tenant_id: &str,
-        group_id: &str,
+        org_id: &str,
         amount: Nanos,
     ) -> Result<TransferReceipt, TransferError>;
 
@@ -77,7 +77,7 @@ pub trait BalanceTransferService: Send + Sync {
     /// # Arguments
     ///
     /// * `tenant_id` - Destination tenant ID
-    /// * `group_id` - Source group ID
+    /// * `org_id` - Source group ID
     /// * `amount` - Amount to withdraw (must be > 0)
     ///
     /// # Errors
@@ -95,7 +95,7 @@ pub trait BalanceTransferService: Send + Sync {
     /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
     /// let receipt = service.withdraw_from_group(
     ///     "tenant_123",
-    ///     "group_abc",
+    ///     "org_abc",
     ///     Nanos::from_dollars(25.0),
     /// ).await?;
     /// # Ok(())
@@ -104,7 +104,7 @@ pub trait BalanceTransferService: Send + Sync {
     async fn withdraw_from_group(
         &self,
         tenant_id: &str,
-        group_id: &str,
+        org_id: &str,
         amount: Nanos,
     ) -> Result<TransferReceipt, TransferError>;
 
@@ -132,8 +132,8 @@ pub trait BalanceTransferService: Send + Sync {
     /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
     /// let receipt = service.transfer_between_groups(
     ///     "tenant_123",
-    ///     "group_abc",
-    ///     "group_xyz",
+    ///     "org_abc",
+    ///     "org_xyz",
     ///     Nanos::from_dollars(10.0),
     /// ).await?;
     /// # Ok(())

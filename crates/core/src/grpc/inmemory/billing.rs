@@ -1,5 +1,5 @@
 /// In-memory billing store and gift card management.
-use crate::ids::{GroupId, Nanos, TenantId};
+use crate::ids::{OrganizationId, Nanos, TenantId};
 use crate::storage::{
     BillingStore, GiftCard, GiftCardStore, IdempotencyResult, NotFound, StorageError,
 };
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::group::GroupMap;
+use super::organization::OrgMap;
 
 /// Tenant balance record with timestamp.
 #[derive(Debug, Clone, Copy)]
@@ -78,7 +78,7 @@ impl GiftCardStore for InMemoryGiftCards {
 #[derive(Clone)]
 pub struct InMemoryBilling {
     tenants: Arc<Mutex<TenantBalanceMap>>,
-    groups: Arc<Mutex<GroupMap>>,
+    groups: Arc<Mutex<OrgMap>>,
     tg_user_to_tenant: Arc<Mutex<HashMap<String, TenantId>>>,
     idempotency_keys: Arc<Mutex<HashMap<String, IdempotencyEntry>>>,
 }
@@ -88,7 +88,7 @@ impl InMemoryBilling {
     ///
     /// This is intended for testing purposes where billing needs to interact
     /// with an in-memory group store.
-    pub fn new(groups: Arc<Mutex<GroupMap>>) -> Self {
+    pub fn new(groups: Arc<Mutex<OrgMap>>) -> Self {
         Self {
             tenants: Arc::new(Mutex::new(HashMap::new())),
             groups,
@@ -129,10 +129,10 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
-    async fn transfer_to_group(
+    async fn transfer_to_organization(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
         let delta = i64::try_from(amount.as_u64())
@@ -150,8 +150,8 @@ impl BillingStore for InMemoryBilling {
 
         let mut groups = self.groups.lock();
         let record = groups
-            .get_mut(&group_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+            .get_mut(&org_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
         if record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
                 "group does not belong to tenant".into(),
@@ -170,11 +170,11 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
-    async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError> {
+    async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError> {
         let groups = self.groups.lock();
         let record = groups
-            .get(&group_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+            .get(&org_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
         let balance_u64 = u64::try_from(record.balance_nanos)
             .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
         Ok(Nanos::new(balance_u64))
@@ -196,9 +196,9 @@ impl BillingStore for InMemoryBilling {
         })
     }
 
-    async fn deduct_group_balance(
+    async fn deduct_organization_balance(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
         let delta = i64::try_from(amount.as_u64())
@@ -206,8 +206,8 @@ impl BillingStore for InMemoryBilling {
 
         let mut groups = self.groups.lock();
         let record = groups
-            .get_mut(&group_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+            .get_mut(&org_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
 
         if record.balance_nanos < delta {
             return Err(StorageError::PreconditionFailed(
@@ -233,7 +233,7 @@ impl BillingStore for InMemoryBilling {
     async fn resolve_telegram_user(
         &self,
         tg_user_id: &str,
-    ) -> Result<Option<(TenantId, GroupId)>, StorageError> {
+    ) -> Result<Option<(TenantId, OrganizationId)>, StorageError> {
         let tg_map = self.tg_user_to_tenant.lock();
         let tenant_id = match tg_map.get(tg_user_id) {
             Some(&id) => id,
@@ -244,7 +244,7 @@ impl BillingStore for InMemoryBilling {
         // 2. Find the first group owned by this tenant
         // (In production, we might want to return the most recently created one)
         let groups = self.groups.lock();
-        let group_id = groups.iter().find_map(|(gid, record)| {
+        let org_id = groups.iter().find_map(|(gid, record)| {
             if record.tenant == tenant_id {
                 Some(*gid)
             } else {
@@ -252,7 +252,7 @@ impl BillingStore for InMemoryBilling {
             }
         });
 
-        match group_id {
+        match org_id {
             Some(gid) => Ok(Some((tenant_id, gid))),
             None => Ok(None),
         }
@@ -287,33 +287,33 @@ impl BillingStore for InMemoryBilling {
     async fn withdraw_from_group(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
         let mut groups = self.groups.lock();
-        let group_record = groups
-            .get_mut(&group_id)
-            .ok_or(StorageError::NotFound(NotFound::Group { group_id }))?;
+        let org_record = groups
+            .get_mut(&org_id)
+            .ok_or(StorageError::NotFound(NotFound::Group { org_id }))?;
 
         // Verify group belongs to tenant
-        if group_record.tenant != tenant {
+        if org_record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
                 "group does not belong to tenant".into(),
             ));
         }
 
         // Check group has sufficient balance
-        if group_record.balance_nanos < delta {
+        if org_record.balance_nanos < delta {
             return Err(StorageError::PreconditionFailed(
                 "insufficient group balance".into(),
             ));
         }
 
         // Deduct from group
-        group_record.balance_nanos -= delta;
+        org_record.balance_nanos -= delta;
 
         // Release groups lock before acquiring tenants lock
         drop(groups);
@@ -338,8 +338,8 @@ impl BillingStore for InMemoryBilling {
     async fn transfer_between_groups(
         &self,
         tenant: TenantId,
-        source_group: GroupId,
-        dest_group: GroupId,
+        source_group: OrganizationId,
+        dest_group: OrganizationId,
         amount: Nanos,
     ) -> Result<(Nanos, Nanos), StorageError> {
         let delta = i64::try_from(amount.as_u64())
@@ -352,7 +352,7 @@ impl BillingStore for InMemoryBilling {
             groups
                 .get(&source_group)
                 .ok_or(StorageError::NotFound(NotFound::Group {
-                    group_id: source_group,
+                    org_id: source_group,
                 }))?;
 
         // Verify source group belongs to tenant
@@ -367,7 +367,7 @@ impl BillingStore for InMemoryBilling {
             groups
                 .get(&dest_group)
                 .ok_or(StorageError::NotFound(NotFound::Group {
-                    group_id: dest_group,
+                    org_id: dest_group,
                 }))?;
 
         // Verify destination group belongs to tenant

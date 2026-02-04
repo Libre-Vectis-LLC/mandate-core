@@ -34,7 +34,7 @@ mod types;
 // Re-export public types for backward compatibility
 pub use event::VerificationEvent;
 pub use types::{
-    EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy, UpgradeStrategy,
+    EscalationStrategy, OrgPowConfig, OrgPowState, RecoveryStrategy, UpgradeStrategy,
 };
 
 #[cfg(test)]
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn test_initial_state() {
-        let state = GroupPowState::new();
+        let state = OrgPowState::new();
         assert!(!state.should_require_pow());
         assert_eq!(state.get_current_multiplier(), 1.0);
         assert_eq!(state.consecutive_failures, 0);
@@ -52,8 +52,8 @@ mod tests {
 
     #[test]
     fn test_trigger_pow_after_threshold() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig::default(); // threshold=3
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig::default(); // threshold=3
 
         // First two failures don't trigger
         state.on_verification_failure(&config);
@@ -69,8 +69,8 @@ mod tests {
 
     #[test]
     fn test_linear_escalation() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig {
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
@@ -100,8 +100,8 @@ mod tests {
 
     #[test]
     fn test_exponential_escalation() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig {
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
@@ -131,8 +131,8 @@ mod tests {
 
     #[test]
     fn test_immediate_recovery() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig {
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
@@ -165,8 +165,8 @@ mod tests {
 
     #[test]
     fn test_gradual_recovery() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig {
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
@@ -214,8 +214,8 @@ mod tests {
 
     #[test]
     fn test_success_resets_failures() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig::default(); // threshold=3
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig::default(); // threshold=3
 
         // Two failures
         state.on_verification_failure(&config);
@@ -235,8 +235,8 @@ mod tests {
 
     #[test]
     fn test_failure_resets_successes() {
-        let mut state = GroupPowState::new();
-        let config = GroupPowConfig {
+        let mut state = OrgPowState::new();
+        let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = GroupPowConfig::default();
+        let config = OrgPowConfig::default();
         assert_eq!(
             config.upgrade_strategy,
             UpgradeStrategy::ConsecutiveFailure {
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_max_multiplier_enforced() {
-        let config = GroupPowConfig {
+        let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
@@ -297,7 +297,7 @@ mod tests {
             max_event_history: 1000,
         };
 
-        let mut state = GroupPowState::new();
+        let mut state = OrgPowState::new();
 
         // First failure triggers POW at initial_multiplier
         state.on_verification_failure(&config);
@@ -326,7 +326,7 @@ mod tests {
             "recovery_strategy": "Immediate",
             "max_event_history": 1000
         }"#;
-        let config: GroupPowConfig = serde_json::from_str(json_with_zero).unwrap();
+        let config: OrgPowConfig = serde_json::from_str(json_with_zero).unwrap();
         assert_eq!(config.max_multiplier, 1000.0);
 
         let json_with_negative = r#"{
@@ -337,7 +337,7 @@ mod tests {
             "recovery_strategy": "Immediate",
             "max_event_history": 1000
         }"#;
-        let config: GroupPowConfig = serde_json::from_str(json_with_negative).unwrap();
+        let config: OrgPowConfig = serde_json::from_str(json_with_negative).unwrap();
         assert_eq!(config.max_multiplier, 1000.0);
 
         // Test that missing max_multiplier uses default
@@ -348,20 +348,20 @@ mod tests {
             "recovery_strategy": "Immediate",
             "max_event_history": 1000
         }"#;
-        let config: GroupPowConfig = serde_json::from_str(json_without_field).unwrap();
+        let config: OrgPowConfig = serde_json::from_str(json_without_field).unwrap();
         assert_eq!(config.max_multiplier, 1000.0);
     }
 
     #[test]
     fn test_serialization() {
-        let config = GroupPowConfig::default();
+        let config = OrgPowConfig::default();
         let json = serde_json::to_string(&config).unwrap();
-        let deserialized: GroupPowConfig = serde_json::from_str(&json).unwrap();
+        let deserialized: OrgPowConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config, deserialized);
 
-        let state = GroupPowState::new();
+        let state = OrgPowState::new();
         let json = serde_json::to_string(&state).unwrap();
-        let deserialized: GroupPowState = serde_json::from_str(&json).unwrap();
+        let deserialized: OrgPowState = serde_json::from_str(&json).unwrap();
         assert_eq!(state, deserialized);
     }
 }

@@ -1,7 +1,7 @@
 //! Helpers to convert between generated gRPC types and core newtypes.
 //! Keep these minimal to avoid leaking prost/tonic details into the rest of the crate.
 
-use crate::ids::{ContentHash, EventId, GroupId, MasterPublicKey, RingHash};
+use crate::ids::{ContentHash, EventId, OrganizationId, MasterPublicKey, RingHash};
 use crate::ring_log::RingDelta;
 use mandate_proto::mandate::v1::{Hash32, NazgulMasterPublicKey, RagePublicKey, Ulid as ProtoUlid};
 use thiserror::Error;
@@ -31,11 +31,11 @@ pub fn parse_ulid(ulid_str: &str) -> Result<Ulid, ProtoConvertError> {
     Ulid::from_string(ulid_str).map_err(|_| ProtoConvertError::InvalidUlid(ulid_str.to_string()))
 }
 
-pub fn proto_ulid_to_group(id: &ProtoUlid) -> Result<GroupId, ProtoConvertError> {
-    parse_ulid(&id.value).map(GroupId)
+pub fn proto_ulid_to_group(id: &ProtoUlid) -> Result<OrganizationId, ProtoConvertError> {
+    parse_ulid(&id.value).map(OrganizationId)
 }
 
-pub fn group_to_proto_ulid(id: &GroupId) -> ProtoUlid {
+pub fn org_to_proto_ulid(id: &OrganizationId) -> ProtoUlid {
     ProtoUlid {
         value: id.to_string(),
     }

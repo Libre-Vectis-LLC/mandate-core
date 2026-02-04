@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::StorageFacade;
-use crate::ids::{GroupId, KeyImage, RingHash, TenantId};
+use crate::ids::{OrganizationId, KeyImage, RingHash, TenantId};
 use crate::ring_log::RingDelta;
 use crate::storage::{BannedOperation, RingDeltaPath, StorageError};
 use nazgul::ring::Ring;
@@ -15,31 +15,31 @@ impl StorageFacade {
     pub async fn ring_by_hash(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         hash: &RingHash,
     ) -> Result<Arc<Ring>, StorageError> {
-        self.ring_view.ring_by_hash(tenant, group_id, hash).await
+        self.ring_view.ring_by_hash(tenant, org_id, hash).await
     }
 
     /// Get the current ring for a group.
     pub async fn current_ring(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<Arc<Ring>, StorageError> {
-        self.ring_view.current_ring(tenant, group_id).await
+        self.ring_view.current_ring(tenant, org_id).await
     }
 
     /// Get the delta path between two ring hashes.
     pub async fn ring_delta_path(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         from: Option<RingHash>,
         to: RingHash,
     ) -> Result<RingDeltaPath, StorageError> {
         self.ring_view
-            .ring_delta_path(tenant, group_id, from, to)
+            .ring_delta_path(tenant, org_id, from, to)
             .await
     }
 
@@ -47,10 +47,10 @@ impl StorageFacade {
     pub async fn append_ring_delta(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         delta: RingDelta,
     ) -> Result<RingHash, StorageError> {
-        self.ring_writer.append_delta(tenant, group_id, delta).await
+        self.ring_writer.append_delta(tenant, org_id, delta).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -61,12 +61,12 @@ impl StorageFacade {
     pub async fn is_banned(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         key_image: &KeyImage,
         operation: BannedOperation,
     ) -> Result<bool, StorageError> {
         self.ban_index
-            .is_banned(tenant, group_id, key_image, operation)
+            .is_banned(tenant, org_id, key_image, operation)
             .await
     }
 
@@ -76,11 +76,11 @@ impl StorageFacade {
     pub async fn count_bans_for_ring(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: &RingHash,
     ) -> Result<usize, StorageError> {
         self.ban_index
-            .count_bans_for_ring(tenant, group_id, ring_hash)
+            .count_bans_for_ring(tenant, org_id, ring_hash)
             .await
     }
 
@@ -92,12 +92,12 @@ impl StorageFacade {
     pub async fn is_vote_key_image_used(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         poll_id: &str,
         key_image: &KeyImage,
     ) -> Result<bool, StorageError> {
         self.vote_key_images
-            .is_used(tenant, group_id, poll_id, key_image)
+            .is_used(tenant, org_id, poll_id, key_image)
             .await
     }
 
@@ -112,12 +112,12 @@ impl StorageFacade {
     pub async fn store_poll_ring_hash(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         poll_id: &str,
         ring_hash: RingHash,
     ) -> Result<(), StorageError> {
         self.poll_ring_hashes
-            .store(tenant, group_id, poll_id, ring_hash)
+            .store(tenant, org_id, poll_id, ring_hash)
             .await
     }
 
@@ -128,9 +128,9 @@ impl StorageFacade {
     pub async fn get_poll_ring_hash(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         poll_id: &str,
     ) -> Result<RingHash, StorageError> {
-        self.poll_ring_hashes.get(tenant, group_id, poll_id).await
+        self.poll_ring_hashes.get(tenant, org_id, poll_id).await
     }
 }

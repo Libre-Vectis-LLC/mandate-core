@@ -1,6 +1,6 @@
 //! Pending member operations.
 
-use crate::ids::GroupId;
+use crate::ids::OrganizationId;
 use crate::rpc::RpcError;
 use mandate_proto::mandate::v1::{
     GetApprovedMemberByTgUserIdRequest, GetApprovedMemberByTgUserIdResponse,
@@ -18,14 +18,14 @@ pub(super) async fn submit_pending_member(
     request: Request<SubmitPendingMemberRequest>,
 ) -> Result<Response<SubmitPendingMemberResponse>, Status> {
     let body = request.into_inner();
-    let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+    let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
         RpcError::InvalidArgument {
-            field: "group_id",
+            field: "org_id",
             reason: e.to_string(),
         }
     })?);
 
-    let (tenant, _) = service.store.get_group(group_id).await.map_err(to_status)?;
+    let (tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
 
     let nazgul_pub = body
         .nazgul_pub
@@ -55,7 +55,7 @@ pub(super) async fn submit_pending_member(
 
     let pending_id = service
         .store
-        .submit_pending_member(tenant, group_id, &body.tg_user_id, nazgul_pub, rage_pub)
+        .submit_pending_member(tenant, org_id, &body.tg_user_id, nazgul_pub, rage_pub)
         .await
         .map_err(to_status)?;
 
@@ -68,25 +68,25 @@ pub(super) async fn list_pending_members(
 ) -> Result<Response<ListPendingMembersResponse>, Status> {
     let tenant = extract_tenant_id(&request, &service.store).await?;
     let body = request.into_inner();
-    let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+    let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
         RpcError::InvalidArgument {
-            field: "group_id",
+            field: "org_id",
             reason: e.to_string(),
         }
     })?);
 
-    let (group_tenant, _) = service.store.get_group(group_id).await.map_err(to_status)?;
-    if group_tenant != tenant {
+    let (org_tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    if org_tenant != tenant {
         return Err(RpcError::NotFound {
             resource: "group",
-            id: format!("{}", group_id.0),
+            id: format!("{}", org_id.0),
         }
         .into());
     }
 
     let (members, _next_page) = service
         .store
-        .list_pending_members(tenant, group_id, clamp_events_limit(body.limit), None)
+        .list_pending_members(tenant, org_id, clamp_events_limit(body.limit), None)
         .await
         .map_err(to_status)?;
 
@@ -115,26 +115,26 @@ pub(super) async fn get_approved_member_by_tg_user_id(
 ) -> Result<Response<GetApprovedMemberByTgUserIdResponse>, Status> {
     let tenant = extract_tenant_id(&request, &service.store).await?;
     let body = request.into_inner();
-    let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+    let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
         RpcError::InvalidArgument {
-            field: "group_id",
+            field: "org_id",
             reason: e.to_string(),
         }
     })?);
 
     // Verify tenant owns the group
-    let (group_tenant, _) = service.store.get_group(group_id).await.map_err(to_status)?;
-    if group_tenant != tenant {
+    let (org_tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    if org_tenant != tenant {
         return Err(RpcError::NotFound {
             resource: "group",
-            id: format!("{}", group_id.0),
+            id: format!("{}", org_id.0),
         }
         .into());
     }
 
     let member = service
         .store
-        .get_approved_member_by_tg_user_id(tenant, group_id, &body.tg_user_id)
+        .get_approved_member_by_tg_user_id(tenant, org_id, &body.tg_user_id)
         .await
         .map_err(to_status)?;
 
@@ -210,7 +210,7 @@ pub(super) async fn register_member(
     };
 
     // Register via invite code
-    let (pending_id, group_id) = service
+    let (pending_id, org_id) = service
         .store
         .register_standalone_member(
             tenant,
@@ -224,7 +224,7 @@ pub(super) async fn register_member(
 
     Ok(Response::new(RegisterMemberResponse {
         pending_id,
-        group_id: group_id.to_string(),
+        org_id: org_id.to_string(),
         status: "pending".to_string(),
     }))
 }

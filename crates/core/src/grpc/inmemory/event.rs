@@ -1,7 +1,7 @@
 /// In-memory event storage and streaming.
 use crate::event::{Event, EventType};
 use crate::hashing::event_hash_sha3_256;
-use crate::ids::{EventId, GroupId, SequenceNo, TenantId};
+use crate::ids::{EventId, OrganizationId, SequenceNo, TenantId};
 use crate::storage::{
     EventBytes, EventReader, EventRecord, EventStore, EventWriter, NotFound, StorageError,
 };
@@ -14,11 +14,11 @@ use super::ban::InMemoryBanIndex;
 use super::member::InMemoryPendingMembers;
 use super::vote::InMemoryVoteKeyImages;
 
-type InMemoryEventMap = HashMap<(TenantId, GroupId), Vec<EventRecord>>;
+type InMemoryEventMap = HashMap<(TenantId, OrganizationId), Vec<EventRecord>>;
 
 #[derive(Clone)]
 pub struct InMemoryEvents {
-    // Keyed by (TenantId, GroupId) for isolation
+    // Keyed by (TenantId, OrganizationId) for isolation
     events: Arc<Mutex<InMemoryEventMap>>,
     ban_index: Arc<InMemoryBanIndex>,
     vote_key_images: Arc<InMemoryVoteKeyImages>,
@@ -46,7 +46,7 @@ impl InMemoryEvents {
     fn apply_indexes(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         event: &Event,
         event_id: EventId,
     ) -> Result<(), StorageError> {
@@ -57,7 +57,7 @@ impl InMemoryEvents {
                 }
                 self.ban_index.record_ban(
                     tenant,
-                    group_id,
+                    org_id,
                     ban.target,
                     ban.scope,
                     event_id,
@@ -74,7 +74,7 @@ impl InMemoryEvents {
                     .ok_or_else(|| StorageError::PreconditionFailed("missing signature".into()))?;
                 self.vote_key_images.record_vote(
                     tenant,
-                    group_id,
+                    org_id,
                     &vote.poll_id,
                     sig.key_image(),
                 )?;
@@ -83,7 +83,7 @@ impl InMemoryEvents {
                 for operation in &update.operations {
                     if let crate::event::RingOperation::AddMember { public_key, .. } = operation {
                         self.pending_members
-                            .approve_member(tenant, group_id, *public_key);
+                            .approve_member(tenant, org_id, *public_key);
                     }
                 }
             }
@@ -98,17 +98,17 @@ impl EventWriter for InMemoryEvents {
     async fn append(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         event_bytes: EventBytes,
     ) -> Result<(EventId, SequenceNo), StorageError> {
         let mut inner = self.inner();
-        let entry = inner.entry((tenant, group_id)).or_default();
+        let entry = inner.entry((tenant, org_id)).or_default();
         let event: Event = serde_json::from_slice(&event_bytes)
             .map_err(|e| StorageError::Backend(format!("invalid event bytes: {e}")))?;
         let hash = event_hash_sha3_256(&event)
             .map_err(|e| StorageError::Backend(format!("hash event: {e}")))?;
         let id = EventId(hash.0);
-        self.apply_indexes(tenant, group_id, &event, id)?;
+        self.apply_indexes(tenant, org_id, &event, id)?;
         let seq = SequenceNo::new(
             i64::try_from(entry.len())
                 .map_err(|_| StorageError::Backend("sequence number overflow".into()))?,
@@ -123,12 +123,12 @@ impl EventReader for InMemoryEvents {
     async fn stream_group(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         after: Option<SequenceNo>,
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
         let inner = self.inner();
-        let Some(events) = inner.get(&(tenant, group_id)) else {
+        let Some(events) = inner.get(&(tenant, org_id)) else {
             return Ok(Vec::new());
         };
         let start = match after {
@@ -146,16 +146,16 @@ impl EventReader for InMemoryEvents {
     async fn get(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         id: &EventId,
     ) -> Result<EventRecord, StorageError> {
         let inner = self.inner();
         let events = inner
-            .get(&(tenant, group_id))
+            .get(&(tenant, org_id))
             .ok_or(StorageError::NotFound(NotFound::Event {
                 id: *id,
                 tenant,
-                group_id,
+                org_id,
             }))?;
         events
             .iter()
@@ -164,19 +164,19 @@ impl EventReader for InMemoryEvents {
             .ok_or(StorageError::NotFound(NotFound::Event {
                 id: *id,
                 tenant,
-                group_id,
+                org_id,
             }))
     }
 
-    async fn tail(&self, tenant: TenantId, group_id: GroupId) -> Result<EventRecord, StorageError> {
+    async fn tail(&self, tenant: TenantId, org_id: OrganizationId) -> Result<EventRecord, StorageError> {
         let inner = self.inner();
         let events = inner
-            .get(&(tenant, group_id))
-            .ok_or(StorageError::NotFound(NotFound::Tail { tenant, group_id }))?;
+            .get(&(tenant, org_id))
+            .ok_or(StorageError::NotFound(NotFound::Tail { tenant, org_id }))?;
         events
             .last()
             .cloned()
-            .ok_or(StorageError::NotFound(NotFound::Tail { tenant, group_id }))
+            .ok_or(StorageError::NotFound(NotFound::Tail { tenant, org_id }))
     }
 }
 

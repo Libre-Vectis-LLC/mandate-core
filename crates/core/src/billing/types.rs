@@ -70,7 +70,7 @@ impl Add for AbstractResourceUnits {
 /// use mandate_core::billing::BalanceHolder;
 ///
 /// let tenant = BalanceHolder::Tenant("tenant_123".to_string());
-/// let group = BalanceHolder::Group("group_abc".to_string());
+/// let group = BalanceHolder::Group("org_abc".to_string());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BalanceHolder {
@@ -144,7 +144,7 @@ pub enum TransferError {
         available: Nanos,
     },
     /// Group is not owned by the tenant attempting the transfer.
-    GroupNotOwned(String),
+    OrgNotOwned(String),
     /// Invalid amount (e.g., zero or negative).
     InvalidAmount(String),
     /// Database error during transfer.
@@ -165,8 +165,8 @@ impl std::fmt::Display for TransferError {
                     available.to_dollars()
                 )
             }
-            TransferError::GroupNotOwned(group_id) => {
-                write!(f, "group {} not owned by tenant", group_id)
+            TransferError::OrgNotOwned(org_id) => {
+                write!(f, "group {} not owned by tenant", org_id)
             }
             TransferError::InvalidAmount(msg) => write!(f, "invalid amount: {}", msg),
             TransferError::Database(msg) => write!(f, "database error: {}", msg),
@@ -269,10 +269,10 @@ mod tests {
 
     #[test]
     fn test_balance_holder_group() {
-        let holder = BalanceHolder::Group("group_abc".to_string());
+        let holder = BalanceHolder::Group("org_abc".to_string());
         assert!(!holder.is_tenant());
         assert!(holder.is_group());
-        assert_eq!(holder.id(), "group_abc");
+        assert_eq!(holder.id(), "org_abc");
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod tests {
         assert!(msg.contains("100"));
         assert!(msg.contains("50"));
 
-        let err = TransferError::GroupNotOwned("group_123".to_string());
+        let err = TransferError::OrgNotOwned("org_123".to_string());
         assert_eq!(format!("{}", err), "group group_123 not owned by tenant");
 
         let err = TransferError::InvalidAmount("amount must be positive".to_string());

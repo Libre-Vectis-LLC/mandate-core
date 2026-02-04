@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use crate::storage::{
     AccessTokenBlobStore, BanIndex, BillingStore, EdgeAccessTokenStore, EventReader, EventWriter,
-    GiftCardStore, GroupMetadataStore, KeyBlobStore, PendingMemberStore, PollRingHashIndex,
+    GiftCardStore, OrganizationMetadataStore, KeyBlobStore, PendingMemberStore, PollRingHashIndex,
     RingView, RingWriter, TenantTokenStore, VoteKeyImageIndex,
 };
 
 mod billing;
 mod event;
-mod group;
+mod organization;
 mod keys;
 mod ring;
 mod token;
@@ -30,7 +30,7 @@ pub struct StorageFacade {
     pub(super) poll_ring_hashes: Arc<dyn PollRingHashIndex + Send + Sync>,
     pub(super) billing: Arc<dyn BillingStore + Send + Sync>,
     pub(super) gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
-    pub(super) groups: Arc<dyn GroupMetadataStore + Send + Sync>,
+    pub(super) groups: Arc<dyn OrganizationMetadataStore + Send + Sync>,
     pub(super) pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
     pub(super) access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
     pub(super) edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
@@ -87,7 +87,7 @@ pub struct StorageFacadeBuilder {
     poll_ring_hashes: Option<Arc<dyn PollRingHashIndex + Send + Sync>>,
     billing: Option<Arc<dyn BillingStore + Send + Sync>>,
     gift_cards: Option<Arc<dyn GiftCardStore + Send + Sync>>,
-    groups: Option<Arc<dyn GroupMetadataStore + Send + Sync>>,
+    groups: Option<Arc<dyn OrganizationMetadataStore + Send + Sync>>,
     pending_members: Option<Arc<dyn PendingMemberStore + Send + Sync>>,
     access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
     edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
@@ -164,7 +164,7 @@ impl StorageFacadeBuilder {
     }
 
     /// Set the group metadata store.
-    pub fn groups(mut self, store: Arc<dyn GroupMetadataStore + Send + Sync>) -> Self {
+    pub fn groups(mut self, store: Arc<dyn OrganizationMetadataStore + Send + Sync>) -> Self {
         self.groups = Some(store);
         self
     }

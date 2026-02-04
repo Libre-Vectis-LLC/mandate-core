@@ -1,6 +1,6 @@
 //! List members operation.
 
-use crate::ids::GroupId;
+use crate::ids::OrganizationId;
 use crate::rpc::RpcError;
 use mandate_proto::mandate::v1::{ListMembersRequest, ListMembersResponse};
 use tonic::{Request, Response, Status};
@@ -14,19 +14,19 @@ pub(super) async fn list_members(
 ) -> Result<Response<ListMembersResponse>, Status> {
     let tenant = extract_tenant_id(&request, &service.store).await?;
     let body = request.into_inner();
-    let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+    let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
         RpcError::InvalidArgument {
-            field: "group_id",
+            field: "org_id",
             reason: e.to_string(),
         }
     })?);
 
     // Verify tenant owns the group
-    let (group_tenant, _) = service.store.get_group(group_id).await.map_err(to_status)?;
-    if group_tenant != tenant {
+    let (org_tenant, _) = service.store.get_organization(org_id).await.map_err(to_status)?;
+    if org_tenant != tenant {
         return Err(RpcError::NotFound {
             resource: "group",
-            id: format!("{}", group_id.0),
+            id: format!("{}", org_id.0),
         }
         .into());
     }
@@ -51,7 +51,7 @@ pub(super) async fn list_members(
         .store
         .list_all_members(
             tenant,
-            group_id,
+            org_id,
             clamp_events_limit(body.limit),
             body.page_token.as_ref().and_then(|t| {
                 if t.value.is_empty() {

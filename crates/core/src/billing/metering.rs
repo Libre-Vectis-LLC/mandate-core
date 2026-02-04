@@ -33,8 +33,8 @@ pub enum MeteringError {
     TenantNotFound(String),
 
     /// Group not found in billing system.
-    #[error("group not found: {0}")]
-    GroupNotFound(String),
+    #[error("org not found: {0}")]
+    OrgNotFound(String),
 }
 
 /// Usage event for recording resource consumption.
@@ -49,7 +49,7 @@ pub enum MeteringError {
 ///
 /// let event = UsageEvent {
 ///     tenant_id: "tenant_123".to_string(),
-///     group_id: Some("group_abc".to_string()),
+///     org_id: Some("org_abc".to_string()),
 ///     event_type: "verification".to_string(),
 ///     aru: AbstractResourceUnits {
 ///         cpu_cycles_aru: 100,
@@ -65,7 +65,7 @@ pub struct UsageEvent {
     pub tenant_id: String,
 
     /// Optional group ID (if operation is group-scoped).
-    pub group_id: Option<String>,
+    pub org_id: Option<String>,
 
     /// Type of event (e.g., "verification", "pow_verify", "event_read").
     pub event_type: String,
@@ -101,16 +101,16 @@ pub trait EgressMeter: Send + Sync {
     /// This should be called **before** executing the actual data transfer.
     ///
     /// # Arguments
-    /// * `group_id` - The group being charged (as string for crate independence)
+    /// * `org_id` - The group being charged (as string for crate independence)
     /// * `estimated_bytes` - Estimated data size to be transferred
     ///
     /// # Returns
     /// * `Ok(())` - Sufficient balance for the transfer
     /// * `Err(MeteringError::InsufficientBalance)` - Not enough credits
-    /// * `Err(MeteringError::GroupNotFound)` - Unknown group
+    /// * `Err(MeteringError::OrgNotFound)` - Unknown group
     async fn check_egress(
         &self,
-        group_id: &str,
+        org_id: &str,
         estimated_bytes: usize,
     ) -> Result<(), MeteringError>;
 
@@ -119,13 +119,13 @@ pub trait EgressMeter: Send + Sync {
     /// This should be called **after** successfully sending data to the client.
     ///
     /// # Arguments
-    /// * `group_id` - The group being charged
+    /// * `org_id` - The group being charged
     /// * `actual_bytes` - Actual data size transferred
     ///
     /// # Returns
     /// * `Ok(())` - Charge recorded successfully
     /// * `Err(MeteringError)` - Failed to record (balance issue or store error)
-    async fn record_egress(&self, group_id: &str, actual_bytes: usize)
+    async fn record_egress(&self, org_id: &str, actual_bytes: usize)
         -> Result<(), MeteringError>;
 }
 
@@ -140,7 +140,7 @@ pub struct NoOpEgressMeter;
 impl EgressMeter for NoOpEgressMeter {
     async fn check_egress(
         &self,
-        _group_id: &str,
+        _org_id: &str,
         _estimated_bytes: usize,
     ) -> Result<(), MeteringError> {
         Ok(())
@@ -148,7 +148,7 @@ impl EgressMeter for NoOpEgressMeter {
 
     async fn record_egress(
         &self,
-        _group_id: &str,
+        _org_id: &str,
         _actual_bytes: usize,
     ) -> Result<(), MeteringError> {
         Ok(())
@@ -188,15 +188,15 @@ mod tests {
         let err = MeteringError::TenantNotFound("tenant_123".to_string());
         assert_eq!(err.to_string(), "tenant not found: tenant_123");
 
-        let err = MeteringError::GroupNotFound("group_abc".to_string());
-        assert_eq!(err.to_string(), "group not found: group_abc");
+        let err = MeteringError::OrgNotFound("org_abc".to_string());
+        assert_eq!(err.to_string(), "org not found: group_abc");
     }
 
     #[test]
     fn test_usage_event_creation() {
         let event = UsageEvent {
             tenant_id: "tenant_123".to_string(),
-            group_id: Some("group_abc".to_string()),
+            org_id: Some("org_abc".to_string()),
             event_type: "verification".to_string(),
             aru: AbstractResourceUnits {
                 cpu_cycles_aru: 100,
@@ -209,7 +209,7 @@ mod tests {
         };
 
         assert_eq!(event.tenant_id, "tenant_123");
-        assert_eq!(event.group_id, Some("group_abc".to_string()));
+        assert_eq!(event.org_id, Some("org_abc".to_string()));
         assert_eq!(event.event_type, "verification");
         assert_eq!(event.aru.cpu_cycles_aru, 100);
     }
@@ -218,7 +218,7 @@ mod tests {
     fn test_usage_event_serialization() {
         let event = UsageEvent {
             tenant_id: "tenant_123".to_string(),
-            group_id: None,
+            org_id: None,
             event_type: "pow_verify".to_string(),
             aru: AbstractResourceUnits {
                 cpu_cycles_aru: 50,
@@ -240,10 +240,10 @@ mod tests {
         let meter = NoOpEgressMeter;
 
         // Check always succeeds
-        assert!(meter.check_egress("group_123", 1_000_000).await.is_ok());
+        assert!(meter.check_egress("org_123", 1_000_000).await.is_ok());
 
         // Record always succeeds
-        assert!(meter.record_egress("group_123", 1_000_000).await.is_ok());
+        assert!(meter.record_egress("org_123", 1_000_000).await.is_ok());
     }
 
     #[cfg(not(target_arch = "wasm32"))]

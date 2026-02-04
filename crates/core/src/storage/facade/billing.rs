@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::StorageFacade;
-use crate::ids::{GroupId, Nanos, TenantId};
+use crate::ids::{OrganizationId, Nanos, TenantId};
 use crate::storage::{BillingStore, GiftCard, IdempotencyResult, StorageError, TenantBalanceInfo};
 
 impl StorageFacade {
@@ -40,20 +40,20 @@ impl StorageFacade {
     }
 
     /// Transfer funds from tenant balance to a group's budget.
-    pub async fn transfer_to_group(
+    pub async fn transfer_to_organization(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
         self.billing
-            .transfer_to_group(tenant, group_id, amount)
+            .transfer_to_organization(tenant, org_id, amount)
             .await
     }
 
     /// Get a group's current budget balance.
-    pub async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError> {
-        self.billing.get_group_balance(group_id).await
+    pub async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError> {
+        self.billing.get_organization_balance(org_id).await
     }
 
     /// Retrieve the current balance for a tenant with metadata.
@@ -80,7 +80,7 @@ impl StorageFacade {
     pub async fn resolve_telegram_user(
         &self,
         tg_user_id: &str,
-    ) -> Result<Option<(TenantId, GroupId)>, StorageError> {
+    ) -> Result<Option<(TenantId, OrganizationId)>, StorageError> {
         self.billing.resolve_telegram_user(tg_user_id).await
     }
 
@@ -113,16 +113,16 @@ impl StorageFacade {
 
     /// Withdraw credits from group wallet back to tenant wallet.
     ///
-    /// This is the reverse operation of `transfer_to_group`, moving funds from
+    /// This is the reverse operation of `transfer_to_organization`, moving funds from
     /// a group's operational budget back to the tenant's personal balance.
     pub async fn withdraw_from_group(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
         self.billing
-            .withdraw_from_group(tenant, group_id, amount)
+            .withdraw_from_group(tenant, org_id, amount)
             .await
     }
 
@@ -133,8 +133,8 @@ impl StorageFacade {
     pub async fn transfer_between_groups(
         &self,
         tenant: TenantId,
-        source_group: GroupId,
-        dest_group: GroupId,
+        source_group: OrganizationId,
+        dest_group: OrganizationId,
         amount: Nanos,
     ) -> Result<(Nanos, Nanos), StorageError> {
         self.billing

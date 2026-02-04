@@ -97,7 +97,7 @@ impl EventServiceImpl {
         if let crate::event::EventType::VoteCast(vote) = &event.event_type {
             match self
                 .store
-                .get_poll_ring_hash(tenant, event.group_id, &vote.poll_id)
+                .get_poll_ring_hash(tenant, event.org_id, &vote.poll_id)
                 .await
             {
                 Ok(_) => {
@@ -124,7 +124,7 @@ impl EventServiceImpl {
         //
         // Security note: Chain integrity is enforced by Party A's Edge and Bot monitoring.
         // The signature does NOT include previous_event_hash (see Event::to_signing_bytes).
-        match self.store.event_tail(tenant, event.group_id).await {
+        match self.store.event_tail(tenant, event.org_id).await {
             Ok((tail_id, _, _)) => {
                 // Chain exists - set previous_event_hash to current tail
                 event.previous_event_hash = crate::ids::EventId(tail_id.0);
@@ -149,7 +149,7 @@ impl EventServiceImpl {
         if let crate::event::EventType::VoteCast(vote) = &event.event_type {
             let used = self
                 .store
-                .is_vote_key_image_used(tenant, event.group_id, &vote.poll_id, &key_image)
+                .is_vote_key_image_used(tenant, event.org_id, &vote.poll_id, &key_image)
                 .await
                 .map_err(to_status)?;
             if used {
@@ -164,7 +164,7 @@ impl EventServiceImpl {
         if let Some(operation) = banned_operation_for_event(&event.event_type) {
             let banned = self
                 .store
-                .is_banned(tenant, event.group_id, &key_image, operation)
+                .is_banned(tenant, event.org_id, &key_image, operation)
                 .await
                 .map_err(to_status)?;
             if banned {
@@ -182,7 +182,7 @@ impl EventServiceImpl {
                 // Get owner's public key from storage
                 let owner_pubkey = self
                     .store
-                    .get_owner_pubkey(event.group_id)
+                    .get_owner_pubkey(event.org_id)
                     .await
                     .map_err(to_status)?
                     .ok_or_else(|| RpcError::FailedPrecondition {
@@ -208,12 +208,12 @@ impl EventServiceImpl {
                 // Create owner keypair (public key only) for derivation
                 let owner_kp = NazgulKeyPair::from_public_key_only(owner_point);
 
-                // Derive delegate key using group_id as context
-                let group_bytes = event.group_id.to_bytes();
+                // Derive delegate key using org_id as context
+                let org_bytes = event.org_id.to_bytes();
                 let mut ctx =
-                    Vec::with_capacity(b"mandate-delegate-signer-v1".len() + group_bytes.len());
+                    Vec::with_capacity(b"mandate-delegate-signer-v1".len() + org_bytes.len());
                 ctx.extend_from_slice(b"mandate-delegate-signer-v1");
-                ctx.extend_from_slice(&group_bytes);
+                ctx.extend_from_slice(&org_bytes);
 
                 let delegate_kp = owner_kp.derive_child::<Sha3_512>(&ctx);
 
@@ -245,7 +245,7 @@ impl EventServiceImpl {
         if let crate::event::EventType::BanCreate(ban) = &event.event_type {
             let current_count = self
                 .store
-                .count_bans_for_ring(tenant, event.group_id, &ban.ring_hash)
+                .count_bans_for_ring(tenant, event.org_id, &ban.ring_hash)
                 .await
                 .map_err(to_status)?;
             if current_count >= crate::storage::MAX_BANS_PER_RING_HASH {
@@ -276,7 +276,7 @@ impl EventServiceImpl {
 
                     Some(
                         self.store
-                            .ring_by_hash(tenant, event.group_id, &ring_hash)
+                            .ring_by_hash(tenant, event.org_id, &ring_hash)
                             .await
                             .map_err(to_status)?,
                     )
@@ -316,7 +316,7 @@ impl EventServiceImpl {
         if let crate::event::EventType::RingUpdate(update) = &event.event_type {
             let current_ring = self
                 .store
-                .current_ring(tenant, event.group_id)
+                .current_ring(tenant, event.org_id)
                 .await
                 .map_err(to_status)?;
             let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
@@ -356,7 +356,7 @@ impl EventServiceImpl {
                     }
                 };
                 self.store
-                    .append_ring_delta(tenant, event.group_id, delta)
+                    .append_ring_delta(tenant, event.org_id, delta)
                     .await
                     .map_err(to_status)?;
             }
@@ -374,7 +374,7 @@ impl EventServiceImpl {
         // which would confuse clients about the actual state.
         if let crate::event::EventType::PollCreate(poll) = &event.event_type {
             self.store
-                .store_poll_ring_hash(tenant, event.group_id, &poll.poll_id, poll.ring_hash)
+                .store_poll_ring_hash(tenant, event.org_id, &poll.poll_id, poll.ring_hash)
                 .await
                 .map_err(to_status)?;
         }
@@ -392,7 +392,7 @@ impl EventServiceImpl {
 
         let id = self
             .store
-            .append_event(tenant, event.group_id, final_event_bytes)
+            .append_event(tenant, event.org_id, final_event_bytes)
             .await
             .map_err(to_status)?;
 

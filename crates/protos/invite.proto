@@ -4,27 +4,27 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
-// InviteService manages invite codes for group membership onboarding.
+// InviteService manages invite codes for organization membership onboarding.
 //
 // ## Authentication
 // Requires `x-api-token` header with valid tenant token.
 // Exposed on the public gRPC listener.
 //
 // ## Invite Code Flow
-// 1. Tenant admin creates an invite code for a group
+// 1. Tenant admin creates an invite code for an organization
 // 2. Invite URL is shared with potential members via Telegram or other channels
 // 3. User validates code before registration (ValidateInviteCode)
-// 4. Registration UI pre-fills group info and metadata
+// 4. Registration UI pre-fills organization info and metadata
 // 5. User submits registration via MemberService.SubmitPendingMember
 // 6. Invite code usage count increments automatically
 //
 // ## Use Cases
 // - Admin creates one-time or multi-use invite codes
 // - Admin lists and manages active invite codes
-// - Registration UI validates invite code and retrieves group info
+// - Registration UI validates invite code and retrieves organization info
 // - Admin revokes compromised or expired invite codes
 service InviteService {
-  // CreateInviteCode generates a new invite code for a group.
+  // CreateInviteCode generates a new invite code for an organization.
   //
   // Only tenant admins can create invite codes.
   // The generated code is a URL-safe random string (16-32 characters)
@@ -35,27 +35,27 @@ service InviteService {
   // No deduplication is performed.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - PERMISSION_DENIED: caller is not a tenant admin
   // - INVALID_ARGUMENT: expires_at is in the past or max_uses is 0
   // - INTERNAL: database error or random generation failure
   rpc CreateInviteCode(CreateInviteCodeRequest) returns (CreateInviteCodeResponse);
 
-  // ListInviteCodes returns all invite codes for a group.
+  // ListInviteCodes returns all invite codes for an organization.
   //
   // Returns both active and revoked codes in reverse chronological order
   // (newest first). Expired codes are marked with is_active = false.
-  // Supports pagination for groups with many invite codes.
+  // Supports pagination for organizations with many invite codes.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - PERMISSION_DENIED: caller is not a tenant admin
   rpc ListInviteCodes(ListInviteCodesRequest) returns (ListInviteCodesResponse);
 
-  // ValidateInviteCode checks if an invite code is valid and returns group info.
+  // ValidateInviteCode checks if an invite code is valid and returns organization info.
   //
   // This is called by the registration page BEFORE showing the registration form.
-  // Returns group name and optional metadata for pre-filling the form.
+  // Returns organization name and optional metadata for pre-filling the form.
   // Does NOT consume the invite code (usage count unchanged).
   //
   // ## Validation Logic
@@ -107,8 +107,8 @@ service InviteService {
 
 // Request to create a new invite code.
 message CreateInviteCodeRequest {
-  // Group ID (ULID format) for which the invite code is created.
-  string group_id = 1;
+  // Organization ID (ULID format) for which the invite code is created.
+  string org_id = 1;
 
   // Optional expiration time (Unix timestamp in milliseconds).
   // If not set, the invite code never expires.
@@ -136,10 +136,10 @@ message CreateInviteCodeResponse {
   string invite_url = 2;
 }
 
-// Request to list invite codes for a group.
+// Request to list invite codes for an organization.
 message ListInviteCodesRequest {
-  // Group ID (ULID format) to query.
-  string group_id = 1;
+  // Organization ID (ULID format) to query.
+  string org_id = 1;
 
   // Maximum number of invite codes to return (server may cap this).
   // Recommended: 50. Maximum: 100.
@@ -155,8 +155,8 @@ message InviteCode {
   // The invite code itself (URL-safe, 16-32 characters).
   string code = 1;
 
-  // Group ID (ULID format) this code belongs to.
-  string group_id = 2;
+  // Organization ID (ULID format) this code belongs to.
+  string org_id = 2;
 
   // Admin ID (ULID format) who created this code.
   string created_by = 3;
@@ -208,14 +208,14 @@ message ValidateInviteCodeResponse {
   // Whether the invite code is valid and can be used.
   bool valid = 1;
 
-  // Group ID (ULID format) if valid.
+  // Organization ID (ULID format) if valid.
   // Only returned when valid = true.
-  optional string group_id = 2;
+  optional string org_id = 2;
 
   // Group display name for showing in the registration UI.
   // Example: "Acme Corp DAO"
   // Only returned when valid = true.
-  optional string group_name = 3;
+  optional string org_name = 3;
 
   // Pre-filled registration metadata (JSON string).
   // Example: {"display_name": "Alice", "role": "contributor"}
@@ -258,8 +258,8 @@ message RegisterWithInviteCodeResponse {
   // Newly created member ID (ULID format).
   string member_id = 1;
 
-  // Group ID (ULID format) the member was added to.
-  string group_id = 2;
+  // Organization ID (ULID format) the member was added to.
+  string org_id = 2;
 
   // Current member status (typically "pending" awaiting admin approval).
   string status = 3;

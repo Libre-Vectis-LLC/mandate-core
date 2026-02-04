@@ -1,7 +1,7 @@
 //! RingService gRPC implementation.
 
 use crate::billing::{default_egress_meter, SharedEgressMeter};
-use crate::ids::{GroupId, RingHash};
+use crate::ids::{OrganizationId, RingHash};
 use crate::proto::ring_delta_to_bytes;
 use crate::ring_log::apply_delta;
 use crate::rpc::RpcError;
@@ -50,11 +50,11 @@ impl RingService for RingServiceImpl {
         request: Request<GetRingHeadRequest>,
     ) -> Result<Response<GetRingHeadResponse>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
-        let group = request.into_inner().group_id;
-        let group_id =
-            GroupId(
+        let group = request.into_inner().org_id;
+        let org_id =
+            OrganizationId(
                 crate::proto::parse_ulid(&group).map_err(|e| RpcError::InvalidArgument {
-                    field: "group_id",
+                    field: "org_id",
                     reason: e.to_string(),
                 })?,
             );
@@ -62,7 +62,7 @@ impl RingService for RingServiceImpl {
         // Current ring for the requested group.
         let ring = self
             .store
-            .current_ring(tenant, group_id)
+            .current_ring(tenant, org_id)
             .await
             .map_err(to_status)?;
         let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
@@ -86,9 +86,9 @@ impl RingService for RingServiceImpl {
     ) -> Result<Response<Self::StreamRingStream>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let req = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&req.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&req.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -110,7 +110,7 @@ impl RingService for RingServiceImpl {
         // For now, stream a single batch from optional anchor to current ring head.
         let current_ring = self
             .store
-            .current_ring(tenant, group_id)
+            .current_ring(tenant, org_id)
             .await
             .map_err(to_status)?;
         let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
@@ -128,7 +128,7 @@ impl RingService for RingServiceImpl {
 
         let path = self
             .store
-            .ring_delta_path(tenant, group_id, after_hash, current_hash)
+            .ring_delta_path(tenant, org_id, after_hash, current_hash)
             .await
             .map_err(to_status)?;
 
@@ -141,7 +141,7 @@ impl RingService for RingServiceImpl {
         let entries = encode_ring_delta_path(
             &self.store,
             tenant,
-            group_id,
+            org_id,
             &path,
             anchor_override,
             clamp_ring_limit(req.limit),
@@ -158,11 +158,11 @@ impl RingService for RingServiceImpl {
             .map(|e| e.ring_hash.len() + e.deltas.iter().map(|d| d.len()).sum::<usize>())
             .sum::<usize>()
             + next_hash.len();
-        let group_id_str = group_id.to_string();
+        let org_id_str = org_id.to_string();
 
         // Check egress balance before sending data
         self.egress_meter
-            .check_egress(&group_id_str, total_bytes)
+            .check_egress(&org_id_str, total_bytes)
             .await
             .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
 
@@ -171,7 +171,7 @@ impl RingService for RingServiceImpl {
         // Record egress after preparing response
         let _ = self
             .egress_meter
-            .record_egress(&group_id_str, total_bytes)
+            .record_egress(&org_id_str, total_bytes)
             .await;
 
         let _ = tx
@@ -192,7 +192,7 @@ impl RingService for RingServiceImpl {
 async fn encode_ring_delta_path(
     store: &StorageFacade,
     tenant: crate::ids::TenantId,
-    group_id: GroupId,
+    org_id: OrganizationId,
     path: &crate::storage::RingDeltaPath,
     anchor_override: Option<Ring>,
     limit: usize,
@@ -201,7 +201,7 @@ async fn encode_ring_delta_path(
         Some(anchor) => anchor,
         None => {
             let anchor = store
-                .ring_by_hash(tenant, group_id, &path.from)
+                .ring_by_hash(tenant, org_id, &path.from)
                 .await
                 .map_err(to_status)?;
             (*anchor).clone()

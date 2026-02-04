@@ -1,0 +1,100 @@
+syntax = "proto3";
+package mandate.v1;
+
+import "common.proto";
+import "error.proto";
+
+// OrganizationService manages organization lifecycle and ownership configuration.
+//
+// ## Authentication
+// Requires `x-api-token` header with valid tenant token.
+// Exposed on the public gRPC listener.
+//
+// ## Authorization
+// - CreateOrganization: Caller becomes the owning tenant
+// - SetOwnerPublicKey: Only the owning tenant can set/update
+// - GetOrganization: Any authenticated caller can read
+//
+// ## Use Cases
+// - Bot creates an organization when adding Mandate to a Telegram chat
+// - Owner client sets their cryptographic identity for signing
+// - Clients fetch organization metadata for display or validation
+service OrganizationService {
+  // CreateOrganization provisions a new Mandate organization linked to a Telegram chat.
+  //
+  // The caller's tenant becomes the organization owner with exclusive write access.
+  // Organizations are identified by ULID and linked to Telegram via tg_group_id.
+  //
+  // ## Errors
+  // - ALREADY_EXISTS: organization with this tg_group_id already exists
+  // - NOT_FOUND: tenant_id doesn't exist
+  // - INTERNAL: database error
+  rpc CreateOrganization (CreateOrganizationRequest) returns (CreateOrganizationResponse);
+
+  // SetOwnerPublicKey configures the owner's signing key for the organization.
+  //
+  // This key is used to verify owner-signed events and approve new members.
+  // Must be called before members can join or events can be pushed.
+  //
+  // ## Authorization
+  // Only the tenant that created the organization can call this.
+  //
+  // ## Errors
+  // - NOT_FOUND: org_id doesn't exist
+  // - PERMISSION_DENIED: caller is not the organization owner
+  // - INVALID_ARGUMENT: malformed public key bytes
+  rpc SetOwnerPublicKey (SetOwnerPublicKeyRequest) returns (SetOwnerPublicKeyResponse);
+
+  // GetOrganization retrieves metadata for an organization.
+  //
+  // ## Errors
+  // - NOT_FOUND: org_id doesn't exist
+  rpc GetOrganization (GetOrganizationRequest) returns (GetOrganizationResponse);
+}
+
+// Request to create a new organization.
+message CreateOrganizationRequest {
+  // Tenant ID (ULID format) that will own this organization.
+  string tenant_id = 1;
+
+  // Telegram group/chat ID (numeric string from Telegram API).
+  // Used to link Mandate organization to Telegram chat for bot interactions.
+  string tg_group_id = 2;
+}
+
+// Response after successful organization creation.
+message CreateOrganizationResponse {
+  // Newly created organization ID (ULID format).
+  string org_id = 1;
+}
+
+// Request to set or update the owner's public key.
+message SetOwnerPublicKeyRequest {
+  // Organization ID (ULID format) to configure.
+  string org_id = 1;
+
+  // Owner's Nazgul master public key (ristretto point, 32 bytes).
+  // Used for verifying owner signatures on events and member approvals.
+  NazgulMasterPublicKey owner_pubkey = 2;
+}
+
+// Empty response indicating success.
+message SetOwnerPublicKeyResponse {}
+
+// Request to fetch organization metadata.
+message GetOrganizationRequest {
+  // Organization ID (ULID format) to query.
+  string org_id = 1;
+}
+
+// Response containing organization metadata.
+message GetOrganizationResponse {
+  // Organization ID (ULID format).
+  string org_id = 1;
+
+  // Owning tenant ID (ULID format).
+  string tenant_id = 2;
+
+  // Owner's Nazgul master public key (may be empty if not yet set).
+  NazgulMasterPublicKey owner_pubkey = 3;
+}

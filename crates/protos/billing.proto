@@ -4,17 +4,17 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
-// BillingService manages tenant-to-group fund transfers and balance queries.
+// BillingService manages tenant-to-organization fund transfers and balance queries.
 //
 // ## Authentication
 // Requires `x-api-token` header with valid tenant token.
 // Exposed on the public gRPC listener.
 //
 // ## Use Cases
-// - Transfer credits from tenant account to group budget
-// - Query group balance for display or pre-flight checks
-// - Withdraw unused credits from group back to tenant
-// - Transfer credits between groups within same tenant
+// - Transfer credits from tenant account to organization budget
+// - Query organization balance for display or pre-flight checks
+// - Withdraw unused credits from organization back to tenant
+// - Transfer credits between organizations within same tenant
 service BillingService {
   // GetTenantBalance retrieves the current credit balance for a tenant.
   //
@@ -26,13 +26,13 @@ service BillingService {
   // - NOT_FOUND: tenant doesn't exist
   rpc GetTenantBalance (GetTenantBalanceRequest) returns (GetTenantBalanceResponse);
 
-  // GetGroupBalance retrieves the current credit balance for a group.
+  // GetOrganizationBalance retrieves the current credit balance for an organization.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
-  rpc GetGroupBalance (GetGroupBalanceRequest) returns (GetGroupBalanceResponse);
+  // - NOT_FOUND: org_id doesn't exist
+  rpc GetOrganizationBalance (GetOrganizationBalanceRequest) returns (GetOrganizationBalanceResponse);
 
-  // TransferToGroup moves funds from tenant balance to a group's budget.
+  // TransferToOrganization moves funds from tenant balance to a organization's budget.
   //
   // The transfer is atomic: either the full amount moves or nothing does.
   // Uses SERIALIZABLE isolation to prevent race conditions on concurrent transfers.
@@ -43,46 +43,46 @@ service BillingService {
   // ## Errors
   // - INVALID_ARGUMENT: amount_nanos is zero or negative
   // - FAILED_PRECONDITION: insufficient tenant balance
-  // - NOT_FOUND: tenant_id or group_id doesn't exist
+  // - NOT_FOUND: tenant_id or org_id doesn't exist
   // - INTERNAL: database transaction failed
-  rpc TransferToGroup (TransferToGroupRequest) returns (TransferToGroupResponse);
+  rpc TransferToOrganization (TransferToOrganizationRequest) returns (TransferToOrganizationResponse);
 
-  // WithdrawFromGroup moves funds from a group's budget back to tenant balance.
+  // WithdrawFromOrganization moves funds from a organization's budget back to tenant balance.
   //
   // The withdrawal is atomic and uses SERIALIZABLE isolation.
   //
   // ## Authorization
-  // Caller must own the tenant that owns the group.
+  // Caller must own the tenant that owns the organization.
   //
   // ## Errors
   // - INVALID_ARGUMENT: amount_nanos is zero or negative
-  // - FAILED_PRECONDITION: insufficient group balance
-  // - NOT_FOUND: group_id doesn't exist or caller doesn't own it
+  // - FAILED_PRECONDITION: insufficient organization balance
+  // - NOT_FOUND: org_id doesn't exist or caller doesn't own it
   // - INTERNAL: database transaction failed
-  rpc WithdrawFromGroup (WithdrawFromGroupRequest) returns (WithdrawFromGroupResponse);
+  rpc WithdrawFromOrganization (WithdrawFromOrganizationRequest) returns (WithdrawFromOrganizationResponse);
 
-  // TransferBetweenGroups moves funds between two groups owned by the same tenant.
+  // TransferBetweenOrganizations moves funds between two organizations owned by the same tenant.
   //
   // The transfer is atomic and uses SERIALIZABLE isolation.
   //
   // ## Authorization
-  // Caller must own both source and destination groups.
+  // Caller must own both source and destination organizations.
   //
   // ## Errors
-  // - INVALID_ARGUMENT: amount_nanos is zero or negative, or groups are the same
-  // - FAILED_PRECONDITION: insufficient balance in source group
-  // - NOT_FOUND: either group doesn't exist or caller doesn't own both
+  // - INVALID_ARGUMENT: amount_nanos is zero or negative, or organizations are the same
+  // - FAILED_PRECONDITION: insufficient balance in source organization
+  // - NOT_FOUND: either organization doesn't exist or caller doesn't own both
   // - INTERNAL: database transaction failed
-  rpc TransferBetweenGroups (TransferBetweenGroupsRequest) returns (TransferBetweenGroupsResponse);
+  rpc TransferBetweenOrganizations (TransferBetweenOrganizationsRequest) returns (TransferBetweenOrganizationsResponse);
 }
 
-// Request to transfer funds from tenant to group.
-message TransferToGroupRequest {
+// Request to transfer funds from tenant to organization.
+message TransferToOrganizationRequest {
   // Tenant ID (ULID format) whose balance will be debited.
   string tenant_id = 1;
 
-  // Target group ID (ULID format) to receive the funds.
-  string group_id = 2;
+  // Target organization ID (ULID format) to receive the funds.
+  string org_id = 2;
 
   // Amount to transfer in nanoUnits (1 unit = 1,000,000,000 nanos).
   // Must be positive; zero or negative values return INVALID_ARGUMENT.
@@ -96,20 +96,20 @@ message TransferToGroupRequest {
 }
 
 // Response after successful transfer.
-message TransferToGroupResponse {
-  // Updated group balance after adding the transferred amount.
+message TransferToOrganizationResponse {
+  // Updated organization balance after adding the transferred amount.
   int64 balance_after_nanos = 1;
 }
 
-// Request to query a group's current balance.
-message GetGroupBalanceRequest {
+// Request to query an organization's current balance.
+message GetOrganizationBalanceRequest {
   // Group ID (ULID format) to query.
-  string group_id = 1;
+  string org_id = 1;
 }
 
-// Response containing the group's balance.
-message GetGroupBalanceResponse {
-  // Current group balance in nanoUnits.
+// Response containing the organization's balance.
+message GetOrganizationBalanceResponse {
+  // Current organization balance in nanoUnits.
   int64 balance_nanos = 1;
 }
 
@@ -128,10 +128,10 @@ message GetTenantBalanceResponse {
   uint64 updated_at = 2;
 }
 
-// Request to withdraw funds from group back to tenant.
-message WithdrawFromGroupRequest {
-  // Source group ID (ULID format) to withdraw from.
-  string group_id = 1;
+// Request to withdraw funds from organization back to tenant.
+message WithdrawFromOrganizationRequest {
+  // Source organization ID (ULID format) to withdraw from.
+  string org_id = 1;
 
   // Amount to withdraw in nanoUnits.
   // Must be positive; zero or negative values return INVALID_ARGUMENT.
@@ -139,7 +139,7 @@ message WithdrawFromGroupRequest {
 }
 
 // Response after successful withdrawal.
-message WithdrawFromGroupResponse {
+message WithdrawFromOrganizationResponse {
   // Transfer ID for audit trail (ULID format).
   string transfer_id = 1;
 
@@ -150,21 +150,21 @@ message WithdrawFromGroupResponse {
   uint64 timestamp = 3;
 }
 
-// Request to transfer funds between two groups.
-message TransferBetweenGroupsRequest {
-  // Source group ID (ULID format) to debit.
-  string from_group_id = 1;
+// Request to transfer funds between two organizations.
+message TransferBetweenOrganizationsRequest {
+  // Source organization ID (ULID format) to debit.
+  string from_org_id = 1;
 
-  // Destination group ID (ULID format) to credit.
-  string to_group_id = 2;
+  // Destination organization ID (ULID format) to credit.
+  string to_org_id = 2;
 
   // Amount to transfer in nanoUnits.
   // Must be positive; zero or negative values return INVALID_ARGUMENT.
   int64 amount_nanos = 3;
 }
 
-// Response after successful inter-group transfer.
-message TransferBetweenGroupsResponse {
+// Response after successful inter-organization transfer.
+message TransferBetweenOrganizationsResponse {
   // Transfer ID for audit trail (ULID format).
   string transfer_id = 1;
 

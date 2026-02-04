@@ -3,10 +3,10 @@
 use super::event::VerificationEvent;
 use super::time::current_timestamp_ms;
 use super::types::{
-    EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy, UpgradeStrategy,
+    EscalationStrategy, OrgPowConfig, OrgPowState, RecoveryStrategy, UpgradeStrategy,
 };
 
-impl GroupPowState {
+impl OrgPowState {
     /// Creates a new POW state (no POW required initially).
     pub fn new() -> Self {
         Self::default()
@@ -23,10 +23,10 @@ impl GroupPowState {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::{GroupPowState, GroupPowConfig};
+    /// use mandate_core::billing::{OrgPowState, OrgPowConfig};
     ///
-    /// let mut state = GroupPowState::new();
-    /// let config = GroupPowConfig::default();
+    /// let mut state = OrgPowState::new();
+    /// let config = OrgPowConfig::default();
     ///
     /// // First failure
     /// state.on_verification_failure(&config);
@@ -42,7 +42,7 @@ impl GroupPowState {
     /// assert!(state.pow_required);
     /// assert_eq!(state.current_multiplier, 3.0);
     /// ```
-    pub fn on_verification_failure(&mut self, config: &GroupPowConfig) {
+    pub fn on_verification_failure(&mut self, config: &OrgPowConfig) {
         // Reset success counter
         self.consecutive_successes = 0;
 
@@ -76,10 +76,10 @@ impl GroupPowState {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::{GroupPowState, GroupPowConfig};
+    /// use mandate_core::billing::{OrgPowState, OrgPowConfig};
     ///
-    /// let mut state = GroupPowState::new();
-    /// let mut config = GroupPowConfig::default();
+    /// let mut state = OrgPowState::new();
+    /// let mut config = OrgPowConfig::default();
     /// config.recovery_success_count = 2;
     ///
     /// // Trigger POW
@@ -96,7 +96,7 @@ impl GroupPowState {
     /// state.on_verification_success(&config);
     /// assert!(!state.pow_required); // Immediate recovery
     /// ```
-    pub fn on_verification_success(&mut self, config: &GroupPowConfig) {
+    pub fn on_verification_success(&mut self, config: &OrgPowConfig) {
         // Reset failure counter
         self.consecutive_failures = 0;
 
@@ -125,7 +125,7 @@ impl GroupPowState {
     }
 
     /// Records a verification event in history (for time-window strategies).
-    fn record_event(&mut self, success: bool, config: &GroupPowConfig) {
+    fn record_event(&mut self, success: bool, config: &OrgPowConfig) {
         let event = VerificationEvent::now(success);
         self.event_history.push_back(event);
 
@@ -142,7 +142,7 @@ impl GroupPowState {
         &mut self,
         timestamp_ms: u64,
         success: bool,
-        config: &GroupPowConfig,
+        config: &OrgPowConfig,
     ) {
         let event = VerificationEvent::with_timestamp(timestamp_ms, success);
         self.event_history.push_back(event);
@@ -154,7 +154,7 @@ impl GroupPowState {
     }
 
     /// Checks if POW should be triggered based on upgrade strategy.
-    fn should_trigger(&self, config: &GroupPowConfig) -> bool {
+    fn should_trigger(&self, config: &OrgPowConfig) -> bool {
         match &config.upgrade_strategy {
             UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold, ..
@@ -210,7 +210,7 @@ impl GroupPowState {
     /// Escalates POW difficulty based on upgrade strategy's growth mode.
     ///
     /// The multiplier is capped at `config.max_multiplier` to prevent unbounded growth.
-    fn escalate(&mut self, config: &GroupPowConfig) {
+    fn escalate(&mut self, config: &OrgPowConfig) {
         let growth = config.upgrade_strategy.growth();
         let new_multiplier = match growth {
             EscalationStrategy::Linear { step } => self.current_multiplier + step,
@@ -221,7 +221,7 @@ impl GroupPowState {
     }
 
     /// Recovers from POW mode based on recovery strategy.
-    fn recover(&mut self, config: &GroupPowConfig) {
+    fn recover(&mut self, config: &OrgPowConfig) {
         match config.recovery_strategy {
             RecoveryStrategy::Immediate => {
                 // Immediately disable POW

@@ -11,14 +11,14 @@ import "error.proto";
 // Exposed on the public gRPC listener (Edge-cacheable for reads).
 //
 // ## Ring Model
-// The ring is an ordered set of Nazgul public keys representing group members.
+// The ring is an ordered set of Nazgul public keys representing organization members.
 // Ring membership determines who can produce valid ring signatures for events.
 // The ring state is tracked via a hash-linked delta log for efficient sync.
 //
 // ## Delta Log
 // Instead of transmitting full ring state, clients sync via deltas (add/remove ops).
 // Each delta produces a new ring hash; clients can resume sync from any known hash.
-// This enables efficient incremental updates even for large groups.
+// This enables efficient incremental updates even for large organizations.
 //
 // ## Use Cases
 // - Clients fetch current ring to verify signatures
@@ -31,7 +31,7 @@ service RingService {
   // Clients use this for initial sync or to verify their local ring state.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   rpc GetRingHead (GetRingHeadRequest) returns (GetRingHeadResponse);
 
   // StreamRing fetches ring deltas for incremental synchronization.
@@ -45,15 +45,15 @@ service RingService {
   // The response includes next_ring_hash for resumption.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - INVALID_ARGUMENT: after_ring_hash is not a known ring state
   rpc StreamRing (StreamRingRequest) returns (stream StreamRingResponse);
 }
 
 // Request to get current ring head.
 message GetRingHeadRequest {
-  // Group ID (ULID format) to query.
-  string group_id = 1;
+  // Organization ID (ULID format) to query.
+  string org_id = 1;
 }
 
 // Response containing current ring state.
@@ -72,8 +72,8 @@ message GetRingHeadResponse {
 
 // Request to stream ring deltas.
 message StreamRingRequest {
-  // Group ID (ULID format) to stream.
-  string group_id = 1;
+  // Organization ID (ULID format) to stream.
+  string org_id = 1;
 
   // Optional anchor hash (32 bytes) to resume from.
   // Empty means start from genesis (empty ring).

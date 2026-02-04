@@ -1,7 +1,7 @@
 //! stream_events gRPC handler implementation.
 
 use super::service::EventServiceImpl;
-use crate::ids::{GroupId, SequenceNo};
+use crate::ids::{OrganizationId, SequenceNo};
 use mandate_proto::mandate::v1::{StreamEventsRequest, StreamEventsResponse};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -19,9 +19,9 @@ impl EventServiceImpl {
     ) -> Result<Response<StreamEventsStream>, Status> {
         let tenant = extract_tenant_id(&request, &self.store).await?;
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             crate::rpc::RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -33,17 +33,17 @@ impl EventServiceImpl {
         let limit = clamp_events_limit(body.limit);
         let records = self
             .store
-            .stream_events(tenant, group_id, cursor, limit)
+            .stream_events(tenant, org_id, cursor, limit)
             .await
             .map_err(to_status)?;
 
         // Calculate total egress bytes for billing
         let total_bytes: usize = records.iter().map(|(_, b, _)| b.len()).sum();
-        let group_id_str = group_id.to_string();
+        let org_id_str = org_id.to_string();
 
         // Check egress balance before sending data
         self.egress_meter
-            .check_egress(&group_id_str, total_bytes)
+            .check_egress(&org_id_str, total_bytes)
             .await
             .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
 
@@ -56,7 +56,7 @@ impl EventServiceImpl {
         // and the check_egress call above already validated the balance.
         let _ = self
             .egress_meter
-            .record_egress(&group_id_str, total_bytes)
+            .record_egress(&org_id_str, total_bytes)
             .await;
 
         let _ = tx

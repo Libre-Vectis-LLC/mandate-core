@@ -1,14 +1,14 @@
 //! BillingService gRPC implementation.
 
-use crate::ids::{GroupId, Nanos, TenantId};
+use crate::ids::{OrganizationId, Nanos, TenantId};
 use crate::rpc::RpcError;
 use crate::storage::facade::StorageFacade;
 use crate::storage::{IdempotencyErrorCode, IdempotencyResult};
 use mandate_proto::mandate::v1::{
-    billing_service_server::BillingService, GetGroupBalanceRequest, GetGroupBalanceResponse,
-    GetTenantBalanceRequest, GetTenantBalanceResponse, TransferBetweenGroupsRequest,
-    TransferBetweenGroupsResponse, TransferToGroupRequest, TransferToGroupResponse,
-    WithdrawFromGroupRequest, WithdrawFromGroupResponse,
+    billing_service_server::BillingService, GetOrganizationBalanceRequest, GetOrganizationBalanceResponse,
+    GetTenantBalanceRequest, GetTenantBalanceResponse, TransferBetweenOrganizationsRequest,
+    TransferBetweenOrganizationsResponse, TransferToOrganizationRequest, TransferToOrganizationResponse,
+    WithdrawFromOrganizationRequest, WithdrawFromOrganizationResponse,
 };
 use tonic::{Code, Request, Response, Status};
 
@@ -82,10 +82,10 @@ impl BillingService for BillingServiceImpl {
     ///
     /// This prevents a compromised Bot from transferring funds from arbitrary tenants.
     /// The Bot must explicitly authenticate as the tenant it intends to act for.
-    async fn transfer_to_group(
+    async fn transfer_to_organization(
         &self,
-        request: Request<TransferToGroupRequest>,
-    ) -> Result<Response<TransferToGroupResponse>, Status> {
+        request: Request<TransferToOrganizationRequest>,
+    ) -> Result<Response<TransferToOrganizationResponse>, Status> {
         if let Some(status) = payments_disabled_status() {
             return Err(status);
         }
@@ -113,10 +113,10 @@ impl BillingService for BillingServiceImpl {
                     // Replay successful result
                     let balance_i64 =
                         i64::try_from(balance_nanos).map_err(|_| RpcError::Internal {
-                            operation: "transfer_to_group",
+                            operation: "transfer_to_organization",
                             details: "cached balance exceeds i64::MAX".into(),
                         })?;
-                    return Ok(Response::new(TransferToGroupResponse {
+                    return Ok(Response::new(TransferToOrganizationResponse {
                         balance_after_nanos: balance_i64,
                     }));
                 }
@@ -136,9 +136,9 @@ impl BillingService for BillingServiceImpl {
 
         // Parse and validate request parameters
         // Note: body.tenant_id is ignored - we use the authenticated tenant_id from context
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -157,7 +157,7 @@ impl BillingService for BillingServiceImpl {
         // Execute the transfer
         let result = self
             .store
-            .transfer_to_group(tenant_id, group_id, Nanos::new(amount))
+            .transfer_to_organization(tenant_id, org_id, Nanos::new(amount))
             .await;
 
         // Record result if idempotency key was provided
@@ -183,38 +183,38 @@ impl BillingService for BillingServiceImpl {
         // Return result
         let balance = result.map_err(to_status)?;
         let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
-            operation: "transfer_to_group",
+            operation: "transfer_to_organization",
             details: "balance exceeds i64::MAX".into(),
         })?;
-        Ok(Response::new(TransferToGroupResponse {
+        Ok(Response::new(TransferToOrganizationResponse {
             balance_after_nanos: balance_i64,
         }))
     }
 
-    async fn get_group_balance(
+    async fn get_organization_balance(
         &self,
-        request: Request<GetGroupBalanceRequest>,
-    ) -> Result<Response<GetGroupBalanceResponse>, Status> {
+        request: Request<GetOrganizationBalanceRequest>,
+    ) -> Result<Response<GetOrganizationBalanceResponse>, Status> {
         if let Some(status) = payments_disabled_status() {
             return Err(status);
         }
         let body = request.into_inner();
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
         let balance = self
             .store
-            .get_group_balance(group_id)
+            .get_organization_balance(org_id)
             .await
             .map_err(to_status)?;
         let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
-            operation: "get_group_balance",
+            operation: "get_organization_balance",
             details: "balance exceeds i64::MAX".into(),
         })?;
-        Ok(Response::new(GetGroupBalanceResponse {
+        Ok(Response::new(GetOrganizationBalanceResponse {
             balance_nanos: balance_i64,
         }))
     }
@@ -256,10 +256,10 @@ impl BillingService for BillingServiceImpl {
         }))
     }
 
-    async fn withdraw_from_group(
+    async fn withdraw_from_organization(
         &self,
-        request: Request<WithdrawFromGroupRequest>,
-    ) -> Result<Response<WithdrawFromGroupResponse>, Status> {
+        request: Request<WithdrawFromOrganizationRequest>,
+    ) -> Result<Response<WithdrawFromOrganizationResponse>, Status> {
         if let Some(status) = payments_disabled_status() {
             return Err(status);
         }
@@ -276,9 +276,9 @@ impl BillingService for BillingServiceImpl {
         let body = request.into_inner();
 
         // Parse and validate request parameters
-        let group_id = GroupId(crate::proto::parse_ulid(&body.group_id).map_err(|e| {
+        let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "group_id",
+                field: "org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -297,7 +297,7 @@ impl BillingService for BillingServiceImpl {
         // Execute the withdrawal
         let _tenant_balance = self
             .store
-            .withdraw_from_group(tenant_id, group_id, Nanos::new(amount))
+            .withdraw_from_group(tenant_id, org_id, Nanos::new(amount))
             .await
             .map_err(to_status)?;
 
@@ -308,17 +308,17 @@ impl BillingService for BillingServiceImpl {
             .unwrap_or_default()
             .as_secs();
 
-        Ok(Response::new(WithdrawFromGroupResponse {
+        Ok(Response::new(WithdrawFromOrganizationResponse {
             transfer_id,
             amount_nanos: body.amount_nanos,
             timestamp,
         }))
     }
 
-    async fn transfer_between_groups(
+    async fn transfer_between_organizations(
         &self,
-        request: Request<TransferBetweenGroupsRequest>,
-    ) -> Result<Response<TransferBetweenGroupsResponse>, Status> {
+        request: Request<TransferBetweenOrganizationsRequest>,
+    ) -> Result<Response<TransferBetweenOrganizationsResponse>, Status> {
         if let Some(status) = payments_disabled_status() {
             return Err(status);
         }
@@ -335,16 +335,16 @@ impl BillingService for BillingServiceImpl {
         let body = request.into_inner();
 
         // Parse and validate request parameters
-        let source_group_id =
-            GroupId(crate::proto::parse_ulid(&body.from_group_id).map_err(|e| {
+        let source_org_id =
+            OrganizationId(crate::proto::parse_ulid(&body.from_org_id).map_err(|e| {
                 RpcError::InvalidArgument {
-                    field: "from_group_id",
+                    field: "from_org_id",
                     reason: e.to_string(),
                 }
             })?);
-        let dest_group_id = GroupId(crate::proto::parse_ulid(&body.to_group_id).map_err(|e| {
+        let dest_org_id = OrganizationId(crate::proto::parse_ulid(&body.to_org_id).map_err(|e| {
             RpcError::InvalidArgument {
-                field: "to_group_id",
+                field: "to_org_id",
                 reason: e.to_string(),
             }
         })?);
@@ -365,8 +365,8 @@ impl BillingService for BillingServiceImpl {
             .store
             .transfer_between_groups(
                 tenant_id,
-                source_group_id,
-                dest_group_id,
+                source_org_id,
+                dest_org_id,
                 Nanos::new(amount),
             )
             .await
@@ -379,7 +379,7 @@ impl BillingService for BillingServiceImpl {
             .unwrap_or_default()
             .as_secs();
 
-        Ok(Response::new(TransferBetweenGroupsResponse {
+        Ok(Response::new(TransferBetweenOrganizationsResponse {
             transfer_id,
             amount_nanos: body.amount_nanos,
             timestamp,

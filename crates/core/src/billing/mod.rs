@@ -46,11 +46,11 @@ pub use metering::{
     UsageEvent,
 };
 pub use pow_state::{
-    EscalationStrategy, GroupPowConfig, GroupPowState, RecoveryStrategy, UpgradeStrategy,
+    EscalationStrategy, OrgPowConfig, OrgPowState, RecoveryStrategy, UpgradeStrategy,
     VerificationEvent,
 };
 pub use pricing::{ProviderPricing, ServiceTier};
-pub use storage::{GroupStorageStatus, GroupStorageUsage};
+pub use storage::{OrgStorageStatus, OrgStorageUsage};
 pub use tenant_tier::{
     has_priority_over, tenant_tier_level, TenantTier, TIER_FREE, TIER_MAX_MIN, TIER_PAID_MAX,
     TIER_PAID_MIN, TIER_PRO_MAX, TIER_PRO_MIN,

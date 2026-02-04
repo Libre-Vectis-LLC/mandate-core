@@ -1,14 +1,14 @@
 /// In-memory ban index tracking using DashMap for lock-free concurrent access.
 use crate::event::BanScope;
-use crate::ids::{EventId, GroupId, KeyImage, RingHash, TenantId};
+use crate::ids::{EventId, OrganizationId, KeyImage, RingHash, TenantId};
 use crate::storage::{BanIndex, BannedOperation, StorageError};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use std::collections::HashSet;
 
-type BanKey = (TenantId, GroupId, [u8; 32]);
+type BanKey = (TenantId, OrganizationId, [u8; 32]);
 type BanScopeSet = HashSet<BanScope>;
-type RingBanCountKey = (TenantId, GroupId, RingHash);
+type RingBanCountKey = (TenantId, OrganizationId, RingHash);
 
 fn key_image_bytes(key_image: &KeyImage) -> [u8; 32] {
     *key_image.compress().as_bytes()
@@ -28,7 +28,7 @@ fn ban_scopes_for_operation(operation: BannedOperation) -> &'static [BanScope] {
 #[derive(Clone)]
 struct BanRecord {
     tenant: TenantId,
-    group_id: GroupId,
+    org_id: OrganizationId,
     key_image: [u8; 32],
     scope: BanScope,
     ring_hash: RingHash,
@@ -37,13 +37,13 @@ struct BanRecord {
 /// In-memory ban index using DashMap for concurrent access.
 ///
 /// With "Option B" (bans only affect current ring), the design is simple:
-/// - Bans are indexed by (TenantId, GroupId, KeyImage) for fast is_banned() lookup
+/// - Bans are indexed by (TenantId, OrganizationId, KeyImage) for fast is_banned() lookup
 /// - A secondary index by EventId allows fast revoke_ban() lookup
 /// - A third index tracks ban counts per ring_hash for OOM protection
 /// - When ring changes (RingUpdate), all KeyImages change, so old bans become ineffective
 #[derive(Clone, Default)]
 pub struct InMemoryBanIndex {
-    /// Primary index: (TenantId, GroupId, KeyImage) → BanScopes
+    /// Primary index: (TenantId, OrganizationId, KeyImage) → BanScopes
     /// Supports fast is_banned() lookup by key image.
     bans: DashMap<BanKey, BanScopeSet>,
 
@@ -51,7 +51,7 @@ pub struct InMemoryBanIndex {
     /// Supports fast revoke_ban() lookup by ban event ID.
     ban_events: DashMap<EventId, BanRecord>,
 
-    /// Third index: (TenantId, GroupId, RingHash) → ban count
+    /// Third index: (TenantId, OrganizationId, RingHash) → ban count
     /// Used to enforce MAX_BANS_PER_RING_HASH limit for OOM protection.
     ring_ban_counts: DashMap<RingBanCountKey, usize>,
 }
@@ -64,7 +64,7 @@ impl InMemoryBanIndex {
     pub fn record_ban(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         key_image: KeyImage,
         scope: BanScope,
         ban_event_id: EventId,
@@ -82,7 +82,7 @@ impl InMemoryBanIndex {
         // Insert into primary index
         let mut entry = self
             .bans
-            .entry((tenant, group_id, key_image_bytes))
+            .entry((tenant, org_id, key_image_bytes))
             .or_default();
         if !entry.insert(scope) {
             return Err(StorageError::PreconditionFailed(
@@ -96,7 +96,7 @@ impl InMemoryBanIndex {
             ban_event_id,
             BanRecord {
                 tenant,
-                group_id,
+                org_id,
                 key_image: key_image_bytes,
                 scope,
                 ring_hash,
@@ -106,7 +106,7 @@ impl InMemoryBanIndex {
         // Increment ring ban count
         *self
             .ring_ban_counts
-            .entry((tenant, group_id, ring_hash))
+            .entry((tenant, org_id, ring_hash))
             .or_default() += 1;
 
         Ok(())
@@ -120,7 +120,7 @@ impl InMemoryBanIndex {
             .ok_or_else(|| StorageError::PreconditionFailed("unknown ban event".into()))?;
 
         // Remove from primary index
-        let ban_key = (record.tenant, record.group_id, record.key_image);
+        let ban_key = (record.tenant, record.org_id, record.key_image);
         if let Some(mut scopes) = self.bans.get_mut(&ban_key) {
             scopes.remove(&record.scope);
             if scopes.is_empty() {
@@ -130,7 +130,7 @@ impl InMemoryBanIndex {
         }
 
         // Decrement ring ban count
-        let ring_key = (record.tenant, record.group_id, record.ring_hash);
+        let ring_key = (record.tenant, record.org_id, record.ring_hash);
         if let Some(mut count) = self.ring_ban_counts.get_mut(&ring_key) {
             *count = count.saturating_sub(1);
             if *count == 0 {
@@ -148,12 +148,12 @@ impl BanIndex for InMemoryBanIndex {
     async fn is_banned(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         key_image: &KeyImage,
         operation: BannedOperation,
     ) -> Result<bool, StorageError> {
         let key_image_bytes = key_image_bytes(key_image);
-        let Some(scopes) = self.bans.get(&(tenant, group_id, key_image_bytes)) else {
+        let Some(scopes) = self.bans.get(&(tenant, org_id, key_image_bytes)) else {
             return Ok(false);
         };
         let blocked = ban_scopes_for_operation(operation)
@@ -165,12 +165,12 @@ impl BanIndex for InMemoryBanIndex {
     async fn count_bans_for_ring(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         ring_hash: &RingHash,
     ) -> Result<usize, StorageError> {
         Ok(self
             .ring_ban_counts
-            .get(&(tenant, group_id, *ring_hash))
+            .get(&(tenant, org_id, *ring_hash))
             .map(|r| *r)
             .unwrap_or(0))
     }
@@ -184,7 +184,7 @@ impl BanIndex for NoopBanIndex {
     async fn is_banned(
         &self,
         _tenant: TenantId,
-        _group_id: GroupId,
+        _org_id: OrganizationId,
         _key_image: &KeyImage,
         _operation: BannedOperation,
     ) -> Result<bool, StorageError> {
@@ -194,7 +194,7 @@ impl BanIndex for NoopBanIndex {
     async fn count_bans_for_ring(
         &self,
         _tenant: TenantId,
-        _group_id: GroupId,
+        _org_id: OrganizationId,
         _ring_hash: &RingHash,
     ) -> Result<usize, StorageError> {
         Ok(0)

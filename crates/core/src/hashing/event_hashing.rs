@@ -5,7 +5,7 @@ use crate::event::{
     AnonymousMessage, BanCreate, BanRevoke, Event, EventType, Poll, PollOption, PollQuestion,
     PollQuestionKind, RingUpdate, Vote, VoteSelection,
 };
-use crate::ids::{ContentHash, EventId, EventUlid, GroupId};
+use crate::ids::{ContentHash, EventId, EventUlid, OrganizationId};
 use nazgul::ring::RingHash;
 use serde::Serialize;
 
@@ -34,7 +34,7 @@ pub fn vote_hash_sha3_256(vote: &Vote) -> Result<ContentHash, CanonicalHashError
 struct CanonicalEvent<'a> {
     event_ulid: EventUlid,
     previous_event_hash: EventId,
-    group_id: GroupId,
+    org_id: OrganizationId,
     // sequence_no intentionally excluded from canonical hash (storage ordering only)
     processed_at: u64,
     serialization_version: u8,
@@ -46,7 +46,7 @@ impl<'a> From<&'a Event> for CanonicalEvent<'a> {
         Self {
             event_ulid: event.event_ulid,
             previous_event_hash: event.previous_event_hash,
-            group_id: event.group_id,
+            org_id: event.org_id,
             processed_at: event.processed_at,
             serialization_version: event.serialization_version,
             event_type: CanonicalEventType::from(&event.event_type),
@@ -81,7 +81,7 @@ impl<'a> From<&'a EventType> for CanonicalEventType<'a> {
 
 #[derive(Serialize)]
 struct CanonicalPoll<'a> {
-    group_id: GroupId,
+    org_id: OrganizationId,
     ring_hash: RingHash,
     poll_id: &'a str,
     questions: Vec<CanonicalPollQuestion<'a>>,
@@ -101,7 +101,7 @@ impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
             .collect();
 
         Self {
-            group_id: poll.group_id,
+            org_id: poll.org_id,
             ring_hash: poll.ring_hash,
             poll_id: &poll.poll_id,
             questions,
@@ -175,7 +175,7 @@ fn canonical_options<'a>(options: &'a [PollOption]) -> Vec<CanonicalPollOption<'
 
 #[derive(Serialize)]
 struct CanonicalVote<'a> {
-    group_id: GroupId,
+    org_id: OrganizationId,
     ring_hash: RingHash,
     poll_id: &'a str,
     poll_hash: crate::ids::ContentHash,
@@ -195,7 +195,7 @@ impl<'a> From<&'a Vote> for CanonicalVote<'a> {
             .collect();
 
         Self {
-            group_id: v.group_id,
+            org_id: v.org_id,
             ring_hash: v.ring_hash,
             poll_id: &v.poll_id,
             poll_hash: v.poll_hash,

@@ -218,9 +218,9 @@ impl From<&str> for BotSecret {
 /// Group identifier (server-assigned ULID) used in derivations and hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct GroupId(pub Ulid);
+pub struct OrganizationId(pub Ulid);
 
-impl GroupId {
+impl OrganizationId {
     pub fn to_bytes(self) -> [u8; 16] {
         self.0.to_bytes()
     }
@@ -230,25 +230,25 @@ impl GroupId {
     }
 }
 
-impl fmt::Display for GroupId {
+impl fmt::Display for OrganizationId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<Ulid> for GroupId {
+impl From<Ulid> for OrganizationId {
     fn from(value: Ulid) -> Self {
         Self(value)
     }
 }
 
-impl From<GroupId> for Ulid {
-    fn from(value: GroupId) -> Self {
+impl From<OrganizationId> for Ulid {
+    fn from(value: OrganizationId) -> Self {
         value.0
     }
 }
 
-impl FromStr for GroupId {
+impl FromStr for OrganizationId {
     type Err = ulid::DecodeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

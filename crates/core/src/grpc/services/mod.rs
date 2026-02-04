@@ -4,7 +4,7 @@ mod admin;
 mod auth;
 mod billing;
 mod event;
-mod group;
+mod organization;
 mod member;
 mod ring;
 mod storage;
@@ -13,7 +13,7 @@ pub use admin::AdminServiceImpl;
 pub use auth::AuthServiceImpl;
 pub use billing::BillingServiceImpl;
 pub use event::EventServiceImpl;
-pub use group::GroupServiceImpl;
+pub use organization::OrganizationServiceImpl;
 pub use member::MemberServiceImpl;
 pub use ring::RingServiceImpl;
 pub use storage::StorageServiceImpl;
@@ -227,10 +227,10 @@ mod tests {
     async fn upload_key_blobs_rejects_oversized_blob() {
         let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
-        let group_id = ulid::Ulid::new().to_string();
+        let org_id = ulid::Ulid::new().to_string();
 
         let mut req = Request::new(UploadKeyBlobsRequest {
-            group_id,
+            org_id,
             blobs: vec![KeyBlob {
                 rage_pub: Some(RagePublicKey {
                     value: vec![7u8; 32],
@@ -252,7 +252,7 @@ mod tests {
     async fn upload_key_blobs_rejects_too_many_entries() {
         let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
-        let group_id = ulid::Ulid::new().to_string();
+        let org_id = ulid::Ulid::new().to_string();
 
         let blobs = (0..(keyblobs_max_count() + 1))
             .map(|_| KeyBlob {
@@ -263,7 +263,7 @@ mod tests {
             })
             .collect();
 
-        let mut req = Request::new(UploadKeyBlobsRequest { group_id, blobs });
+        let mut req = Request::new(UploadKeyBlobsRequest { org_id, blobs });
         req.extensions_mut().insert(tenant);
 
         let err = services
@@ -278,7 +278,7 @@ mod tests {
     async fn push_event_rejects_oversized_poll_id() {
         use crate::crypto::ciphertext::Ciphertext;
         use crate::event::{Event, EventType, Poll, PollQuestion, PollQuestionKind};
-        use crate::ids::{EventId, EventUlid, GroupId, RingHash, Ulid};
+        use crate::ids::{EventId, EventUlid, OrganizationId, RingHash, Ulid};
 
         let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
@@ -286,7 +286,7 @@ mod tests {
         // Create a poll event with an oversized poll_id
         let oversized_poll_id = "x".repeat(max_poll_id_length() + 1);
         let poll = Poll {
-            group_id: GroupId(Ulid::new()),
+            org_id: OrganizationId(Ulid::new()),
             ring_hash: RingHash([0u8; 32]),
             poll_id: oversized_poll_id,
             questions: vec![PollQuestion {
@@ -302,7 +302,7 @@ mod tests {
         let event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            group_id: poll.group_id,
+            org_id: poll.org_id,
             sequence_no: None,
             processed_at: 123,
             serialization_version: 1,
@@ -326,7 +326,7 @@ mod tests {
     async fn push_event_rejects_oversized_message_content() {
         use crate::crypto::ciphertext::Ciphertext;
         use crate::event::{AnonymousMessage, Event, EventType};
-        use crate::ids::{EventId, EventUlid, GroupId, RingHash, Ulid};
+        use crate::ids::{EventId, EventUlid, OrganizationId, RingHash, Ulid};
 
         let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
@@ -334,7 +334,7 @@ mod tests {
         // Create a message event with oversized content (in UTF-8 characters)
         let oversized_content = "x".repeat(max_message_content_chars() + 1);
         let message = AnonymousMessage {
-            group_id: GroupId(Ulid::new()),
+            org_id: OrganizationId(Ulid::new()),
             ring_hash: RingHash([0u8; 32]),
             message_id: Ulid::new().to_string(),
             content: Ciphertext(oversized_content.into_bytes()),
@@ -344,7 +344,7 @@ mod tests {
         let event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            group_id: GroupId(Ulid::new()),
+            org_id: OrganizationId(Ulid::new()),
             sequence_no: None,
             processed_at: 123,
             serialization_version: 1,
@@ -366,19 +366,19 @@ mod tests {
 
     #[test]
     fn to_status_not_found_does_not_leak_internal_ids() {
-        use crate::ids::{GroupId, TenantId, Ulid};
+        use crate::ids::{OrganizationId, TenantId, Ulid};
         use crate::storage::{NotFound, StorageError};
 
         let status = to_status(StorageError::NotFound(NotFound::KeyBlob {
             tenant: TenantId(Ulid::new()),
-            group_id: GroupId(Ulid::new()),
+            org_id: OrganizationId(Ulid::new()),
             rage_pub: [7u8; 32],
         }));
 
         assert_eq!(status.code(), Code::NotFound);
         assert!(status.message().contains("key_blob not found"));
         assert!(!status.message().contains("TenantId"));
-        assert!(!status.message().contains("GroupId"));
+        assert!(!status.message().contains("OrganizationId"));
         assert!(!status.message().contains("rage_pub"));
     }
 }

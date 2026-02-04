@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../protos/error.proto",
         "../protos/event.proto",
         "../protos/ring.proto",
-        "../protos/group.proto",
+        "../protos/organization.proto",
         "../protos/member.proto",
         "../protos/storage.proto",
         "../protos/billing.proto",

@@ -1,8 +1,8 @@
 /// In-memory pending member storage.
 use crate::event::MemberIdentity;
-use crate::ids::{GroupId, MasterPublicKey, TenantId};
+use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
 use crate::storage::{
-    GroupMembershipInfo, MemberInfo, NotFound, PendingMember, PendingMemberStatus,
+    OrganizationMembershipInfo, MemberInfo, NotFound, PendingMember, PendingMemberStatus,
     PendingMemberStore, StorageError,
 };
 use async_trait::async_trait;
@@ -10,13 +10,13 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(crate) type PendingMemberMap = HashMap<(TenantId, GroupId), Vec<PendingMemberRecord>>;
+pub(crate) type PendingMemberMap = HashMap<(TenantId, OrganizationId), Vec<PendingMemberRecord>>;
 
 /// In-memory invite code record for testing.
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryInviteCode {
     pub(crate) tenant_id: TenantId,
-    pub(crate) group_id: GroupId,
+    pub(crate) org_id: OrganizationId,
     pub(crate) max_uses: u32,
     pub(crate) current_uses: u32,
     pub(crate) is_active: bool,
@@ -31,7 +31,7 @@ pub(crate) struct PendingMemberRecord {
 
 #[derive(Clone, Default)]
 pub struct InMemoryPendingMembers {
-    // Keyed by (TenantId, GroupId)
+    // Keyed by (TenantId, OrganizationId)
     members: Arc<Mutex<PendingMemberMap>>,
     // Keyed by invite code string (for register_standalone testing)
     invite_codes: Arc<Mutex<HashMap<String, InMemoryInviteCode>>>,
@@ -49,7 +49,7 @@ impl InMemoryPendingMembers {
         &self,
         code: impl Into<String>,
         tenant_id: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         max_uses: u32,
     ) {
         let mut codes = self.invite_codes.lock();
@@ -57,7 +57,7 @@ impl InMemoryPendingMembers {
             code.into(),
             InMemoryInviteCode {
                 tenant_id,
-                group_id,
+                org_id,
                 max_uses,
                 current_uses: 0,
                 is_active: true,
@@ -71,7 +71,7 @@ impl InMemoryPendingMembers {
         &self,
         code: impl Into<String>,
         tenant_id: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         max_uses: u32,
         expires_at_ms: i64,
     ) {
@@ -80,7 +80,7 @@ impl InMemoryPendingMembers {
             code.into(),
             InMemoryInviteCode {
                 tenant_id,
-                group_id,
+                org_id,
                 max_uses,
                 current_uses: 0,
                 is_active: true,
@@ -92,11 +92,11 @@ impl InMemoryPendingMembers {
     pub(crate) fn approve_member(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         public_key: MasterPublicKey,
     ) {
         let mut members = self.members.lock();
-        let Some(list) = members.get_mut(&(tenant, group_id)) else {
+        let Some(list) = members.get_mut(&(tenant, org_id)) else {
             return;
         };
         for record in list.iter_mut() {
@@ -114,13 +114,13 @@ impl PendingMemberStore for InMemoryPendingMembers {
     async fn submit(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         tg_user_id: &str,
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
     ) -> Result<String, StorageError> {
         let mut map = self.members.lock();
-        let list = map.entry((tenant, group_id)).or_default();
+        let list = map.entry((tenant, org_id)).or_default();
 
         let pending_id = format!("PENDING-{}", ulid::Ulid::new());
         let member = PendingMember {
@@ -145,12 +145,12 @@ impl PendingMemberStore for InMemoryPendingMembers {
     async fn list(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         limit: usize,
         _page_token: Option<String>,
     ) -> Result<(Vec<PendingMember>, Option<String>), StorageError> {
         let map = self.members.lock();
-        if let Some(list) = map.get(&(tenant, group_id)) {
+        if let Some(list) = map.get(&(tenant, org_id)) {
             // MVP: naive pagination
             let result = list
                 .iter()
@@ -167,11 +167,11 @@ impl PendingMemberStore for InMemoryPendingMembers {
     async fn get_approved_by_tg_user_id(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         tg_user_id: &str,
     ) -> Result<Option<PendingMember>, StorageError> {
         let map = self.members.lock();
-        if let Some(list) = map.get(&(tenant, group_id)) {
+        if let Some(list) = map.get(&(tenant, org_id)) {
             // Find the most recently submitted approved member with matching tg_user_id
             let result = list
                 .iter()
@@ -194,9 +194,9 @@ impl PendingMemberStore for InMemoryPendingMembers {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
         _display_name: Option<String>,
-    ) -> Result<(String, GroupId), StorageError> {
+    ) -> Result<(String, OrganizationId), StorageError> {
         // Validate and consume invite code atomically
-        let (group_id, code_tenant) = {
+        let (org_id, code_tenant) = {
             let mut codes = self.invite_codes.lock();
             let code = codes.get_mut(invite_code).ok_or_else(|| {
                 StorageError::NotFound(NotFound::InviteCode {
@@ -241,7 +241,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
             // Increment usage
             code.current_uses += 1;
 
-            (code.group_id, code.tenant_id)
+            (code.org_id, code.tenant_id)
         };
 
         // Verify tenant consistency
@@ -272,23 +272,23 @@ impl PendingMemberStore for InMemoryPendingMembers {
         };
 
         let mut map = self.members.lock();
-        let list = map.entry((tenant, group_id)).or_default();
+        let list = map.entry((tenant, org_id)).or_default();
         list.push(record);
 
-        Ok((pending_id, group_id))
+        Ok((pending_id, org_id))
     }
 
     async fn list_all_members(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         limit: usize,
         _page_token: Option<String>,
         filter_source: Option<&str>,
         filter_status: Option<&str>,
     ) -> Result<(Vec<MemberInfo>, Option<String>, u32), StorageError> {
         let map = self.members.lock();
-        if let Some(list) = map.get(&(tenant, group_id)) {
+        if let Some(list) = map.get(&(tenant, org_id)) {
             // Apply filters
             let status_filter = filter_status.unwrap_or("approved");
             let filtered: Vec<_> = list
@@ -340,21 +340,21 @@ impl PendingMemberStore for InMemoryPendingMembers {
         }
     }
 
-    async fn list_groups_for_member(
+    async fn list_organizations_for_member(
         &self,
         tenant: TenantId,
         nazgul_pub: &[u8],
         limit: usize,
         _page_token: Option<String>,
         filter_status: Option<&str>,
-    ) -> Result<(Vec<GroupMembershipInfo>, Option<String>, u32), StorageError> {
+    ) -> Result<(Vec<OrganizationMembershipInfo>, Option<String>, u32), StorageError> {
         let members = self.members.lock();
 
         let status_filter = filter_status.unwrap_or("approved");
 
         let mut results = Vec::new();
 
-        // Iterate all (tenant, group_id) pairs
+        // Iterate all (tenant, org_id) pairs
         for ((t, g), records) in members.iter() {
             // Skip if tenant doesn't match
             if *t != tenant {
@@ -366,8 +366,8 @@ impl PendingMemberStore for InMemoryPendingMembers {
                 if record.member.nazgul_pub.0.as_slice() == nazgul_pub
                     && record.status.as_str() == status_filter
                 {
-                    results.push(GroupMembershipInfo {
-                        group_id: *g,
+                    results.push(OrganizationMembershipInfo {
+                        org_id: *g,
                         joined_at_ms: record.member.submitted_at_ms,
                         status: record.status.as_str().to_string(),
                     });

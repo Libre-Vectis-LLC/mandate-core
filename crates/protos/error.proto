@@ -28,7 +28,7 @@ enum ErrorCode {
   // Request arguments are invalid or malformed.
   INVALID_ARGUMENT = 1;
 
-  // Requested resource (group, tenant, member, etc.) not found.
+  // Requested resource (organization, tenant, member, etc.) not found.
   NOT_FOUND = 2;
 
   // Resource already exists (e.g., duplicate gift card redemption).

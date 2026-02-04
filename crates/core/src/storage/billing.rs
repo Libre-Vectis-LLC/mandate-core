@@ -1,6 +1,6 @@
 //! Billing, idempotency, and gift cards.
 
-use crate::ids::{GroupId, Nanos, TenantId};
+use crate::ids::{OrganizationId, Nanos, TenantId};
 use async_trait::async_trait;
 
 use super::types::{IdempotencyResult, StorageError};
@@ -49,7 +49,7 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `amount` - Amount to transfer
     ///
     /// # Returns
@@ -62,17 +62,17 @@ pub trait BillingStore: Send + Sync {
     /// # Invariants
     /// * Transfers are atomic (tenant debit and group credit happen together)
     /// * Group balance is always non-negative
-    async fn transfer_to_group(
+    async fn transfer_to_organization(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
     /// Retrieve the current operational budget balance for a group.
     ///
     /// # Arguments
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     ///
     /// # Returns
     /// The group's current balance.
@@ -80,7 +80,7 @@ pub trait BillingStore: Send + Sync {
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn get_group_balance(&self, group_id: GroupId) -> Result<Nanos, StorageError>;
+    async fn get_organization_balance(&self, org_id: OrganizationId) -> Result<Nanos, StorageError>;
 
     /// Retrieve the current balance for a tenant with metadata.
     ///
@@ -101,7 +101,7 @@ pub trait BillingStore: Send + Sync {
     /// This method is used to charge a group for resource consumption (verification, storage, etc.).
     ///
     /// # Arguments
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `amount` - Amount to deduct
     ///
     /// # Returns
@@ -115,9 +115,9 @@ pub trait BillingStore: Send + Sync {
     /// # Invariants
     /// * Deductions are atomic
     /// * Balance cannot go negative (checked via precondition)
-    async fn deduct_group_balance(
+    async fn deduct_organization_balance(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
@@ -140,14 +140,14 @@ pub trait BillingStore: Send + Sync {
     /// * `tg_user_id` - The Telegram user ID to resolve
     ///
     /// # Returns
-    /// `Some((TenantId, GroupId))` if found, `None` if no tenant or group exists.
+    /// `Some((TenantId, OrganizationId))` if found, `None` if no tenant or group exists.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn resolve_telegram_user(
         &self,
         tg_user_id: &str,
-    ) -> Result<Option<(TenantId, GroupId)>, StorageError>;
+    ) -> Result<Option<(TenantId, OrganizationId)>, StorageError>;
 
     /// Check if an idempotency key has been used and return the cached result.
     ///
@@ -195,11 +195,11 @@ pub trait BillingStore: Send + Sync {
     /// Withdraw credits from group wallet back to tenant wallet.
     ///
     /// This method moves funds from a group's operational budget back to the tenant's
-    /// personal balance. This is the reverse operation of `transfer_to_group`.
+    /// personal balance. This is the reverse operation of `transfer_to_organization`.
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier (must belong to the tenant)
+    /// * `org_id` - The group identifier (must belong to the tenant)
     /// * `amount` - Amount to withdraw
     ///
     /// # Returns
@@ -216,7 +216,7 @@ pub trait BillingStore: Send + Sync {
     async fn withdraw_from_group(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
@@ -247,8 +247,8 @@ pub trait BillingStore: Send + Sync {
     async fn transfer_between_groups(
         &self,
         tenant: TenantId,
-        source_group: GroupId,
-        dest_group: GroupId,
+        source_group: OrganizationId,
+        dest_group: OrganizationId,
         amount: Nanos,
     ) -> Result<(Nanos, Nanos), StorageError>;
 }

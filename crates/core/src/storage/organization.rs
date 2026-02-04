@@ -1,6 +1,6 @@
 //! Group metadata and member management.
 
-use crate::ids::{GroupId, MasterPublicKey, TenantId};
+use crate::ids::{OrganizationId, MasterPublicKey, TenantId};
 use async_trait::async_trait;
 
 use super::types::StorageError;
@@ -33,10 +33,10 @@ pub struct MemberInfo {
 }
 
 /// Summary of a member's group membership.
-/// This struct is returned by `list_groups_for_member` for wallet restore flow.
+/// This struct is returned by `list_organizations_for_member` for wallet restore flow.
 #[derive(Clone, Debug)]
-pub struct GroupMembershipInfo {
-    pub group_id: GroupId,
+pub struct OrganizationMembershipInfo {
+    pub org_id: OrganizationId,
     pub joined_at_ms: i64,
     pub status: String,
 }
@@ -51,7 +51,7 @@ pub struct PendingMember {
 }
 
 #[async_trait]
-pub trait GroupMetadataStore {
+pub trait OrganizationMetadataStore {
     /// Create a new group record.
     ///
     /// This method initializes a new group within a tenant's account and associates it
@@ -62,7 +62,7 @@ pub trait GroupMetadataStore {
     /// * `tg_group_id` - The Telegram group ID (e.g., `-1001234567890`)
     ///
     /// # Returns
-    /// A newly generated `GroupId` for the created group.
+    /// A newly generated `OrganizationId` for the created group.
     ///
     /// # Errors
     /// * `StorageError::AlreadyExists` - When a group with this Telegram ID already exists
@@ -71,16 +71,16 @@ pub trait GroupMetadataStore {
     /// # Invariants
     /// * Group IDs are globally unique
     /// * Each Telegram group ID maps to at most one Mandate group
-    async fn create_group(
+    async fn create_organization(
         &self,
         tenant: TenantId,
         tg_group_id: &str,
-    ) -> Result<GroupId, StorageError>;
+    ) -> Result<OrganizationId, StorageError>;
 
     /// Retrieve group metadata by group ID.
     ///
     /// # Arguments
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     ///
     /// # Returns
     /// A tuple of `(TenantId, tg_group_id)` containing the owning tenant and Telegram group ID.
@@ -88,7 +88,7 @@ pub trait GroupMetadataStore {
     /// # Errors
     /// * `StorageError::NotFound(NotFound::Group)` - When the group does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    async fn get_group(&self, group_id: GroupId) -> Result<(TenantId, String), StorageError>;
+    async fn get_organization(&self, org_id: OrganizationId) -> Result<(TenantId, String), StorageError>;
 
     /// Set the owner's Nazgul master public key for a group.
     ///
@@ -97,7 +97,7 @@ pub trait GroupMetadataStore {
     /// - Derive delegate public keys for delegated signing
     ///
     /// # Arguments
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `owner_pubkey` - The owner's Nazgul master public key
     ///
     /// # Errors
@@ -105,14 +105,14 @@ pub trait GroupMetadataStore {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn set_owner_pubkey(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
         owner_pubkey: MasterPublicKey,
     ) -> Result<(), StorageError>;
 
     /// Retrieve the owner's Nazgul master public key for a group.
     ///
     /// # Arguments
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     ///
     /// # Returns
     /// The owner's `MasterPublicKey` if set, `None` if not yet configured.
@@ -122,7 +122,7 @@ pub trait GroupMetadataStore {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_owner_pubkey(
         &self,
-        group_id: GroupId,
+        org_id: OrganizationId,
     ) -> Result<Option<MasterPublicKey>, StorageError>;
 }
 
@@ -135,7 +135,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `tg_user_id` - The Telegram user ID of the joining member
     /// * `nazgul_pub` - The member's Nazgul master public key (for ring signatures)
     /// * `rage_pub` - The member's Rage public key (for encrypted key distribution)
@@ -153,7 +153,7 @@ pub trait PendingMemberStore {
     async fn submit(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         tg_user_id: &str,
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
@@ -166,7 +166,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `limit` - Maximum number of pending members to return
     /// * `page_token` - Optional continuation token from a previous call
     ///
@@ -183,7 +183,7 @@ pub trait PendingMemberStore {
     async fn list(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         limit: usize,
         page_token: Option<String>,
     ) -> Result<(Vec<PendingMember>, Option<String>), StorageError>;
@@ -195,7 +195,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `tg_user_id` - The Telegram user ID to look up
     ///
     /// # Returns
@@ -211,7 +211,7 @@ pub trait PendingMemberStore {
     async fn get_approved_by_tg_user_id(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         tg_user_id: &str,
     ) -> Result<Option<PendingMember>, StorageError>;
 
@@ -228,7 +228,7 @@ pub trait PendingMemberStore {
     /// * `display_name` - Optional user-provided display name
     ///
     /// # Returns
-    /// A tuple of `(pending_id, group_id)` on success.
+    /// A tuple of `(pending_id, org_id)` on success.
     ///
     /// # Errors
     /// * `StorageError::NotFound` - When invite code doesn't exist
@@ -247,7 +247,7 @@ pub trait PendingMemberStore {
         nazgul_pub: MasterPublicKey,
         rage_pub: [u8; 32],
         display_name: Option<String>,
-    ) -> Result<(String, GroupId), StorageError>;
+    ) -> Result<(String, OrganizationId), StorageError>;
 
     /// List all members in a group with optional filtering (Phase 4).
     ///
@@ -256,7 +256,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `group_id` - The group identifier
+    /// * `org_id` - The group identifier
     /// * `limit` - Maximum number of members to return
     /// * `page_token` - Optional continuation token from a previous call
     /// * `filter_source` - Optional filter by identity source
@@ -275,7 +275,7 @@ pub trait PendingMemberStore {
     async fn list_all_members(
         &self,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         limit: usize,
         page_token: Option<String>,
         filter_source: Option<&str>,
@@ -304,12 +304,12 @@ pub trait PendingMemberStore {
     /// # Invariants
     /// * Results are ordered by `joined_at_ms` (oldest first)
     /// * If `filter_status` is None, only approved memberships are returned
-    async fn list_groups_for_member(
+    async fn list_organizations_for_member(
         &self,
         tenant: TenantId,
         nazgul_pub: &[u8],
         limit: usize,
         page_token: Option<String>,
         filter_status: Option<&str>,
-    ) -> Result<(Vec<GroupMembershipInfo>, Option<String>, u32), StorageError>;
+    ) -> Result<(Vec<OrganizationMembershipInfo>, Option<String>, u32), StorageError>;
 }

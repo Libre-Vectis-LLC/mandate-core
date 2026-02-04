@@ -5,7 +5,7 @@ import "common.proto";
 import "error.proto";
 import "event.proto";  // For MemberIdentity, IdentitySource, CredentialRef
 
-// MemberService handles the group membership onboarding workflow.
+// MemberService handles the organization membership onboarding workflow.
 //
 // ## Authentication
 // Requires `x-api-token` header with valid tenant token.
@@ -29,17 +29,17 @@ import "event.proto";  // For MemberIdentity, IdentitySource, CredentialRef
 // - Standalone users register via invite codes
 // - Owner client reviews pending members before approval
 service MemberService {
-  // SubmitPendingMember registers a Telegram user's intent to join a group.
+  // SubmitPendingMember registers a Telegram user's intent to join an organization.
   //
-  // The member remains in "pending" state until the group owner approves
+  // The member remains in "pending" state until the organization owner approves
   // by adding them to the ring and uploading their key blob.
   //
   // ## Idempotency
-  // Submitting the same tg_user_id + group_id combination again is idempotent;
+  // Submitting the same tg_user_id + org_id combination again is idempotent;
   // the existing pending_id is returned without creating a duplicate.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - INVALID_ARGUMENT: malformed public key bytes
   // - INTERNAL: database error
   rpc SubmitPendingMember (SubmitPendingMemberRequest) returns (SubmitPendingMemberResponse);
@@ -47,7 +47,7 @@ service MemberService {
   // RegisterMember registers a standalone user via invite code.
   //
   // This is the standalone mode alternative to SubmitPendingMember.
-  // The invite code determines which group the user joins.
+  // The invite code determines which organization the user joins.
   //
   // ## Flow
   // 1. User receives invite link containing code
@@ -68,7 +68,7 @@ service MemberService {
   // Owner client uses this to display pending requests and approve/reject.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   rpc ListPendingMembers (ListPendingMembersRequest) returns (ListPendingMembersResponse);
 
   // GetApprovedMemberByTgUserId retrieves an approved member's cryptographic keys
@@ -81,13 +81,13 @@ service MemberService {
   // - NOT_FOUND: no approved member with the given tg_user_id exists
   rpc GetApprovedMemberByTgUserId (GetApprovedMemberByTgUserIdRequest) returns (GetApprovedMemberByTgUserIdResponse);
 
-  // ListMembers returns all approved members for a group with unified MemberInfo.
+  // ListMembers returns all approved members for an organization with unified MemberInfo.
   //
   // Returns members with full identity information regardless of identity source
-  // (Telegram or Standalone). Supports pagination for groups with many members.
+  // (Telegram or Standalone). Supports pagination for organizations with many members.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - PERMISSION_DENIED: caller is not authorized to view members
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
 
@@ -97,25 +97,25 @@ service MemberService {
   // Supports filtering which fields to include in the export.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - INVALID_ARGUMENT: unsupported format or invalid field names
   // - PERMISSION_DENIED: caller is not a tenant admin
   rpc ExportMembers(ExportMembersRequest) returns (ExportMembersResponse);
 
-  // ListMemberGroups retrieves all groups that a member belongs to.
+  // ListMemberOrganizations retrieves all organizations that a member belongs to.
   //
   // This is used for wallet restore flow where the client needs to discover
-  // its group memberships by querying with its Nazgul public key.
+  // its organization memberships by querying with its Nazgul public key.
   //
   // ## Errors
   // - INVALID_ARGUMENT: malformed nazgul_pub (must be exactly 32 bytes)
-  rpc ListMemberGroups(ListMemberGroupsRequest) returns (ListMemberGroupsResponse);
+  rpc ListMemberOrganizations(ListMemberOrganizationsRequest) returns (ListMemberOrganizationsResponse);
 }
 
 // Request to submit a pending member.
 message SubmitPendingMemberRequest {
-  // Group ID (ULID format) to join.
-  string group_id = 1;
+  // Organization ID (ULID format) to join.
+  string org_id = 1;
 
   // Telegram user ID (numeric string from Telegram API).
   string tg_user_id = 2;
@@ -138,8 +138,8 @@ message SubmitPendingMemberResponse {
 
 // Request to list pending members.
 message ListPendingMembersRequest {
-  // Group ID (ULID format) to query.
-  string group_id = 1;
+  // Organization ID (ULID format) to query.
+  string org_id = 1;
 
   // Maximum number of pending members to return (server may cap this).
   uint32 limit = 2;
@@ -179,8 +179,8 @@ message ListPendingMembersResponse {
 
 // Request to get an approved member by Telegram user ID.
 message GetApprovedMemberByTgUserIdRequest {
-  // Group ID (ULID format) to query.
-  string group_id = 1;
+  // Organization ID (ULID format) to query.
+  string org_id = 1;
 
   // Telegram user ID (numeric string from Telegram API).
   string tg_user_id = 2;
@@ -202,7 +202,7 @@ message GetApprovedMemberByTgUserIdResponse {
 // Request to register a standalone member via invite code.
 message RegisterMemberRequest {
   // Invite code from the invite link (required).
-  // The code determines which group to join.
+  // The code determines which organization to join.
   string invite_code = 1;
 
   // Member's Nazgul master public key for ring signatures (32 bytes).
@@ -220,8 +220,8 @@ message RegisterMemberResponse {
   // Server-assigned pending member ID (ULID format).
   string pending_id = 1;
 
-  // Group ID that the member will join (derived from invite code).
-  string group_id = 2;
+  // Organization ID that the member will join (derived from invite code).
+  string org_id = 2;
 
   // Current status: "pending" (awaiting owner approval).
   string status = 3;
@@ -244,14 +244,14 @@ message MemberInfo {
   // Possible values: "pending", "approved", "banned"
   string status = 3;
 
-  // Unix timestamp in milliseconds when member joined the group.
+  // Unix timestamp in milliseconds when member joined the organization.
   uint64 joined_at = 4;
 }
 
-// Request to list approved members in a group.
+// Request to list approved members in an organization.
 message ListMembersRequest {
-  // Group ID (ULID format) to list members for.
-  string group_id = 1;
+  // Organization ID (ULID format) to list members for.
+  string org_id = 1;
 
   // Maximum number of members to return (server may cap this).
   // Recommended: 50. Maximum: 100.
@@ -285,8 +285,8 @@ message ListMembersResponse {
 
 // Request to export member data.
 message ExportMembersRequest {
-  // Group ID (ULID format) to export members from.
-  string group_id = 1;
+  // Organization ID (ULID format) to export members from.
+  string org_id = 1;
 
   // Export format.
   // Supported values: "csv", "json"
@@ -321,15 +321,15 @@ message ExportMembersResponse {
 }
 
 // =============================================================================
-// ListMemberGroups (Wallet Restore)
+// ListMemberOrganizations (Wallet Restore)
 // =============================================================================
 
-// Request to list all groups that a member belongs to.
-message ListMemberGroupsRequest {
+// Request to list all organizations that a member belongs to.
+message ListMemberOrganizationsRequest {
   // Member's Nazgul master public key (32 bytes).
   bytes nazgul_pub = 1;
 
-  // Maximum number of groups to return (server may cap this).
+  // Maximum number of organizations to return (server may cap this).
   uint32 limit = 2;
 
   // Pagination cursor from previous response.
@@ -342,10 +342,10 @@ message ListMemberGroupsRequest {
   optional string filter_status = 4;
 }
 
-// Summary of a member's group membership.
-message GroupMembership {
-  // Group ID (ULID format).
-  string group_id = 1;
+// Summary of a member's organization membership.
+message OrganizationMembership {
+  // Organization ID (ULID format).
+  string org_id = 1;
 
   // Unix timestamp in milliseconds when the member joined.
   int64 joined_at = 2;
@@ -354,15 +354,15 @@ message GroupMembership {
   string status = 3;
 }
 
-// Response containing list of groups.
-message ListMemberGroupsResponse {
-  // List of groups the member belongs to.
-  repeated GroupMembership groups = 1;
+// Response containing list of organizations.
+message ListMemberOrganizationsResponse {
+  // List of organizations the member belongs to.
+  repeated OrganizationMembership orgs = 1;
 
   // Pagination cursor for next page.
   // Empty if no more pages.
   PageToken next_page_token = 2;
 
-  // Total count of groups matching criteria.
+  // Total count of organizations matching criteria.
   uint32 total_count = 3;
 }

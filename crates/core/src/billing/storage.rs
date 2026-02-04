@@ -1,8 +1,8 @@
 //! Storage metering types for usage tracking and quota management.
 //!
 //! This module provides WASM-compatible types for storage metering:
-//! - `GroupStorageUsage`: Records per-group storage consumption
-//! - `GroupStorageStatus`: Quota status based on balance and usage
+//! - `OrgStorageUsage`: Records per-group storage consumption
+//! - `OrgStorageStatus`: Quota status based on balance and usage
 //!
 //! # Design
 //!
@@ -22,10 +22,10 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```
-/// use mandate_core::billing::GroupStorageUsage;
+/// use mandate_core::billing::OrgStorageUsage;
 ///
-/// let usage = GroupStorageUsage {
-///     group_id: "group_abc".to_string(),
+/// let usage = OrgStorageUsage {
+///     org_id: "org_abc".to_string(),
 ///     tenant_id: "tenant_123".to_string(),
 ///     event_bytes: 1_048_576,      // 1 MB of events
 ///     keyblob_bytes: 512,          // 512 bytes of key blobs
@@ -34,9 +34,9 @@ use serde::{Deserialize, Serialize};
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GroupStorageUsage {
+pub struct OrgStorageUsage {
     /// Group ID this usage belongs to.
-    pub group_id: String,
+    pub org_id: String,
 
     /// Tenant ID that owns this group.
     pub tenant_id: String,
@@ -54,7 +54,7 @@ pub struct GroupStorageUsage {
     pub total_bytes: i64,
 }
 
-impl GroupStorageUsage {
+impl OrgStorageUsage {
     /// Creates a new storage usage record.
     ///
     /// Automatically calculates `total_bytes` from component values.
@@ -62,10 +62,10 @@ impl GroupStorageUsage {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::GroupStorageUsage;
+    /// use mandate_core::billing::OrgStorageUsage;
     ///
-    /// let usage = GroupStorageUsage::new(
-    ///     "group_abc".to_string(),
+    /// let usage = OrgStorageUsage::new(
+    ///     "org_abc".to_string(),
     ///     "tenant_123".to_string(),
     ///     1_000_000,
     ///     500,
@@ -75,7 +75,7 @@ impl GroupStorageUsage {
     /// assert_eq!(usage.total_bytes, 1_002_500);
     /// ```
     pub fn new(
-        group_id: String,
+        org_id: String,
         tenant_id: String,
         event_bytes: i64,
         keyblob_bytes: i64,
@@ -86,7 +86,7 @@ impl GroupStorageUsage {
             .saturating_add(ring_bytes);
 
         Self {
-            group_id,
+            org_id,
             tenant_id,
             event_bytes,
             keyblob_bytes,
@@ -100,10 +100,10 @@ impl GroupStorageUsage {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::GroupStorageUsage;
+    /// use mandate_core::billing::OrgStorageUsage;
     ///
-    /// let usage = GroupStorageUsage::new(
-    ///     "group_abc".to_string(),
+    /// let usage = OrgStorageUsage::new(
+    ///     "org_abc".to_string(),
     ///     "tenant_123".to_string(),
     ///     1_073_741_824, // 1 GB
     ///     0,
@@ -133,23 +133,23 @@ impl GroupStorageUsage {
 /// # Examples
 ///
 /// ```
-/// use mandate_core::billing::GroupStorageStatus;
+/// use mandate_core::billing::OrgStorageStatus;
 ///
 /// // Group with sufficient balance
-/// let status = GroupStorageStatus::Normal;
+/// let status = OrgStorageStatus::Normal;
 ///
 /// // Group with low balance
-/// let status = GroupStorageStatus::Warning { days_remaining: 15 };
+/// let status = OrgStorageStatus::Warning { days_remaining: 15 };
 ///
 /// // Group with zero balance
-/// let status = GroupStorageStatus::Suspended;
+/// let status = OrgStorageStatus::Suspended;
 ///
 /// // Group pending deletion
-/// let status = GroupStorageStatus::PendingDeletion { days_until_deletion: 20 };
+/// let status = OrgStorageStatus::PendingDeletion { days_until_deletion: 20 };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum GroupStorageStatus {
+pub enum OrgStorageStatus {
     /// Balance covers 30+ days of storage.
     /// Reads and writes allowed.
     Normal,
@@ -173,21 +173,21 @@ pub enum GroupStorageStatus {
     },
 }
 
-impl GroupStorageStatus {
+impl OrgStorageStatus {
     /// Returns whether writes are allowed in this status.
     ///
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::GroupStorageStatus;
+    /// use mandate_core::billing::OrgStorageStatus;
     ///
-    /// assert!(GroupStorageStatus::Normal.can_write());
-    /// assert!(!GroupStorageStatus::Warning { days_remaining: 15 }.can_write());
-    /// assert!(!GroupStorageStatus::Suspended.can_write());
-    /// assert!(!GroupStorageStatus::PendingDeletion { days_until_deletion: 20 }.can_write());
+    /// assert!(OrgStorageStatus::Normal.can_write());
+    /// assert!(!OrgStorageStatus::Warning { days_remaining: 15 }.can_write());
+    /// assert!(!OrgStorageStatus::Suspended.can_write());
+    /// assert!(!OrgStorageStatus::PendingDeletion { days_until_deletion: 20 }.can_write());
     /// ```
     pub fn can_write(&self) -> bool {
-        matches!(self, GroupStorageStatus::Normal)
+        matches!(self, OrgStorageStatus::Normal)
     }
 
     /// Returns whether reads are allowed in this status.
@@ -195,17 +195,17 @@ impl GroupStorageStatus {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::GroupStorageStatus;
+    /// use mandate_core::billing::OrgStorageStatus;
     ///
-    /// assert!(GroupStorageStatus::Normal.can_read());
-    /// assert!(GroupStorageStatus::Warning { days_remaining: 15 }.can_read());
-    /// assert!(!GroupStorageStatus::Suspended.can_read());
-    /// assert!(!GroupStorageStatus::PendingDeletion { days_until_deletion: 20 }.can_read());
+    /// assert!(OrgStorageStatus::Normal.can_read());
+    /// assert!(OrgStorageStatus::Warning { days_remaining: 15 }.can_read());
+    /// assert!(!OrgStorageStatus::Suspended.can_read());
+    /// assert!(!OrgStorageStatus::PendingDeletion { days_until_deletion: 20 }.can_read());
     /// ```
     pub fn can_read(&self) -> bool {
         matches!(
             self,
-            GroupStorageStatus::Normal | GroupStorageStatus::Warning { .. }
+            OrgStorageStatus::Normal | OrgStorageStatus::Warning { .. }
         )
     }
 
@@ -214,17 +214,17 @@ impl GroupStorageStatus {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::GroupStorageStatus;
+    /// use mandate_core::billing::OrgStorageStatus;
     ///
-    /// assert!(!GroupStorageStatus::Normal.is_critical());
-    /// assert!(!GroupStorageStatus::Warning { days_remaining: 15 }.is_critical());
-    /// assert!(GroupStorageStatus::Suspended.is_critical());
-    /// assert!(GroupStorageStatus::PendingDeletion { days_until_deletion: 20 }.is_critical());
+    /// assert!(!OrgStorageStatus::Normal.is_critical());
+    /// assert!(!OrgStorageStatus::Warning { days_remaining: 15 }.is_critical());
+    /// assert!(OrgStorageStatus::Suspended.is_critical());
+    /// assert!(OrgStorageStatus::PendingDeletion { days_until_deletion: 20 }.is_critical());
     /// ```
     pub fn is_critical(&self) -> bool {
         matches!(
             self,
-            GroupStorageStatus::Suspended | GroupStorageStatus::PendingDeletion { .. }
+            OrgStorageStatus::Suspended | OrgStorageStatus::PendingDeletion { .. }
         )
     }
 }
@@ -235,15 +235,15 @@ mod tests {
 
     #[test]
     fn test_group_storage_usage_new() {
-        let usage = GroupStorageUsage::new(
-            "group_abc".to_string(),
+        let usage = OrgStorageUsage::new(
+            "org_abc".to_string(),
             "tenant_123".to_string(),
             1_000_000,
             500,
             2_000,
         );
 
-        assert_eq!(usage.group_id, "group_abc");
+        assert_eq!(usage.org_id, "org_abc");
         assert_eq!(usage.tenant_id, "tenant_123");
         assert_eq!(usage.event_bytes, 1_000_000);
         assert_eq!(usage.keyblob_bytes, 500);
@@ -253,8 +253,8 @@ mod tests {
 
     #[test]
     fn test_group_storage_usage_total_gb() {
-        let usage = GroupStorageUsage::new(
-            "group_abc".to_string(),
+        let usage = OrgStorageUsage::new(
+            "org_abc".to_string(),
             "tenant_123".to_string(),
             1_073_741_824, // 1 GB
             0,
@@ -267,8 +267,8 @@ mod tests {
 
     #[test]
     fn test_group_storage_usage_total_gb_fractional() {
-        let usage = GroupStorageUsage::new(
-            "group_abc".to_string(),
+        let usage = OrgStorageUsage::new(
+            "org_abc".to_string(),
             "tenant_123".to_string(),
             536_870_912, // 0.5 GB
             0,
@@ -281,10 +281,10 @@ mod tests {
 
     #[test]
     fn test_group_storage_status_can_write() {
-        assert!(GroupStorageStatus::Normal.can_write());
-        assert!(!GroupStorageStatus::Warning { days_remaining: 15 }.can_write());
-        assert!(!GroupStorageStatus::Suspended.can_write());
-        assert!(!GroupStorageStatus::PendingDeletion {
+        assert!(OrgStorageStatus::Normal.can_write());
+        assert!(!OrgStorageStatus::Warning { days_remaining: 15 }.can_write());
+        assert!(!OrgStorageStatus::Suspended.can_write());
+        assert!(!OrgStorageStatus::PendingDeletion {
             days_until_deletion: 20
         }
         .can_write());
@@ -292,10 +292,10 @@ mod tests {
 
     #[test]
     fn test_group_storage_status_can_read() {
-        assert!(GroupStorageStatus::Normal.can_read());
-        assert!(GroupStorageStatus::Warning { days_remaining: 15 }.can_read());
-        assert!(!GroupStorageStatus::Suspended.can_read());
-        assert!(!GroupStorageStatus::PendingDeletion {
+        assert!(OrgStorageStatus::Normal.can_read());
+        assert!(OrgStorageStatus::Warning { days_remaining: 15 }.can_read());
+        assert!(!OrgStorageStatus::Suspended.can_read());
+        assert!(!OrgStorageStatus::PendingDeletion {
             days_until_deletion: 20
         }
         .can_read());
@@ -303,10 +303,10 @@ mod tests {
 
     #[test]
     fn test_group_storage_status_is_critical() {
-        assert!(!GroupStorageStatus::Normal.is_critical());
-        assert!(!GroupStorageStatus::Warning { days_remaining: 15 }.is_critical());
-        assert!(GroupStorageStatus::Suspended.is_critical());
-        assert!(GroupStorageStatus::PendingDeletion {
+        assert!(!OrgStorageStatus::Normal.is_critical());
+        assert!(!OrgStorageStatus::Warning { days_remaining: 15 }.is_critical());
+        assert!(OrgStorageStatus::Suspended.is_critical());
+        assert!(OrgStorageStatus::PendingDeletion {
             days_until_deletion: 20
         }
         .is_critical());
@@ -314,19 +314,19 @@ mod tests {
 
     #[test]
     fn test_group_storage_status_serialization() {
-        let status = GroupStorageStatus::Warning { days_remaining: 15 };
+        let status = OrgStorageStatus::Warning { days_remaining: 15 };
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("warning"));
         assert!(json.contains("days_remaining"));
 
-        let deserialized: GroupStorageStatus = serde_json::from_str(&json).unwrap();
+        let deserialized: OrgStorageStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(status, deserialized);
     }
 
     #[test]
     fn test_group_storage_usage_serialization() {
-        let usage = GroupStorageUsage::new(
-            "group_abc".to_string(),
+        let usage = OrgStorageUsage::new(
+            "org_abc".to_string(),
             "tenant_123".to_string(),
             1_000,
             500,
@@ -334,7 +334,7 @@ mod tests {
         );
 
         let json = serde_json::to_string(&usage).unwrap();
-        let deserialized: GroupStorageUsage = serde_json::from_str(&json).unwrap();
+        let deserialized: OrgStorageUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(usage, deserialized);
     }
 }

@@ -34,7 +34,7 @@ message MemberIdentity {
   IdentitySource source = 5;            // Required: identity source (Telegram, Standalone, or Other)
 }
 
-// EventService handles the append-only event log for group coordination.
+// EventService handles the append-only event log for organization coordination.
 //
 // ## Authentication
 // Requires `x-api-token` header with valid tenant token.
@@ -42,14 +42,14 @@ message MemberIdentity {
 //
 // ## Event Model
 // Events are cryptographically signed and stored in canonical byte format.
-// Each event receives a monotonically increasing sequence number within its group.
+// Each event receives a monotonically increasing sequence number within its organization.
 // The event log is append-only and immutable once committed.
 //
 // ## Use Cases
 // - Clients push signed coordination events (votes, proposals, etc.)
 // - Clients sync event history via paginated streaming
 service EventService {
-  // PushEvent appends a signed event to the group's event log.
+  // PushEvent appends a signed event to the organization's event log.
   //
   // The event_bytes must be in canonical format with embedded signature.
   // Server validates signature, assigns sequence number, and returns confirmation.
@@ -60,11 +60,11 @@ service EventService {
   //
   // ## Errors
   // - INVALID_ARGUMENT: malformed event_bytes or invalid signature
-  // - PERMISSION_DENIED: signer not authorized for this group
+  // - PERMISSION_DENIED: signer not authorized for this organization
   // - INTERNAL: storage write failed
   rpc PushEvent (PushEventRequest) returns (PushEventResponse);
 
-  // StreamEvents fetches a page of events for a group starting after a sequence.
+  // StreamEvents fetches a page of events for an organization starting after a sequence.
   //
   // Returns a stream that sends one response containing a batch of events,
   // then closes. An empty batch indicates no new events after the given sequence.
@@ -75,7 +75,7 @@ service EventService {
   // The response includes sequence numbers for each event to enable resumption.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - INVALID_ARGUMENT: limit exceeds server maximum
   rpc StreamEvents (StreamEventsRequest) returns (stream StreamEventsResponse);
 
@@ -92,7 +92,7 @@ service EventService {
   // ## Errors
   // - NOT_FOUND: event_ulid doesn't exist or is not a poll event
   // - PERMISSION_DENIED: invalid poll_key
-  // - INVALID_ARGUMENT: malformed group_id or event_ulid
+  // - INVALID_ARGUMENT: malformed org_id or event_ulid
   rpc GetPollResults (GetPollResultsRequest) returns (GetPollResultsResponse);
 
   // GetPollBundle fetches complete poll data for external audit.
@@ -113,7 +113,7 @@ service EventService {
   // ## Errors
   // - NOT_FOUND: event_ulid doesn't exist or is not a poll event
   // - PERMISSION_DENIED: invalid poll_key
-  // - INVALID_ARGUMENT: malformed group_id or event_ulid
+  // - INVALID_ARGUMENT: malformed org_id or event_ulid
   rpc GetPollBundle (GetPollBundleRequest) returns (GetPollBundleResponse);
 }
 
@@ -124,7 +124,7 @@ message PushEventRequest {
   bytes event_bytes = 1;
 
   // Optional proof-of-work submission when required by Edge.
-  // Only needed when group is under attack and POW defense is active.
+  // Only needed when organization is under attack and POW defense is active.
   optional PowSubmission pow_submission = 2;
 }
 
@@ -136,7 +136,7 @@ message PushEventResponse {
   // SHA3-256 hash of the canonical event bytes.
   Hash32 event_hash = 2;
 
-  // Monotonically increasing sequence number within the group.
+  // Monotonically increasing sequence number within the organization.
   // Used for ordering and resumption during streaming.
   int64 sequence_no = 3;
 
@@ -146,10 +146,10 @@ message PushEventResponse {
   optional string event_url = 4;
 }
 
-// Request to stream events from a group.
+// Request to stream events from an organization.
 message StreamEventsRequest {
-  // Group ID (ULID format) to stream events from.
-  string group_id = 1;
+  // Organization ID (ULID format) to stream events from.
+  string org_id = 1;
 
   // Exclusive lower bound: returns events with sequence_no > start_sequence_no.
   // Use -1 to start from the beginning of the event log.
@@ -173,7 +173,7 @@ message StreamEventsResponse {
 
 // Proof-of-work submission attached to PushEventRequest when POW defense is active.
 //
-// POW is triggered per-group when signature verification failures exceed threshold,
+// POW is triggered per-organization when signature verification failures exceed threshold,
 // indicating potential attack or abuse. Clients must compute and submit valid POW
 // bundle to have their events accepted during this defensive state.
 message PowSubmission {
@@ -218,8 +218,8 @@ message PowChallenge {
 
 // Request to get aggregated poll results.
 message GetPollResultsRequest {
-  // Group ID (ULID format) containing the poll event.
-  string group_id = 1;
+  // Organization ID (ULID format) containing the poll event.
+  string org_id = 1;
 
   // Event ID (ULID format) of the poll to retrieve results for.
   Ulid event_ulid = 2;
@@ -264,8 +264,8 @@ message PollOption {
 
 // Request to download complete poll bundle for external audit.
 message GetPollBundleRequest {
-  // Group ID (ULID format) containing the poll event.
-  string group_id = 1;
+  // Organization ID (ULID format) containing the poll event.
+  string org_id = 1;
 
   // Event ID (ULID format) of the poll to download bundle for.
   Ulid event_ulid = 2;
@@ -277,8 +277,8 @@ message GetPollBundleRequest {
 
 // Response containing complete poll data for external verification.
 message GetPollBundleResponse {
-  // Group ID (ULID format).
-  string group_id = 1;
+  // Organization ID (ULID format).
+  string org_id = 1;
 
   // Poll event ID (ULID format).
   string poll_id = 2;
@@ -316,7 +316,7 @@ message PollVoteData {
   // Vote event ID (ULID format).
   string event_ulid = 1;
 
-  // Sequence number of this vote event in the group.
+  // Sequence number of this vote event in the organization.
   int64 sequence_no = 2;
 
   // Key image from ring signature (hex-encoded, for double-vote detection).

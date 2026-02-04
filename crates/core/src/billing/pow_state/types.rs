@@ -24,10 +24,10 @@ where
 /// # Examples
 ///
 /// ```
-/// use mandate_core::billing::{GroupPowConfig, UpgradeStrategy, EscalationStrategy, RecoveryStrategy};
+/// use mandate_core::billing::{OrgPowConfig, UpgradeStrategy, EscalationStrategy, RecoveryStrategy};
 ///
 /// // Conservative config: trigger POW after 3 consecutive failures, escalate linearly
-/// let config = GroupPowConfig {
+/// let config = OrgPowConfig {
 ///     upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
 ///         trigger_threshold: 3,
 ///         escalate_every: 1,
@@ -41,7 +41,7 @@ where
 /// };
 ///
 /// // Time-window config: trigger if >5 failures in 60s with <90% success rate
-/// let time_window_config = GroupPowConfig {
+/// let time_window_config = OrgPowConfig {
 ///     upgrade_strategy: UpgradeStrategy::TimeWindowBased {
 ///         window_secs: 60,
 ///         failure_threshold: 5,
@@ -56,7 +56,7 @@ where
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GroupPowConfig {
+pub struct OrgPowConfig {
     /// Strategy for triggering and escalating POW.
     pub upgrade_strategy: UpgradeStrategy,
 
@@ -87,7 +87,7 @@ pub struct GroupPowConfig {
     pub max_event_history: usize,
 }
 
-impl Default for GroupPowConfig {
+impl Default for OrgPowConfig {
     fn default() -> Self {
         Self {
             upgrade_strategy: UpgradeStrategy::default(),
@@ -231,14 +231,14 @@ impl UpgradeStrategy {
 /// # Examples
 ///
 /// ```
-/// use mandate_core::billing::GroupPowState;
+/// use mandate_core::billing::OrgPowState;
 ///
-/// let mut state = GroupPowState::default();
+/// let mut state = OrgPowState::default();
 /// assert!(!state.pow_required);
 /// assert_eq!(state.current_multiplier, 1.0);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GroupPowState {
+pub struct OrgPowState {
     /// Whether POW is currently required for this group.
     pub pow_required: bool,
 
@@ -259,7 +259,7 @@ pub struct GroupPowState {
     pub event_history: VecDeque<VerificationEvent>,
 }
 
-impl Default for GroupPowState {
+impl Default for OrgPowState {
     fn default() -> Self {
         Self {
             pow_required: false,

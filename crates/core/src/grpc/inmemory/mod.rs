@@ -9,17 +9,17 @@
 /// - `tenant`: Tenant token resolution
 /// - `event`: Event streaming and append-only log
 /// - `ring`: Ring delta log and reconstruction
-/// - `billing`: Tenant/group balance tracking and gift cards
+/// - `billing`: Tenant/organization balance tracking and gift cards
 /// - `member`: Pending member queue
 /// - `key_blob`: Encrypted key blob storage
-/// - `group`: Group metadata
+/// - `organization`: Organization metadata
 /// - `ban`: Ban index for moderation
 /// - `vote`: Vote key image deduplication
 /// - `poll`: Poll ring hash index
 pub mod ban;
 pub mod billing;
 pub mod event;
-pub mod group;
+pub mod organization;
 pub mod key_blob;
 pub mod member;
 pub mod poll;
@@ -31,7 +31,7 @@ pub mod vote;
 pub use ban::{InMemoryBanIndex, NoopBanIndex};
 pub use billing::{InMemoryBilling, InMemoryGiftCards};
 pub use event::InMemoryEvents;
-pub use group::InMemoryGroups;
+pub use organization::InMemoryGroups;
 pub use key_blob::InMemoryKeyBlobs;
 pub use member::InMemoryPendingMembers;
 pub use poll::{InMemoryPollRingHashes, NoopPollRingHashes};
@@ -44,10 +44,10 @@ mod tests {
     use super::*;
     use crate::event::{Event, EventType, MemberIdentity, RingOperation, RingUpdate};
     use crate::hashing::ring_hash_sha3_256;
-    use crate::ids::{EventId, EventUlid, GroupId, MasterPublicKey, Nanos, RingHash, TenantId};
+    use crate::ids::{EventId, EventUlid, OrganizationId, MasterPublicKey, Nanos, RingHash, TenantId};
     use crate::key_manager::KeyManager;
     use crate::storage::{
-        BanIndex, BannedOperation, BillingStore, EventWriter, GroupMetadataStore,
+        BanIndex, BannedOperation, BillingStore, EventWriter, OrganizationMetadataStore,
         PendingMemberStore, RingView, RingWriter, VoteKeyImageIndex,
     };
     use crate::test_utils::TEST_MNEMONIC;
@@ -68,7 +68,7 @@ mod tests {
     async fn ring_writer_roundtrip() {
         let rings = InMemoryRings::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = GroupId(ulid::Ulid::new());
+        let group = OrganizationId(ulid::Ulid::new());
 
         let h1 = rings
             .append_delta(tenant, group, crate::ring_log::RingDelta::Add(mpk(b"a")))
@@ -92,7 +92,7 @@ mod tests {
     #[tokio::test]
     async fn pending_members_only_list_pending_after_ring_add() {
         let tenant = TenantId(ulid::Ulid::new());
-        let group = GroupId(ulid::Ulid::new());
+        let group = OrganizationId(ulid::Ulid::new());
         let pending = Arc::new(InMemoryPendingMembers::new());
         let events = InMemoryEvents::new(
             Arc::new(InMemoryBanIndex::new()),
@@ -109,12 +109,12 @@ mod tests {
         let event = Event {
             event_ulid: EventUlid(ulid::Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            group_id: group,
+            org_id: group,
             sequence_no: None,
             processed_at: 0,
             serialization_version: 1,
             event_type: EventType::RingUpdate(RingUpdate {
-                group_id: group,
+                org_id: group,
                 ring_hash: RingHash([7u8; 32]),
                 operations: vec![RingOperation::AddMember {
                     public_key: member_key,
@@ -144,8 +144,8 @@ mod tests {
     async fn rings_are_scoped_by_group() {
         let rings = InMemoryRings::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let g1 = GroupId(ulid::Ulid::new());
-        let g2 = GroupId(ulid::Ulid::new());
+        let g1 = OrganizationId(ulid::Ulid::new());
+        let g2 = OrganizationId(ulid::Ulid::new());
 
         let h = rings
             .append_delta(tenant, g1, crate::ring_log::RingDelta::Add(mpk(b"a")))
@@ -165,9 +165,9 @@ mod tests {
             err,
             crate::storage::StorageError::NotFound(crate::storage::NotFound::Ring {
                 tenant: t,
-                group_id,
+                org_id,
                 hash
-            }) if t == tenant && group_id == g2 && hash == h
+            }) if t == tenant && org_id == g2 && hash == h
         ));
 
         let h2 = rings
@@ -188,7 +188,7 @@ mod tests {
     async fn ban_index_respects_scope_and_revoke() {
         let ban_index = InMemoryBanIndex::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = GroupId(ulid::Ulid::new());
+        let group = OrganizationId(ulid::Ulid::new());
         let key_image = RistrettoPoint::default();
         let ban_event_id = EventId([42u8; 32]);
 
@@ -230,7 +230,7 @@ mod tests {
     async fn vote_key_images_block_duplicates() {
         let vote_index = InMemoryVoteKeyImages::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = GroupId(ulid::Ulid::new());
+        let group = OrganizationId(ulid::Ulid::new());
         let key_image = RistrettoPoint::default();
         let poll_id = "poll-1";
 
@@ -263,8 +263,8 @@ mod tests {
     async fn billing_transfer_updates_group_balance() {
         let tenant = TenantId(ulid::Ulid::new());
         let groups = InMemoryGroups::new();
-        let group_id = groups
-            .create_group(tenant, "tg-group")
+        let org_id = groups
+            .create_organization(tenant, "tg-group")
             .await
             .expect("group created");
         let billing = InMemoryBilling::new(groups.shared());
@@ -275,25 +275,25 @@ mod tests {
             .expect("tenant credited");
         assert_eq!(balance, Nanos::new(100));
 
-        let group_balance = billing
-            .transfer_to_group(tenant, group_id, Nanos::new(60))
+        let org_balance = billing
+            .transfer_to_organization(tenant, org_id, Nanos::new(60))
             .await
             .expect("transfer succeeds");
-        assert_eq!(group_balance, Nanos::new(60));
+        assert_eq!(org_balance, Nanos::new(60));
 
-        let group_balance = billing
-            .get_group_balance(group_id)
+        let org_balance = billing
+            .get_organization_balance(org_id)
             .await
             .expect("balance query succeeds");
-        assert_eq!(group_balance, Nanos::new(60));
+        assert_eq!(org_balance, Nanos::new(60));
     }
 
     #[tokio::test]
     async fn billing_rejects_overdraft() {
         let tenant = TenantId(ulid::Ulid::new());
         let groups = InMemoryGroups::new();
-        let group_id = groups
-            .create_group(tenant, "tg-group")
+        let org_id = groups
+            .create_organization(tenant, "tg-group")
             .await
             .expect("group created");
         let billing = InMemoryBilling::new(groups.shared());
@@ -304,7 +304,7 @@ mod tests {
             .expect("tenant credited");
 
         let err = billing
-            .transfer_to_group(tenant, group_id, Nanos::new(60))
+            .transfer_to_organization(tenant, org_id, Nanos::new(60))
             .await
             .expect_err("overdraft rejected");
 
@@ -318,7 +318,7 @@ mod tests {
     async fn ban_index_counts_bans_per_ring_hash() {
         let ban_index = InMemoryBanIndex::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = GroupId(ulid::Ulid::new());
+        let group = OrganizationId(ulid::Ulid::new());
 
         let ring_hash_a = RingHash([1u8; 32]);
         let ring_hash_b = RingHash([2u8; 32]);

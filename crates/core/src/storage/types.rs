@@ -1,6 +1,6 @@
 //! Core data types and errors for storage layer.
 
-use crate::ids::{EventId, GroupId, RingHash, SequenceNo, TenantId};
+use crate::ids::{EventId, OrganizationId, RingHash, SequenceNo, TenantId};
 use crate::ring_log::{apply_delta, RingDelta, RingLogError};
 use nazgul::ring::Ring;
 use serde::{Deserialize, Serialize};
@@ -58,49 +58,49 @@ pub enum TenantTokenError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotFound {
-    #[error("event {id:?} for tenant {tenant:?} group {group_id:?}")]
+    #[error("event {id:?} for tenant {tenant:?} group {org_id:?}")]
     Event {
         id: EventId,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     },
     #[error("tenant {tenant:?}")]
     Tenant { tenant: TenantId },
-    #[error("group {group_id:?}")]
-    Group { group_id: GroupId },
-    #[error("tail for tenant {tenant:?} group {group_id:?}")]
-    Tail { tenant: TenantId, group_id: GroupId },
-    #[error("ring {hash:?} for tenant {tenant:?} group {group_id:?}")]
+    #[error("group {org_id:?}")]
+    Group { org_id: OrganizationId },
+    #[error("tail for tenant {tenant:?} group {org_id:?}")]
+    Tail { tenant: TenantId, org_id: OrganizationId },
+    #[error("ring {hash:?} for tenant {tenant:?} group {org_id:?}")]
     Ring {
         hash: RingHash,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     },
-    #[error("ring delta path from {from:?} to {to:?} for tenant {tenant:?} group {group_id:?}")]
+    #[error("ring delta path from {from:?} to {to:?} for tenant {tenant:?} group {org_id:?}")]
     RingDeltaPath {
         from: Option<RingHash>,
         to: RingHash,
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
     },
-    #[error("key blob for tenant {tenant:?} group {group_id:?} rage_pub {rage_pub:?}")]
+    #[error("key blob for tenant {tenant:?} group {org_id:?} rage_pub {rage_pub:?}")]
     KeyBlob {
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     },
     #[error("gift card {code}")]
     GiftCard { code: String },
     #[error("invite code {code}")]
     InviteCode { code: String },
-    #[error("access token blob for tenant {tenant:?} group {group_id:?} rage_pub {rage_pub:?}")]
+    #[error("access token blob for tenant {tenant:?} group {org_id:?} rage_pub {rage_pub:?}")]
     AccessTokenBlob {
         tenant: TenantId,
-        group_id: GroupId,
+        org_id: OrganizationId,
         rage_pub: [u8; 32],
     },
-    #[error("edge access token for tenant {tenant:?} group {group_id:?}")]
-    EdgeAccessToken { tenant: TenantId, group_id: GroupId },
+    #[error("edge access token for tenant {tenant:?} group {org_id:?}")]
+    EdgeAccessToken { tenant: TenantId, org_id: OrganizationId },
 }
 
 /// Error codes for idempotency results, mapped from gRPC status codes.

@@ -4,14 +4,14 @@ package mandate.v1;
 import "common.proto";
 import "error.proto";
 
-// StorageService manages encrypted key blobs for group members.
+// StorageService manages encrypted key blobs for organization members.
 //
 // ## Authentication
 // Requires `x-api-token` header with valid tenant token.
 // Exposed on the public gRPC listener (heavily Edge-cached for reads).
 //
 // ## Key Blob Model
-// Each member receives an encrypted "bucket" containing the group's shared
+// Each member receives an encrypted "bucket" containing the organization's shared
 // cryptographic material (K_shared). The blob is encrypted to the member's
 // Rage (X25519) public key, ensuring only they can decrypt it.
 //
@@ -32,14 +32,14 @@ service StorageService {
   // Rage public key using age/rage encryption.
   //
   // ## Authorization
-  // Only the group owner can upload blobs.
+  // Only the organization owner can upload blobs.
   //
   // ## Atomicity
   // All blobs in a single request are stored atomically.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
-  // - PERMISSION_DENIED: caller is not the group owner
+  // - NOT_FOUND: org_id doesn't exist
+  // - PERMISSION_DENIED: caller is not the organization owner
   // - INVALID_ARGUMENT: empty blob list or malformed public keys
   rpc UploadKeyBlobs (UploadKeyBlobsRequest) returns (UploadKeyBlobsResponse);
 
@@ -50,10 +50,10 @@ service StorageService {
   //
   // ## Caching
   // This endpoint is aggressively cached at the Edge layer.
-  // Cache key: SHA3(group_id || rage_pub).
+  // Cache key: SHA3(org_id || rage_pub).
   //
   // ## Errors
-  // - NOT_FOUND: group_id or rage_pub not found (member not yet approved)
+  // - NOT_FOUND: org_id or rage_pub not found (member not yet approved)
   rpc DownloadMyKeyBlob (DownloadMyKeyBlobRequest) returns (DownloadMyKeyBlobResponse);
 
   // UploadAccessTokenBlobs stores encrypted Edge access tokens for members.
@@ -69,7 +69,7 @@ service StorageService {
   // All blobs in a single request are stored atomically.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist
+  // - NOT_FOUND: org_id doesn't exist
   // - INVALID_ARGUMENT: empty blob list or malformed public keys
   rpc UploadAccessTokenBlobs (UploadAccessTokenBlobsRequest) returns (UploadAccessTokenBlobsResponse);
 
@@ -84,10 +84,10 @@ service StorageService {
   // This RPC does NOT require the access token itself (avoids chicken-and-egg).
   //
   // ## Caching
-  // Cached at Edge layer. Cache key: SHA3("at" || group_id || rage_pub).
+  // Cached at Edge layer. Cache key: SHA3("at" || org_id || rage_pub).
   //
   // ## Errors
-  // - NOT_FOUND: group_id or rage_pub not found, or no token generated yet
+  // - NOT_FOUND: org_id or rage_pub not found, or no token generated yet
   rpc DownloadMyAccessTokenBlob (DownloadMyAccessTokenBlobRequest) returns (DownloadMyAccessTokenBlobResponse);
 
   // GetEdgeAccessToken returns the raw access token for Edge enforcement.
@@ -104,7 +104,7 @@ service StorageService {
   // during a configurable grace period to handle rotation lag.
   //
   // ## Errors
-  // - NOT_FOUND: group_id doesn't exist or no token generated yet
+  // - NOT_FOUND: org_id doesn't exist or no token generated yet
   rpc GetEdgeAccessToken (GetEdgeAccessTokenRequest) returns (GetEdgeAccessTokenResponse);
 }
 
@@ -114,15 +114,15 @@ message KeyBlob {
   // Used as the lookup key and encryption recipient.
   RagePublicKey rage_pub = 1;
 
-  // Age/Rage-encrypted ciphertext containing K_shared and group metadata.
+  // Age/Rage-encrypted ciphertext containing K_shared and organization metadata.
   // Only decryptable by the holder of the corresponding private key.
   bytes blob = 2;
 }
 
 // Request to upload key blobs.
 message UploadKeyBlobsRequest {
-  // Group ID (ULID format) to upload blobs for.
-  string group_id = 1;
+  // Organization ID (ULID format) to upload blobs for.
+  string org_id = 1;
 
   // List of key blobs to store (one per member).
   // Existing blobs for the same rage_pub are overwritten.
@@ -134,8 +134,8 @@ message UploadKeyBlobsResponse {}
 
 // Request to download a member's key blob.
 message DownloadMyKeyBlobRequest {
-  // Group ID (ULID format) to download from.
-  string group_id = 1;
+  // Organization ID (ULID format) to download from.
+  string org_id = 1;
 
   // Member's Rage public key (32 bytes) identifying the blob to fetch.
   RagePublicKey rage_pub = 2;
@@ -150,7 +150,7 @@ message DownloadMyKeyBlobResponse {
 // --- Edge Access Token ---
 //
 // An EdgeAccessToken is a random 32-byte secret that controls read access
-// to group events at the Edge layer. It is rotated on every ring change
+// to organization events at the Edge layer. It is rotated on every ring change
 // (RingUpdate event) and distributed per-member via age encryption.
 //
 // Security model:
@@ -173,8 +173,8 @@ message AccessTokenBlob {
 
 // Request to upload access token blobs.
 message UploadAccessTokenBlobsRequest {
-  // Group ID (ULID format) to upload blobs for.
-  string group_id = 1;
+  // Organization ID (ULID format) to upload blobs for.
+  string org_id = 1;
 
   // List of access token blobs (one per current ring member).
   // Existing blobs for the same rage_pub are overwritten.
@@ -186,8 +186,8 @@ message UploadAccessTokenBlobsResponse {}
 
 // Request to download a member's access token blob.
 message DownloadMyAccessTokenBlobRequest {
-  // Group ID (ULID format) to download from.
-  string group_id = 1;
+  // Organization ID (ULID format) to download from.
+  string org_id = 1;
 
   // Member's Rage public key (32 bytes) identifying the blob to fetch.
   RagePublicKey rage_pub = 2;
@@ -203,8 +203,8 @@ message DownloadMyAccessTokenBlobResponse {
 
 // Request to get the raw Edge access token (Edge-only).
 message GetEdgeAccessTokenRequest {
-  // Group ID (ULID format) to get the token for.
-  string group_id = 1;
+  // Organization ID (ULID format) to get the token for.
+  string org_id = 1;
 }
 
 // Response containing raw access tokens for Edge enforcement.

@@ -1,9 +1,9 @@
-use crate::ids::{EventId, GroupId, KeyImage, RingHash};
+use crate::ids::{EventId, OrganizationId, KeyImage, RingHash};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BanCreate {
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     pub ring_hash: RingHash,
     pub target: KeyImage,
     pub reason: String,
@@ -19,12 +19,12 @@ pub enum BanScope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BanRevoke {
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     pub ban_event_id: EventId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofOfInnocence {
-    pub group_id: GroupId,
+    pub org_id: OrganizationId,
     pub historical_ring_hash: RingHash,
 }

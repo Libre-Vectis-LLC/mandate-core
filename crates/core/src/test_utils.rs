@@ -3,7 +3,7 @@
 //! IMPORTANT: Mandate requires at least 256-bit security for user keys.
 //! Use 24-word BIP39 mnemonics in production; 12-word (128-bit) mnemonics are not allowed.
 
-use crate::ids::{EventUlid, GroupId, TenantId};
+use crate::ids::{EventUlid, OrganizationId, TenantId};
 use ulid::Ulid;
 
 /// Fixed 24‑word BIP39 mnemonic used in tests for deterministic key derivations.
@@ -22,19 +22,19 @@ pub const TEST_EVENT_ULID_STR: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 pub const TEST_GROUP_ID_STR_ALT1: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 pub const TEST_GROUP_ID_STR_ALT2: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 
-/// Construct a GroupId from a ULID string. Panics if invalid (test-only).
-pub fn test_group_id() -> GroupId {
-    GroupId(Ulid::from_string(TEST_GROUP_ID_STR).expect("static test ULID"))
+/// Construct a OrganizationId from a ULID string. Panics if invalid (test-only).
+pub fn test_org_id() -> OrganizationId {
+    OrganizationId(Ulid::from_string(TEST_GROUP_ID_STR).expect("static test ULID"))
 }
 
-/// Construct an alternative GroupId for isolation tests.
-pub fn test_group_id_alt1() -> GroupId {
-    GroupId(Ulid::from_string(TEST_GROUP_ID_STR_ALT1).expect("static test ULID"))
+/// Construct an alternative OrganizationId for isolation tests.
+pub fn test_org_id_alt1() -> OrganizationId {
+    OrganizationId(Ulid::from_string(TEST_GROUP_ID_STR_ALT1).expect("static test ULID"))
 }
 
-/// Construct a second alternative GroupId for isolation tests.
-pub fn test_group_id_alt2() -> GroupId {
-    GroupId(Ulid::from_string(TEST_GROUP_ID_STR_ALT2).expect("static test ULID"))
+/// Construct a second alternative OrganizationId for isolation tests.
+pub fn test_org_id_alt2() -> OrganizationId {
+    OrganizationId(Ulid::from_string(TEST_GROUP_ID_STR_ALT2).expect("static test ULID"))
 }
 
 /// Construct a TenantId from the standard test ULID string.
@@ -52,9 +52,9 @@ pub fn parse_test_ulid(s: &str) -> Ulid {
     Ulid::from_string(s).expect("valid test ULID")
 }
 
-/// Construct a GroupId from an arbitrary ULID string. Panics if invalid.
-pub fn group_id_from_str(s: &str) -> GroupId {
-    GroupId(parse_test_ulid(s))
+/// Construct a OrganizationId from an arbitrary ULID string. Panics if invalid.
+pub fn org_id_from_str(s: &str) -> OrganizationId {
+    OrganizationId(parse_test_ulid(s))
 }
 
 /// Construct an EventUlid from an arbitrary ULID string. Panics if invalid.
