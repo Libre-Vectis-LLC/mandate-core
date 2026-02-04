@@ -555,13 +555,13 @@ mod tests {
     fn public_derivation_matches_private_for_member_session() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
-        let group = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB0");
+        let org = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB0");
         let ring = RingHash([7u8; 32]);
 
-        let private = km.derive_member_session_key(&group, &ring);
+        let private = km.derive_member_session_key(&org, &ring);
         let public =
             NazgulKeyPair::from_public_key_only(*km.derive_nazgul_master_keypair().0.public())
-                .derive_session(&group, &ring);
+                .derive_session(&org, &ring);
 
         assert_eq!(
             private.public(),

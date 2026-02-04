@@ -301,7 +301,7 @@ mod tests {
 
         // Test each event type returns correct ring_hash
         let poll = EventType::PollCreate(Poll {
-            org_id: group,
+            org_id: org,
             ring_hash,
             poll_id: "p1".into(),
             questions: vec![],
@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(poll.ring_hash(), Some(ring_hash));
 
         let vote = EventType::VoteCast(Vote {
-            org_id: group,
+            org_id: org,
             ring_hash,
             poll_id: "p1".into(),
             poll_hash: ContentHash([0u8; 32]),
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(vote.ring_hash(), Some(ring_hash));
 
         let msg = EventType::MessageCreate(AnonymousMessage {
-            org_id: group,
+            org_id: org,
             ring_hash,
             message_id: "m1".into(),
             content: Ciphertext(b"test".to_vec()),
@@ -331,14 +331,14 @@ mod tests {
         assert_eq!(msg.ring_hash(), Some(ring_hash));
 
         let ring_update = EventType::RingUpdate(RingUpdate {
-            org_id: group,
+            org_id: org,
             ring_hash,
             operations: vec![],
         });
         assert_eq!(ring_update.ring_hash(), Some(ring_hash));
 
         let ban_create = EventType::BanCreate(BanCreate {
-            org_id: group,
+            org_id: org,
             ring_hash,
             target: KeyImage::default(),
             reason: "test".into(),
@@ -347,14 +347,14 @@ mod tests {
         assert_eq!(ban_create.ring_hash(), Some(ring_hash));
 
         let ban_revoke = EventType::BanRevoke(BanRevoke {
-            org_id: group,
+            org_id: org,
             ban_event_id: EventId([0u8; 32]),
         });
         assert_eq!(ban_revoke.ring_hash(), None);
 
         // ProofOfInnocence uses historical_ring_hash
         let proof = EventType::ProofOfInnocence(ProofOfInnocence {
-            org_id: group,
+            org_id: org,
             historical_ring_hash: historical_hash,
         });
         assert_eq!(proof.ring_hash(), Some(historical_hash));
@@ -585,12 +585,12 @@ mod tests {
         let mut event = Event {
             event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
             previous_event_hash: EventId([0u8; 32]),
-            org_id: group,
+            org_id: org,
             sequence_no: None,
             processed_at: 100,
             serialization_version: 1,
             event_type: EventType::RingUpdate(RingUpdate {
-                org_id: group,
+                org_id: org,
                 ring_hash,
                 operations: vec![RingOperation::AddMember {
                     public_key: MasterPublicKey([42u8; 32]),
@@ -646,12 +646,12 @@ mod tests {
             Event {
                 event_ulid: EventUlid(Ulid::from_string("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap()),
                 previous_event_hash: EventId([0u8; 32]),
-                org_id: group,
+                org_id: org,
                 sequence_no: None,
                 processed_at: 100,
                 serialization_version: 1,
                 event_type: EventType::RingUpdate(RingUpdate {
-                    org_id: group,
+                    org_id: org,
                     ring_hash,
                     operations: vec![RingOperation::AddMember {
                         public_key: MasterPublicKey([42u8; 32]),
