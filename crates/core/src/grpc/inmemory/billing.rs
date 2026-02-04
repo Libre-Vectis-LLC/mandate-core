@@ -84,7 +84,11 @@ pub struct InMemoryBilling {
 }
 
 impl InMemoryBilling {
-    pub(crate) fn new(groups: Arc<Mutex<GroupMap>>) -> Self {
+    /// Creates a new in-memory billing store.
+    ///
+    /// This is intended for testing purposes where billing needs to interact
+    /// with an in-memory group store.
+    pub fn new(groups: Arc<Mutex<GroupMap>>) -> Self {
         Self {
             tenants: Arc::new(Mutex::new(HashMap::new())),
             groups,

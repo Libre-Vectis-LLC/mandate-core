@@ -18,17 +18,28 @@ impl InMemoryGroups {
         Self::default()
     }
 
-    pub(crate) fn shared(&self) -> Arc<Mutex<GroupMap>> {
+    /// Returns a shared reference to the internal group map.
+    ///
+    /// This is primarily used for constructing `InMemoryBilling` in tests.
+    pub fn shared(&self) -> Arc<Mutex<GroupMap>> {
         Arc::clone(&self.groups)
     }
 }
 
+/// In-memory group metadata record.
+///
+/// This type is exposed publicly to support test infrastructure that needs
+/// to share group maps between `InMemoryGroups` and `InMemoryBilling`.
 #[derive(Clone, Debug)]
-pub(crate) struct GroupRecord {
-    pub(crate) tenant: TenantId,
-    pub(crate) tg_group_id: String,
-    pub(crate) balance_nanos: i64,
-    pub(crate) owner_pubkey: Option<MasterPublicKey>,
+pub struct GroupRecord {
+    /// Tenant that owns this group.
+    pub tenant: TenantId,
+    /// Telegram group ID.
+    pub tg_group_id: String,
+    /// Current balance in nanos.
+    pub balance_nanos: i64,
+    /// Owner's master public key, if set.
+    pub owner_pubkey: Option<MasterPublicKey>,
 }
 
 #[async_trait]
