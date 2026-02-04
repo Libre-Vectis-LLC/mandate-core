@@ -111,7 +111,7 @@ impl BalanceHolder {
 /// let receipt = TransferReceipt {
 ///     transfer_id: "uuid-1234".to_string(),
 ///     from: BalanceHolder::Tenant("tenant_1".to_string()),
-///     to: BalanceHolder::Organization("group_a".to_string()),
+///     to: BalanceHolder::Organization("org_a".to_string()),
 ///     amount: Nanos::from_dollars(10.0),
 ///     timestamp_ms: 1609459200000,
 ///     reason: Some("Initial funding".to_string()),
@@ -280,7 +280,7 @@ mod tests {
         let receipt = TransferReceipt {
             transfer_id: "uuid-1234".to_string(),
             from: BalanceHolder::Tenant("tenant_1".to_string()),
-            to: BalanceHolder::Organization("group_a".to_string()),
+            to: BalanceHolder::Organization("org_a".to_string()),
             amount: Nanos::from_dollars(10.0),
             timestamp_ms: 1609459200000,
             reason: Some("Initial funding".to_string()),
@@ -304,7 +304,7 @@ mod tests {
         assert!(msg.contains("50"));
 
         let err = TransferError::OrgNotOwned("org_123".to_string());
-        assert_eq!(format!("{}", err), "group group_123 not owned by tenant");
+        assert_eq!(format!("{}", err), "group org_123 not owned by tenant");
 
         let err = TransferError::InvalidAmount("amount must be positive".to_string());
         assert_eq!(
