@@ -361,7 +361,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
                 continue;
             }
 
-            // Check if this group contains a member with matching nazgul_pub and status
+            // Check if this org contains a member with matching nazgul_pub and status
             for record in records {
                 if record.member.nazgul_pub.0.as_slice() == nazgul_pub
                     && record.status.as_str() == status_filter
@@ -371,7 +371,7 @@ impl PendingMemberStore for InMemoryPendingMembers {
                         joined_at_ms: record.member.submitted_at_ms,
                         status: record.status.as_str().to_string(),
                     });
-                    break; // One match per group is enough
+                    break; // One match per org is enough
                 }
             }
         }

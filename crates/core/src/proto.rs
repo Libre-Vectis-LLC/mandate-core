@@ -31,7 +31,7 @@ pub fn parse_ulid(ulid_str: &str) -> Result<Ulid, ProtoConvertError> {
     Ulid::from_string(ulid_str).map_err(|_| ProtoConvertError::InvalidUlid(ulid_str.to_string()))
 }
 
-pub fn proto_ulid_to_group(id: &ProtoUlid) -> Result<OrganizationId, ProtoConvertError> {
+pub fn proto_ulid_to_org(id: &ProtoUlid) -> Result<OrganizationId, ProtoConvertError> {
     parse_ulid(&id.value).map(OrganizationId)
 }
 

@@ -49,7 +49,7 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `amount` - Amount to transfer
     ///
     /// # Returns
@@ -72,7 +72,7 @@ pub trait BillingStore: Send + Sync {
     /// Retrieve the current operational budget balance for a group.
     ///
     /// # Arguments
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     ///
     /// # Returns
     /// The group's current balance.
@@ -102,7 +102,7 @@ pub trait BillingStore: Send + Sync {
     /// This method is used to charge a group for resource consumption (verification, storage, etc.).
     ///
     /// # Arguments
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `amount` - Amount to deduct
     ///
     /// # Returns
@@ -200,7 +200,7 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier (must belong to the tenant)
+    /// * `org_id` - The org IDentifier (must belong to the tenant)
     /// * `amount` - Amount to withdraw
     ///
     /// # Returns
@@ -214,7 +214,7 @@ pub trait BillingStore: Send + Sync {
     /// # Invariants
     /// * Withdrawals are atomic (group debit and tenant credit happen together)
     /// * Tenant balance is always non-negative
-    async fn withdraw_from_group(
+    async fn withdraw_from_org(
         &self,
         tenant: TenantId,
         org_id: OrganizationId,
@@ -228,8 +228,8 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier (both groups must belong to this tenant)
-    /// * `source_group` - The source group identifier (funds withdrawn from here)
-    /// * `dest_group` - The destination group identifier (funds deposited here)
+    /// * `source_org` - The source org IDentifier (funds withdrawn from here)
+    /// * `dest_org` - The destination org IDentifier (funds deposited here)
     /// * `amount` - Amount to transfer
     ///
     /// # Returns
@@ -245,11 +245,11 @@ pub trait BillingStore: Send + Sync {
     /// * Transfers are atomic (source debit and destination credit happen together)
     /// * Both group balances are always non-negative
     /// * Both groups must belong to the same tenant
-    async fn transfer_between_groups(
+    async fn transfer_between_orgs(
         &self,
         tenant: TenantId,
-        source_group: OrganizationId,
-        dest_group: OrganizationId,
+        source_org: OrganizationId,
+        dest_org: OrganizationId,
         amount: Nanos,
     ) -> Result<(Nanos, Nanos), StorageError>;
 }

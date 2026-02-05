@@ -103,7 +103,7 @@ message TransferToOrganizationResponse {
 
 // Request to query an organization's current balance.
 message GetOrganizationBalanceRequest {
-  // Group ID (ULID format) to query.
+  // Organization ID (ULID format) to query.
   string org_id = 1;
 }
 

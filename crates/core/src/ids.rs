@@ -215,7 +215,7 @@ impl From<&str> for BotSecret {
     }
 }
 
-/// Group identifier (server-assigned ULID) used in derivations and hashing.
+/// org IDentifier (server-assigned ULID) used in derivations and hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct OrganizationId(pub Ulid);

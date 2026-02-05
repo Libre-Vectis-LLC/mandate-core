@@ -19,7 +19,7 @@ pub trait RingView {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `hash` - The content-addressed hash of the ring
     ///
     /// # Returns
@@ -44,7 +44,7 @@ pub trait RingView {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     ///
     /// # Returns
     /// An `Arc<Ring>` representing the current group membership ring.
@@ -67,7 +67,7 @@ pub trait RingView {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `ring_hash_current` - Optional starting ring hash; `None` means start from genesis
     /// * `ring_hash_target` - Target ring hash
     ///
@@ -101,7 +101,7 @@ pub trait RingWriter {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `delta` - The ring delta to apply (Add or Remove variant)
     ///
     /// # Returns

@@ -76,7 +76,7 @@ impl Add for AbstractResourceUnits {
 pub enum BalanceHolder {
     /// Tenant account balance.
     Tenant(String),
-    /// Group project balance.
+    /// Organization project balance.
     Organization(String),
 }
 
@@ -86,8 +86,8 @@ impl BalanceHolder {
         matches!(self, BalanceHolder::Tenant(_))
     }
 
-    /// Returns true if this is a group balance holder.
-    pub fn is_group(&self) -> bool {
+    /// Returns true if this is an organization balance holder.
+    pub fn is_org(&self) -> bool {
         matches!(self, BalanceHolder::Organization(_))
     }
 
@@ -143,7 +143,7 @@ pub enum TransferError {
         /// Amount currently available.
         available: Nanos,
     },
-    /// Group is not owned by the tenant attempting the transfer.
+    /// Org is not owned by the tenant attempting the transfer.
     OrgNotOwned(String),
     /// Invalid amount (e.g., zero or negative).
     InvalidAmount(String),
@@ -166,7 +166,7 @@ impl std::fmt::Display for TransferError {
                 )
             }
             TransferError::OrgNotOwned(org_id) => {
-                write!(f, "group {} not owned by tenant", org_id)
+                write!(f, "organization {} not owned by tenant", org_id)
             }
             TransferError::InvalidAmount(msg) => write!(f, "invalid amount: {}", msg),
             TransferError::Database(msg) => write!(f, "database error: {}", msg),
@@ -263,15 +263,15 @@ mod tests {
     fn test_balance_holder_tenant() {
         let holder = BalanceHolder::Tenant("tenant_123".to_string());
         assert!(holder.is_tenant());
-        assert!(!holder.is_group());
+        assert!(!holder.is_org());
         assert_eq!(holder.id(), "tenant_123");
     }
 
     #[test]
-    fn test_balance_holder_group() {
+    fn test_balance_holder_org() {
         let holder = BalanceHolder::Organization("org_abc".to_string());
         assert!(!holder.is_tenant());
-        assert!(holder.is_group());
+        assert!(holder.is_org());
         assert_eq!(holder.id(), "org_abc");
     }
 
@@ -288,7 +288,7 @@ mod tests {
 
         assert_eq!(receipt.transfer_id, "uuid-1234");
         assert!(receipt.from.is_tenant());
-        assert!(receipt.to.is_group());
+        assert!(receipt.to.is_org());
         assert_eq!(receipt.amount.to_dollars(), 10.0);
     }
 
@@ -304,7 +304,7 @@ mod tests {
         assert!(msg.contains("50"));
 
         let err = TransferError::OrgNotOwned("org_123".to_string());
-        assert_eq!(format!("{}", err), "group org_123 not owned by tenant");
+        assert_eq!(format!("{}", err), "organization org_123 not owned by tenant");
 
         let err = TransferError::InvalidAmount("amount must be positive".to_string());
         assert_eq!(

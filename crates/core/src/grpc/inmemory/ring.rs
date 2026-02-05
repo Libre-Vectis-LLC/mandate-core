@@ -154,10 +154,10 @@ impl RingWriter for InMemoryRings {
         let mut map = self.inner();
         let key = (tenant, org_id);
 
-        // Check if this is the first delta for this group.
-        let is_new_group = !map.contains_key(&key);
+        // Check if this is the first delta for this org.
+        let is_new_org = !map.contains_key(&key);
 
-        if is_new_group {
+        if is_new_org {
             // For the first delta (must be Add), use RingDeltaLog::new to properly initialize.
             let founder = match &delta {
                 RingDelta::Add(pubkey) => *pubkey,

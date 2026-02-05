@@ -38,7 +38,7 @@ pub trait BanIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `key_image` - The key image to check
     /// * `operation` - The operation type being attempted
     ///
@@ -66,7 +66,7 @@ pub trait BanIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `ring_hash` - The ring hash to count bans for
     ///
     /// # Returns
@@ -92,7 +92,7 @@ pub trait VoteKeyImageIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `poll_id` - The poll identifier
     /// * `key_image` - The key image to check
     ///
@@ -130,7 +130,7 @@ pub trait PollRingHashIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `poll_id` - The poll identifier (unique within the group)
     /// * `ring_hash` - The ring hash at poll creation time
     ///
@@ -159,7 +159,7 @@ pub trait PollRingHashIndex {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `poll_id` - The poll identifier
     ///
     /// # Returns

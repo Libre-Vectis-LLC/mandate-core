@@ -212,7 +212,7 @@ message ValidateInviteCodeResponse {
   // Only returned when valid = true.
   optional string org_id = 2;
 
-  // Group display name for showing in the registration UI.
+  // Organization display name for showing in the registration UI.
   // Example: "Acme Corp DAO"
   // Only returned when valid = true.
   optional string org_name = 3;

@@ -18,7 +18,7 @@ pub trait KeyBlobStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `blobs` - Vector of `(rage_pub, encrypted_blob)` pairs
     ///
     /// # Returns
@@ -42,7 +42,7 @@ pub trait KeyBlobStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `rage_pub` - The recipient's Rage public key
     ///
     /// # Returns
@@ -72,7 +72,7 @@ pub trait AccessTokenBlobStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `ring_hash` - The ring hash at the time of generation
     /// * `blobs` - Vector of `(rage_pub, encrypted_token)` pairs
     async fn put_many_access_tokens(

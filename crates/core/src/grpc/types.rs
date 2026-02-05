@@ -8,7 +8,7 @@
 #![allow(deprecated)]
 
 pub use super::inmemory::{
-    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryGroups,
+    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryOrgs,
     InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryRings, InMemoryTenantTokens,
     InMemoryVoteKeyImages, NoopBanIndex, NoopVoteKeyImages,
 };

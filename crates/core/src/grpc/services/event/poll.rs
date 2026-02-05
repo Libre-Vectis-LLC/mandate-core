@@ -185,7 +185,7 @@ impl EventServiceImpl {
 
         let identity = RageIdentity::from_secret_bytes(poll_key_bytes);
 
-        // 3. Stream all events for this group
+        // 3. Stream all events for this org
         let event_records = self
             .store
             .stream_events(tenant, org_id, None, usize::MAX)

@@ -111,7 +111,7 @@ const ACCESS_TOKEN_BLOB_PREFIX: &[u8] = b"mandate:edge-access:v1|";
 #[derive(Clone, Debug)]
 pub struct MasterNazgulKeyPair(pub NazgulKeyPair);
 
-/// Delegate signing keypair derived per group.
+/// Delegate signing keypair derived per org.
 #[derive(Clone, Debug)]
 pub struct DelegateNazgulKeyPair(pub NazgulKeyPair);
 

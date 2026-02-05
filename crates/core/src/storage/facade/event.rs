@@ -25,7 +25,7 @@ impl StorageFacade {
         limit: usize,
     ) -> Result<Vec<EventRecord>, StorageError> {
         self.event_reader
-            .stream_group(tenant, org_id, after_sequence, limit)
+            .stream_org(tenant, org_id, after_sequence, limit)
             .await
     }
 

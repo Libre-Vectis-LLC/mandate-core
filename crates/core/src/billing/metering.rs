@@ -64,7 +64,7 @@ pub struct UsageEvent {
     /// Tenant ID responsible for this usage.
     pub tenant_id: String,
 
-    /// Optional group ID (if operation is group-scoped).
+    /// Optional org ID (if operation is org-scoped).
     pub org_id: Option<String>,
 
     /// Type of event (e.g., "verification", "pow_verify", "event_read").
@@ -92,7 +92,7 @@ pub struct UsageEvent {
 /// 1. Before sending data, call [`check_egress`](EgressMeter::check_egress) to verify balance
 /// 2. After sending data, call [`record_egress`](EgressMeter::record_egress) to charge
 ///
-/// This allows rejecting requests upfront if the group has insufficient balance,
+/// This allows rejecting requests upfront if the org has insufficient balance,
 /// preventing data exfiltration without payment.
 #[async_trait]
 pub trait EgressMeter: Send + Sync {
@@ -107,7 +107,7 @@ pub trait EgressMeter: Send + Sync {
     /// # Returns
     /// * `Ok(())` - Sufficient balance for the transfer
     /// * `Err(MeteringError::InsufficientBalance)` - Not enough credits
-    /// * `Err(MeteringError::OrgNotFound)` - Unknown group
+    /// * `Err(MeteringError::OrgNotFound)` - Unknown org
     async fn check_egress(&self, org_id: &str, estimated_bytes: usize)
         -> Result<(), MeteringError>;
 

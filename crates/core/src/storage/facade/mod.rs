@@ -30,7 +30,7 @@ pub struct StorageFacade {
     pub(super) poll_ring_hashes: Arc<dyn PollRingHashIndex + Send + Sync>,
     pub(super) billing: Arc<dyn BillingStore + Send + Sync>,
     pub(super) gift_cards: Arc<dyn GiftCardStore + Send + Sync>,
-    pub(super) groups: Arc<dyn OrganizationMetadataStore + Send + Sync>,
+    pub(super) orgs: Arc<dyn OrganizationMetadataStore + Send + Sync>,
     pub(super) pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
     pub(super) access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
     pub(super) edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
@@ -70,7 +70,7 @@ impl std::error::Error for StorageFacadeBuilderError {}
 ///     .poll_ring_hashes(poll_hashes)
 ///     .billing(billing)
 ///     .gift_cards(cards)
-///     .groups(groups)
+///     .orgs(orgs)
 ///     .pending_members(members)
 ///     .build()?;
 /// ```
@@ -87,7 +87,7 @@ pub struct StorageFacadeBuilder {
     poll_ring_hashes: Option<Arc<dyn PollRingHashIndex + Send + Sync>>,
     billing: Option<Arc<dyn BillingStore + Send + Sync>>,
     gift_cards: Option<Arc<dyn GiftCardStore + Send + Sync>>,
-    groups: Option<Arc<dyn OrganizationMetadataStore + Send + Sync>>,
+    orgs: Option<Arc<dyn OrganizationMetadataStore + Send + Sync>>,
     pending_members: Option<Arc<dyn PendingMemberStore + Send + Sync>>,
     access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
     edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
@@ -163,9 +163,9 @@ impl StorageFacadeBuilder {
         self
     }
 
-    /// Set the group metadata store.
-    pub fn groups(mut self, store: Arc<dyn OrganizationMetadataStore + Send + Sync>) -> Self {
-        self.groups = Some(store);
+    /// Set the org metadata store.
+    pub fn orgs(mut self, store: Arc<dyn OrganizationMetadataStore + Send + Sync>) -> Self {
+        self.orgs = Some(store);
         self
     }
 
@@ -229,8 +229,8 @@ impl StorageFacadeBuilder {
             gift_cards: self.gift_cards.ok_or(StorageFacadeBuilderError {
                 missing_field: "gift_cards",
             })?,
-            groups: self.groups.ok_or(StorageFacadeBuilderError {
-                missing_field: "groups",
+            orgs: self.orgs.ok_or(StorageFacadeBuilderError {
+                missing_field: "orgs",
             })?,
             pending_members: self.pending_members.ok_or(StorageFacadeBuilderError {
                 missing_field: "pending_members",

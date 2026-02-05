@@ -1,5 +1,5 @@
 use crate::grpc::inmemory::{
-    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryGroups,
+    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryOrgs,
     InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryPollRingHashes, InMemoryRings,
     InMemoryTenantTokens, InMemoryVoteKeyImages,
 };
@@ -73,8 +73,8 @@ impl CoreServices {
         let key_blobs = Arc::new(InMemoryKeyBlobs::new());
         let rings = Arc::new(InMemoryRings::new());
         let gift_cards = Arc::new(InMemoryGiftCards::new());
-        let groups = Arc::new(InMemoryGroups::new());
-        let billing = Arc::new(InMemoryBilling::new(groups.shared()));
+        let orgs = Arc::new(InMemoryOrgs::new());
+        let billing = Arc::new(InMemoryBilling::new(orgs.shared()));
         let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
         let facade = StorageFacade::builder()
@@ -87,7 +87,7 @@ impl CoreServices {
             .poll_ring_hashes(poll_ring_hashes)
             .billing(billing)
             .gift_cards(gift_cards)
-            .groups(groups)
+            .orgs(orgs)
             .pending_members(pending_members)
             .build()?;
 

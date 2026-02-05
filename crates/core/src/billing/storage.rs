@@ -1,7 +1,7 @@
 //! Storage metering types for usage tracking and quota management.
 //!
 //! This module provides WASM-compatible types for storage metering:
-//! - `OrgStorageUsage`: Records per-group storage consumption
+//! - `OrgStorageUsage`: Records per-org storage consumption
 //! - `OrgStorageStatus`: Quota status based on balance and usage
 //!
 //! # Design
@@ -11,13 +11,13 @@
 //! 2. Daily job: charge 1 day for existing data (30-day prepay already done)
 //! 3. Warning when balance < 30 days of storage
 //! 4. Suspend writes when balance <= 0
-//! 5. Delete group data after 30 days of suspension
+//! 5. Delete org data after 30 days of suspension
 
 use serde::{Deserialize, Serialize};
 
 /// Per-group storage usage record.
 ///
-/// Tracks storage consumption across different data types within a group.
+/// Tracks storage consumption across different data types within an organization.
 ///
 /// # Examples
 ///
@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrgStorageUsage {
-    /// Group ID this usage belongs to.
+    /// Organization ID this usage belongs to.
     pub org_id: String,
 
     /// Tenant ID that owns this group.
@@ -119,7 +119,7 @@ impl OrgStorageUsage {
 
 /// Storage status for a group based on balance and usage.
 ///
-/// Determines whether the group can accept new writes and how long until
+/// Determines whether the org can accept new writes and how long until
 /// suspension or deletion.
 ///
 /// # State Transitions
@@ -209,7 +209,7 @@ impl OrgStorageStatus {
         )
     }
 
-    /// Returns whether the group is at risk of data loss.
+    /// Returns whether the org is at risk of data loss.
     ///
     /// # Examples
     ///
@@ -234,7 +234,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_group_storage_usage_new() {
+    fn test_org_storage_usage_new() {
         let usage = OrgStorageUsage::new(
             "org_abc".to_string(),
             "tenant_123".to_string(),
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_usage_total_gb() {
+    fn test_org_storage_usage_total_gb() {
         let usage = OrgStorageUsage::new(
             "org_abc".to_string(),
             "tenant_123".to_string(),
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_usage_total_gb_fractional() {
+    fn test_org_storage_usage_total_gb_fractional() {
         let usage = OrgStorageUsage::new(
             "org_abc".to_string(),
             "tenant_123".to_string(),
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_status_can_write() {
+    fn test_org_storage_status_can_write() {
         assert!(OrgStorageStatus::Normal.can_write());
         assert!(!OrgStorageStatus::Warning { days_remaining: 15 }.can_write());
         assert!(!OrgStorageStatus::Suspended.can_write());
@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_status_can_read() {
+    fn test_org_storage_status_can_read() {
         assert!(OrgStorageStatus::Normal.can_read());
         assert!(OrgStorageStatus::Warning { days_remaining: 15 }.can_read());
         assert!(!OrgStorageStatus::Suspended.can_read());
@@ -302,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_status_is_critical() {
+    fn test_org_storage_status_is_critical() {
         assert!(!OrgStorageStatus::Normal.is_critical());
         assert!(!OrgStorageStatus::Warning { days_remaining: 15 }.is_critical());
         assert!(OrgStorageStatus::Suspended.is_critical());
@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_status_serialization() {
+    fn test_org_storage_status_serialization() {
         let status = OrgStorageStatus::Warning { days_remaining: 15 };
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("warning"));
@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_storage_usage_serialization() {
+    fn test_org_storage_usage_serialization() {
         let usage = OrgStorageUsage::new(
             "org_abc".to_string(),
             "tenant_123".to_string(),

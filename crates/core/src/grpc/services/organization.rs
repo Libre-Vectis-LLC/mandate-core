@@ -146,7 +146,7 @@ impl OrganizationService for OrganizationServiceImpl {
             Err(err) => return Err(to_status(err)),
         }
 
-        // Store owner pubkey in group metadata for delegate key derivation
+        // Store owner pubkey in org metadata for delegate key derivation
         self.store
             .set_owner_pubkey(org_id, crate::ids::MasterPublicKey(owner_pubkey.0))
             .await

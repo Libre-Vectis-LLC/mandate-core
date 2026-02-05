@@ -54,7 +54,7 @@ pub struct PendingMember {
 pub trait OrganizationMetadataStore {
     /// Create a new group record.
     ///
-    /// This method initializes a new group within a tenant's account and associates it
+    /// This method initializes a new org within a tenant's account and associates it
     /// with a Telegram group identifier.
     ///
     /// # Arguments
@@ -69,7 +69,7 @@ pub trait OrganizationMetadataStore {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
-    /// * Group IDs are globally unique
+    /// * org IDs are globally unique
     /// * Each Telegram group ID maps to at most one Mandate group
     async fn create_organization(
         &self,
@@ -77,10 +77,10 @@ pub trait OrganizationMetadataStore {
         tg_group_id: &str,
     ) -> Result<OrganizationId, StorageError>;
 
-    /// Retrieve group metadata by group ID.
+    /// Retrieve org metadata by org ID.
     ///
     /// # Arguments
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     ///
     /// # Returns
     /// A tuple of `(TenantId, tg_group_id)` containing the owning tenant and Telegram group ID.
@@ -100,7 +100,7 @@ pub trait OrganizationMetadataStore {
     /// - Derive delegate public keys for delegated signing
     ///
     /// # Arguments
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `owner_pubkey` - The owner's Nazgul master public key
     ///
     /// # Errors
@@ -115,7 +115,7 @@ pub trait OrganizationMetadataStore {
     /// Retrieve the owner's Nazgul master public key for a group.
     ///
     /// # Arguments
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     ///
     /// # Returns
     /// The owner's `MasterPublicKey` if set, `None` if not yet configured.
@@ -138,7 +138,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `tg_user_id` - The Telegram user ID of the joining member
     /// * `nazgul_pub` - The member's Nazgul master public key (for ring signatures)
     /// * `rage_pub` - The member's Rage public key (for encrypted key distribution)
@@ -151,7 +151,7 @@ pub trait PendingMemberStore {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
-    /// * Each Telegram user can have at most one pending request per group
+    /// * Each Telegram user can have at most one pending request per org
     /// * `submitted_at_ms` is set to the current timestamp in milliseconds
     async fn submit(
         &self,
@@ -169,7 +169,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `limit` - Maximum number of pending members to return
     /// * `page_token` - Optional continuation token from a previous call
     ///
@@ -198,7 +198,7 @@ pub trait PendingMemberStore {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `tg_user_id` - The Telegram user ID to look up
     ///
     /// # Returns
@@ -252,14 +252,14 @@ pub trait PendingMemberStore {
         display_name: Option<String>,
     ) -> Result<(String, OrganizationId), StorageError>;
 
-    /// List all members in a group with optional filtering (Phase 4).
+    /// List all members in a org with optional filtering (Phase 4).
     ///
     /// This method returns unified member information including identity and status,
     /// supporting both Telegram and Standalone members.
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `limit` - Maximum number of members to return
     /// * `page_token` - Optional continuation token from a previous call
     /// * `filter_source` - Optional filter by identity source

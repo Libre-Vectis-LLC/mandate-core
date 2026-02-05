@@ -34,7 +34,7 @@ service AuthService {
   //
   // ## Resolution Strategy
   // 1. Lookup tenant via `owner_tg_user_id` in tenants table
-  // 2. Lookup associated organization via pending_members or groups table
+  // 2. Lookup associated organization via pending_members or orgs table
   //
   // ## Errors
   // - NOT_FOUND: No tenant or organization associated with this Telegram user
@@ -76,7 +76,7 @@ message ResolveTelegramUserResponse {
   // Tenant ID (UUID format) that owns this Telegram user.
   string tenant_id = 1;
 
-  // Group ID (ULID format) associated with this tenant.
+  // Organization ID (ULID format) associated with this tenant.
   // If the user belongs to multiple organizations, returns the most recently created one.
   string org_id = 2;
 }

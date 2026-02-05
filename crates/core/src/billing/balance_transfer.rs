@@ -1,4 +1,4 @@
-//! Balance transfer trait for moving funds between tenants and groups.
+//! Balance transfer trait for moving funds between tenants and organizations.
 //!
 //! This module defines the interface for balance transfers. Implementations
 //! are provided by mandate-enterprise with PostgreSQL backend.
@@ -14,7 +14,7 @@ use crate::billing::{Nanos, TransferError, TransferReceipt};
 ///
 /// 1. All transfers must execute in database transactions
 /// 2. Transfer amounts must be > 0 and ≤ source balance
-/// 3. Groups can only transfer to same tenant's groups or back to tenant
+/// 3. Groups can only transfer to same tenant.s orgs or back to tenant
 /// 4. Complete audit logs must be maintained
 ///
 /// # Examples
@@ -22,7 +22,7 @@ use crate::billing::{Nanos, TransferError, TransferReceipt};
 /// ```no_run
 /// use mandate_core::billing::{BalanceTransferService, Nanos};
 /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
-/// // Transfer from tenant to group
+/// // Transfer from tenant to organization
 /// let receipt = service.transfer_to_organization(
 ///     "tenant_123",
 ///     "org_abc",
@@ -36,19 +36,19 @@ use crate::billing::{Nanos, TransferError, TransferReceipt};
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait BalanceTransferService: Send + Sync {
-    /// Transfer funds from tenant to group.
+    /// Transfer funds from tenant to organization.
     ///
     /// # Arguments
     ///
     /// * `tenant_id` - Source tenant ID
-    /// * `org_id` - Destination group ID
+    /// * `org_id` - Destination org ID
     /// * `amount` - Amount to transfer (must be > 0)
     ///
     /// # Errors
     ///
     /// Returns error if:
     /// - Tenant has insufficient balance
-    /// - Group is not owned by tenant
+    /// - Org is not owned by tenant
     /// - Amount is invalid (zero or negative)
     /// - Database transaction fails
     ///
@@ -72,19 +72,19 @@ pub trait BalanceTransferService: Send + Sync {
         amount: Nanos,
     ) -> Result<TransferReceipt, TransferError>;
 
-    /// Withdraw funds from group back to tenant.
+    /// Withdraw funds from organization back to tenant.
     ///
     /// # Arguments
     ///
     /// * `tenant_id` - Destination tenant ID
-    /// * `org_id` - Source group ID
+    /// * `org_id` - Source org ID
     /// * `amount` - Amount to withdraw (must be > 0)
     ///
     /// # Errors
     ///
     /// Returns error if:
-    /// - Group has insufficient balance
-    /// - Group is not owned by tenant
+    /// - Org has insufficient balance
+    /// - Org is not owned by tenant
     /// - Amount is invalid
     /// - Database transaction fails
     ///
@@ -93,7 +93,7 @@ pub trait BalanceTransferService: Send + Sync {
     /// ```no_run
     /// # use mandate_core::billing::{BalanceTransferService, Nanos};
     /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
-    /// let receipt = service.withdraw_from_group(
+    /// let receipt = service.withdraw_from_org(
     ///     "tenant_123",
     ///     "org_abc",
     ///     Nanos::from_dollars(25.0),
@@ -101,27 +101,27 @@ pub trait BalanceTransferService: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn withdraw_from_group(
+    async fn withdraw_from_org(
         &self,
         tenant_id: &str,
         org_id: &str,
         amount: Nanos,
     ) -> Result<TransferReceipt, TransferError>;
 
-    /// Transfer funds between groups under the same tenant.
+    /// Transfer funds between orgs under the same tenant.
     ///
     /// # Arguments
     ///
     /// * `tenant_id` - Owning tenant ID
-    /// * `from_org` - Source group ID
-    /// * `to_org` - Destination group ID
+    /// * `from_org` - Source org ID
+    /// * `to_org` - Destination org ID
     /// * `amount` - Amount to transfer (must be > 0)
     ///
     /// # Errors
     ///
     /// Returns error if:
-    /// - Source group has insufficient balance
-    /// - Either group is not owned by tenant
+    /// - Source org has insufficient balance
+    /// - Either org is not owned by tenant
     /// - Amount is invalid
     /// - Database transaction fails
     ///
@@ -130,7 +130,7 @@ pub trait BalanceTransferService: Send + Sync {
     /// ```no_run
     /// # use mandate_core::billing::{BalanceTransferService, Nanos};
     /// # async fn example(service: &dyn BalanceTransferService) -> Result<(), Box<dyn std::error::Error>> {
-    /// let receipt = service.transfer_between_groups(
+    /// let receipt = service.transfer_between_orgs(
     ///     "tenant_123",
     ///     "org_abc",
     ///     "org_xyz",
@@ -139,7 +139,7 @@ pub trait BalanceTransferService: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn transfer_between_groups(
+    async fn transfer_between_orgs(
         &self,
         tenant_id: &str,
         from_org: &str,

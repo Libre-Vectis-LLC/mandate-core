@@ -78,7 +78,7 @@ impl GiftCardStore for InMemoryGiftCards {
 #[derive(Clone)]
 pub struct InMemoryBilling {
     tenants: Arc<Mutex<TenantBalanceMap>>,
-    groups: Arc<Mutex<OrgMap>>,
+    orgs: Arc<Mutex<OrgMap>>,
     tg_user_to_tenant: Arc<Mutex<HashMap<String, TenantId>>>,
     idempotency_keys: Arc<Mutex<HashMap<String, IdempotencyEntry>>>,
 }
@@ -87,11 +87,11 @@ impl InMemoryBilling {
     /// Creates a new in-memory billing store.
     ///
     /// This is intended for testing purposes where billing needs to interact
-    /// with an in-memory group store.
-    pub fn new(groups: Arc<Mutex<OrgMap>>) -> Self {
+    /// with an in-memory org store.
+    pub fn new(orgs: Arc<Mutex<OrgMap>>) -> Self {
         Self {
             tenants: Arc::new(Mutex::new(HashMap::new())),
-            groups,
+            orgs,
             tg_user_to_tenant: Arc::new(Mutex::new(HashMap::new())),
             idempotency_keys: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -148,8 +148,8 @@ impl BillingStore for InMemoryBilling {
             ));
         }
 
-        let mut groups = self.groups.lock();
-        let record = groups
+        let mut orgs = self.orgs.lock();
+        let record = orgs
             .get_mut(&org_id)
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         if record.tenant != tenant {
@@ -174,8 +174,8 @@ impl BillingStore for InMemoryBilling {
         &self,
         org_id: OrganizationId,
     ) -> Result<Nanos, StorageError> {
-        let groups = self.groups.lock();
-        let record = groups
+        let orgs = self.orgs.lock();
+        let record = orgs
             .get(&org_id)
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         let balance_u64 = u64::try_from(record.balance_nanos)
@@ -207,8 +207,8 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
-        let mut groups = self.groups.lock();
-        let record = groups
+        let mut orgs = self.orgs.lock();
+        let record = orgs
             .get_mut(&org_id)
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
 
@@ -246,8 +246,8 @@ impl BillingStore for InMemoryBilling {
 
         // 2. Find the first group owned by this tenant
         // (In production, we might want to return the most recently created one)
-        let groups = self.groups.lock();
-        let org_id = groups.iter().find_map(|(gid, record)| {
+        let orgs = self.orgs.lock();
+        let org_id = orgs.iter().find_map(|(gid, record)| {
             if record.tenant == tenant_id {
                 Some(*gid)
             } else {
@@ -287,7 +287,7 @@ impl BillingStore for InMemoryBilling {
         Ok(())
     }
 
-    async fn withdraw_from_group(
+    async fn withdraw_from_org(
         &self,
         tenant: TenantId,
         org_id: OrganizationId,
@@ -296,8 +296,8 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
-        let mut groups = self.groups.lock();
-        let org_record = groups
+        let mut orgs = self.orgs.lock();
+        let org_record = orgs
             .get_mut(&org_id)
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
 
@@ -318,8 +318,8 @@ impl BillingStore for InMemoryBilling {
         // Deduct from group
         org_record.balance_nanos -= delta;
 
-        // Release groups lock before acquiring tenants lock
-        drop(groups);
+        // Release orgs lock before acquiring tenants lock
+        drop(orgs);
 
         // Credit to tenant
         let mut tenants = self.tenants.lock();
@@ -338,24 +338,24 @@ impl BillingStore for InMemoryBilling {
         Ok(Nanos::new(balance_u64))
     }
 
-    async fn transfer_between_groups(
+    async fn transfer_between_orgs(
         &self,
         tenant: TenantId,
-        source_group: OrganizationId,
-        dest_group: OrganizationId,
+        source_org: OrganizationId,
+        dest_org: OrganizationId,
         amount: Nanos,
     ) -> Result<(Nanos, Nanos), StorageError> {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
-        let mut groups = self.groups.lock();
+        let mut orgs = self.orgs.lock();
 
         // Get source group
         let source_record =
-            groups
-                .get(&source_group)
+            orgs
+                .get(&source_org)
                 .ok_or(StorageError::NotFound(NotFound::Organization {
-                    org_id: source_group,
+                    org_id: source_org,
                 }))?;
 
         // Verify source group belongs to tenant
@@ -367,10 +367,10 @@ impl BillingStore for InMemoryBilling {
 
         // Get destination group
         let dest_record =
-            groups
-                .get(&dest_group)
+            orgs
+                .get(&dest_org)
                 .ok_or(StorageError::NotFound(NotFound::Organization {
-                    org_id: dest_group,
+                    org_id: dest_org,
                 }))?;
 
         // Verify destination group belongs to tenant
@@ -389,12 +389,12 @@ impl BillingStore for InMemoryBilling {
         }
 
         // Perform atomic transfer
-        // SAFETY: We checked above that both groups exist and belong to the same tenant
-        let source_record = groups.get_mut(&source_group).unwrap();
+        // SAFETY: We checked above that both orgs exist and belong to the same tenant
+        let source_record = orgs.get_mut(&source_org).unwrap();
         source_record.balance_nanos -= delta;
         let new_source_balance = source_record.balance_nanos;
 
-        let dest_record = groups.get_mut(&dest_group).unwrap();
+        let dest_record = orgs.get_mut(&dest_org).unwrap();
         dest_record.balance_nanos =
             dest_record
                 .balance_nanos

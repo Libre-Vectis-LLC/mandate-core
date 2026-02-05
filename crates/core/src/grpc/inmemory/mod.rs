@@ -33,7 +33,7 @@ pub use billing::{InMemoryBilling, InMemoryGiftCards};
 pub use event::InMemoryEvents;
 pub use key_blob::InMemoryKeyBlobs;
 pub use member::InMemoryPendingMembers;
-pub use organization::InMemoryGroups;
+pub use organization::InMemoryOrgs;
 pub use poll::{InMemoryPollRingHashes, NoopPollRingHashes};
 pub use ring::InMemoryRings;
 pub use tenant::InMemoryTenantTokens;
@@ -264,12 +264,12 @@ mod tests {
     #[tokio::test]
     async fn billing_transfer_updates_group_balance() {
         let tenant = TenantId(ulid::Ulid::new());
-        let groups = InMemoryGroups::new();
-        let org_id = groups
+        let orgs = InMemoryOrgs::new();
+        let org_id = orgs
             .create_organization(tenant, "tg-group")
             .await
             .expect("group created");
-        let billing = InMemoryBilling::new(groups.shared());
+        let billing = InMemoryBilling::new(orgs.shared());
 
         let balance = billing
             .credit_tenant(tenant, "tg-user", Nanos::new(100))
@@ -293,12 +293,12 @@ mod tests {
     #[tokio::test]
     async fn billing_rejects_overdraft() {
         let tenant = TenantId(ulid::Ulid::new());
-        let groups = InMemoryGroups::new();
-        let org_id = groups
+        let orgs = InMemoryOrgs::new();
+        let org_id = orgs
             .create_organization(tenant, "tg-group")
             .await
             .expect("group created");
-        let billing = InMemoryBilling::new(groups.shared());
+        let billing = InMemoryBilling::new(orgs.shared());
 
         billing
             .credit_tenant(tenant, "tg-user", Nanos::new(40))

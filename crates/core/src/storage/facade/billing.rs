@@ -118,14 +118,14 @@ impl StorageFacade {
     ///
     /// This is the reverse operation of `transfer_to_organization`, moving funds from
     /// a group's operational budget back to the tenant's personal balance.
-    pub async fn withdraw_from_group(
+    pub async fn withdraw_from_org(
         &self,
         tenant: TenantId,
         org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
         self.billing
-            .withdraw_from_group(tenant, org_id, amount)
+            .withdraw_from_org(tenant, org_id, amount)
             .await
     }
 
@@ -133,15 +133,15 @@ impl StorageFacade {
     ///
     /// Both groups must belong to the same tenant. Returns a tuple of
     /// (source_balance, dest_balance) after the transfer.
-    pub async fn transfer_between_groups(
+    pub async fn transfer_between_orgs(
         &self,
         tenant: TenantId,
-        source_group: OrganizationId,
-        dest_group: OrganizationId,
+        source_org: OrganizationId,
+        dest_org: OrganizationId,
         amount: Nanos,
     ) -> Result<(Nanos, Nanos), StorageError> {
         self.billing
-            .transfer_between_groups(tenant, source_group, dest_group, amount)
+            .transfer_between_orgs(tenant, source_org, dest_org, amount)
             .await
     }
 

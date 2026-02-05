@@ -116,7 +116,7 @@ impl EventWriter for InMemoryEvents {
 
 #[async_trait]
 impl EventReader for InMemoryEvents {
-    async fn stream_group(
+    async fn stream_org(
         &self,
         tenant: TenantId,
         org_id: OrganizationId,

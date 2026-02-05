@@ -298,7 +298,7 @@ impl BillingService for BillingServiceImpl {
         // Execute the withdrawal
         let _tenant_balance = self
             .store
-            .withdraw_from_group(tenant_id, org_id, Nanos::new(amount))
+            .withdraw_from_org(tenant_id, org_id, Nanos::new(amount))
             .await
             .map_err(to_status)?;
 
@@ -365,7 +365,7 @@ impl BillingService for BillingServiceImpl {
         // Execute the transfer
         let (_source_balance, _dest_balance) = self
             .store
-            .transfer_between_groups(tenant_id, source_org_id, dest_org_id, Nanos::new(amount))
+            .transfer_between_orgs(tenant_id, source_org_id, dest_org_id, Nanos::new(amount))
             .await
             .map_err(to_status)?;
 

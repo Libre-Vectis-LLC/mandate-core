@@ -19,7 +19,7 @@ pub trait EventWriter {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier owning this event
-    /// * `org_id` - The group identifier scoping this event
+    /// * `org_id` - The org IDentifier scoping this event
     /// * `event_bytes` - Canonical, signed, serialized event bytes
     ///
     /// # Returns
@@ -42,7 +42,7 @@ pub trait EventWriter {
     ) -> Result<(EventId, SequenceNo), StorageError>;
 }
 
-/// Read-only grouping helper to support backend-specific implementations (e.g., Postgres).
+/// Read-only org helper to support backend-specific implementations (e.g., Postgres).
 #[async_trait]
 pub trait EventReader {
     /// Stream events for a group in deterministic append order.
@@ -53,7 +53,7 @@ pub trait EventReader {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `after_sequence` - Optional anchor; if `None`, starts from the first event
     /// * `limit` - Maximum number of events to return
     ///
@@ -67,7 +67,7 @@ pub trait EventReader {
     /// # Invariants
     /// * Results are always ordered by increasing `SequenceNo`
     /// * No duplicates across successive calls with keyset pagination
-    async fn stream_group(
+    async fn stream_org(
         &self,
         tenant: TenantId,
         org_id: OrganizationId,
@@ -79,7 +79,7 @@ pub trait EventReader {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     /// * `id` - The event identifier
     ///
     /// # Returns
@@ -102,7 +102,7 @@ pub trait EventReader {
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
-    /// * `org_id` - The group identifier
+    /// * `org_id` - The org IDentifier
     ///
     /// # Returns
     /// The most recent `EventRecord` in append order.

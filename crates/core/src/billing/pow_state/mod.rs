@@ -1,6 +1,6 @@
-//! Group POW state machine for DOS defense.
+//! Organization POW state machine for DOS defense.
 //!
-//! Manages per-group POW requirements based on verification success/failure history.
+//! Manages per-org POW requirements based on verification success/failure history.
 //!
 //! # State Transitions
 //!

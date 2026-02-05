@@ -13,7 +13,7 @@ impl StorageFacade {
         tenant: TenantId,
         tg_group_id: &str,
     ) -> Result<OrganizationId, StorageError> {
-        self.groups.create_organization(tenant, tg_group_id).await
+        self.orgs.create_organization(tenant, tg_group_id).await
     }
 
     /// Get a group's metadata (tenant ID and Telegram group ID).
@@ -21,7 +21,7 @@ impl StorageFacade {
         &self,
         org_id: OrganizationId,
     ) -> Result<(TenantId, String), StorageError> {
-        self.groups.get_organization(org_id).await
+        self.orgs.get_organization(org_id).await
     }
 
     /// Set the owner's Nazgul public key for a group.
@@ -32,7 +32,7 @@ impl StorageFacade {
         org_id: OrganizationId,
         owner_pubkey: MasterPublicKey,
     ) -> Result<(), StorageError> {
-        self.groups.set_owner_pubkey(org_id, owner_pubkey).await
+        self.orgs.set_owner_pubkey(org_id, owner_pubkey).await
     }
 
     /// Get the owner's Nazgul public key for a group.
@@ -42,7 +42,7 @@ impl StorageFacade {
         &self,
         org_id: OrganizationId,
     ) -> Result<Option<MasterPublicKey>, StorageError> {
-        self.groups.get_owner_pubkey(org_id).await
+        self.orgs.get_owner_pubkey(org_id).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────

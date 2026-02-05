@@ -15,7 +15,7 @@ pub struct Cli {
         default_value = "http://127.0.0.1:48080"
     )]
     pub edge_url: String,
-    /// API token for group access.
+    /// API token for org access.
     #[arg(long, env = "MANDATE_API_TOKEN")]
     pub api_token: String,
     #[command(subcommand)]
@@ -26,7 +26,7 @@ pub struct Cli {
 pub enum Command {
     /// Stream all events and verify signature, chain, and vote key images.
     VerifyEvents {
-        /// Group ID (ULID).
+        /// Organization ID (ULID).
         #[arg(long)]
         org_id: String,
         /// Start sequence number (exclusive). Use -1 for full history.
@@ -49,7 +49,7 @@ pub enum Command {
             .args(["poll_id", "poll_event_ulid"])
     ))]
     ExportPollBundle {
-        /// Group ID (ULID).
+        /// Organization ID (ULID).
         #[arg(long)]
         org_id: String,
         /// Poll ID (from PollCreate payload). Requires full event history scan.
@@ -58,7 +58,7 @@ pub enum Command {
         /// Poll event ULID (from event metadata). Recommended for archived data.
         #[arg(long)]
         poll_event_ulid: Option<String>,
-        /// Group shared secret K_shared (hex, 32 bytes).
+        /// Organization shared secret K_shared (hex, 32 bytes).
         #[arg(long)]
         k_shared_hex: String,
         /// Output directory for bundle files.

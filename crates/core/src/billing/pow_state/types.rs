@@ -17,7 +17,7 @@ where
     Ok(normalize_max_multiplier(value))
 }
 
-/// Group POW configuration (set by group owner).
+/// Organization POW configuration (set by group owner).
 ///
 /// Controls when POW is triggered and how difficulty escalates/recovers.
 ///
@@ -239,7 +239,7 @@ impl UpgradeStrategy {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrgPowState {
-    /// Whether POW is currently required for this group.
+    /// Whether POW is currently required for this org.
     pub pow_required: bool,
 
     /// Current POW cost multiplier (1.0 = no POW, >1.0 = POW active).

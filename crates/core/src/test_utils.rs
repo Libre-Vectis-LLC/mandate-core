@@ -14,27 +14,27 @@ pub const TEST_MNEMONIC: &str =
 ///
 /// These are deterministic, well-formed ULIDs suitable for unit and integration tests.
 /// Using constants avoids magic strings and ensures test reproducibility.
-pub const TEST_GROUP_ID_STR: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+pub const TEST_ORG_ID_STR: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 pub const TEST_TENANT_ID_STR: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAQ";
 pub const TEST_EVENT_ULID_STR: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 /// Alternative test ULIDs for isolation tests requiring distinct identifiers.
-pub const TEST_GROUP_ID_STR_ALT1: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
-pub const TEST_GROUP_ID_STR_ALT2: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+pub const TEST_ORG_ID_STR_ALT1: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
+pub const TEST_ORG_ID_STR_ALT2: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 
 /// Construct a OrganizationId from a ULID string. Panics if invalid (test-only).
 pub fn test_org_id() -> OrganizationId {
-    OrganizationId(Ulid::from_string(TEST_GROUP_ID_STR).expect("static test ULID"))
+    OrganizationId(Ulid::from_string(TEST_ORG_ID_STR).expect("static test ULID"))
 }
 
 /// Construct an alternative OrganizationId for isolation tests.
 pub fn test_org_id_alt1() -> OrganizationId {
-    OrganizationId(Ulid::from_string(TEST_GROUP_ID_STR_ALT1).expect("static test ULID"))
+    OrganizationId(Ulid::from_string(TEST_ORG_ID_STR_ALT1).expect("static test ULID"))
 }
 
 /// Construct a second alternative OrganizationId for isolation tests.
 pub fn test_org_id_alt2() -> OrganizationId {
-    OrganizationId(Ulid::from_string(TEST_GROUP_ID_STR_ALT2).expect("static test ULID"))
+    OrganizationId(Ulid::from_string(TEST_ORG_ID_STR_ALT2).expect("static test ULID"))
 }
 
 /// Construct a TenantId from the standard test ULID string.
