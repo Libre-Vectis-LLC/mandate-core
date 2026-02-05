@@ -28,12 +28,12 @@ pub trait EventWriter {
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    /// * `StorageError::PreconditionFailed` - When tenant or group does not exist
+    /// * `StorageError::PreconditionFailed` - When tenant or org does not exist
     ///
     /// # Invariants
     /// * Events are immutable once appended
     /// * Sequence numbers are strictly increasing per `(tenant, org_id)` pair
-    /// * Single-writer assumption: concurrent appends for the same group are undefined
+    /// * Single-writer assumption: concurrent appends for the same org are undefined
     async fn append(
         &self,
         tenant: TenantId,
@@ -45,7 +45,7 @@ pub trait EventWriter {
 /// Read-only org helper to support backend-specific implementations (e.g., Postgres).
 #[async_trait]
 pub trait EventReader {
-    /// Stream events for a group in deterministic append order.
+    /// Stream events for an org in deterministic append order.
     ///
     /// This method supports keyset pagination using sequence numbers. Results are
     /// always ordered by increasing `SequenceNo`, enabling efficient forward iteration
@@ -61,7 +61,7 @@ pub trait EventReader {
     /// A vector of `EventRecord` tuples in ascending sequence order, potentially empty.
     ///
     /// # Errors
-    /// * `StorageError::NotFound` - When tenant or group does not exist
+    /// * `StorageError::NotFound` - When tenant or org does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
@@ -95,7 +95,7 @@ pub trait EventReader {
         id: &EventId,
     ) -> Result<EventRecord, StorageError>;
 
-    /// Retrieve the most recent event for a group.
+    /// Retrieve the most recent event for an org.
     ///
     /// This is a shortcut for retrieving the event with the highest sequence number
     /// for the given `(tenant, org_id)` pair.
@@ -108,7 +108,7 @@ pub trait EventReader {
     /// The most recent `EventRecord` in append order.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Tail)` - When the group has no events yet
+    /// * `StorageError::NotFound(NotFound::Tail)` - When the org has no events yet
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn tail(
         &self,

@@ -58,7 +58,7 @@ pub enum TenantTokenError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotFound {
-    #[error("event {id:?} for tenant {tenant:?} group {org_id:?}")]
+    #[error("event {id:?} for tenant {tenant:?} org {org_id:?}")]
     Event {
         id: EventId,
         tenant: TenantId,
@@ -68,25 +68,25 @@ pub enum NotFound {
     Tenant { tenant: TenantId },
     #[error("organization {org_id:?}")]
     Organization { org_id: OrganizationId },
-    #[error("tail for tenant {tenant:?} group {org_id:?}")]
+    #[error("tail for tenant {tenant:?} org {org_id:?}")]
     Tail {
         tenant: TenantId,
         org_id: OrganizationId,
     },
-    #[error("ring {hash:?} for tenant {tenant:?} group {org_id:?}")]
+    #[error("ring {hash:?} for tenant {tenant:?} org {org_id:?}")]
     Ring {
         hash: RingHash,
         tenant: TenantId,
         org_id: OrganizationId,
     },
-    #[error("ring delta path from {from:?} to {to:?} for tenant {tenant:?} group {org_id:?}")]
+    #[error("ring delta path from {from:?} to {to:?} for tenant {tenant:?} org {org_id:?}")]
     RingDeltaPath {
         from: Option<RingHash>,
         to: RingHash,
         tenant: TenantId,
         org_id: OrganizationId,
     },
-    #[error("key blob for tenant {tenant:?} group {org_id:?} rage_pub {rage_pub:?}")]
+    #[error("key blob for tenant {tenant:?} org {org_id:?} rage_pub {rage_pub:?}")]
     KeyBlob {
         tenant: TenantId,
         org_id: OrganizationId,
@@ -96,13 +96,13 @@ pub enum NotFound {
     GiftCard { code: String },
     #[error("invite code {code}")]
     InviteCode { code: String },
-    #[error("access token blob for tenant {tenant:?} group {org_id:?} rage_pub {rage_pub:?}")]
+    #[error("access token blob for tenant {tenant:?} org {org_id:?} rage_pub {rage_pub:?}")]
     AccessTokenBlob {
         tenant: TenantId,
         org_id: OrganizationId,
         rage_pub: [u8; 32],
     },
-    #[error("edge access token for tenant {tenant:?} group {org_id:?}")]
+    #[error("edge access token for tenant {tenant:?} org {org_id:?}")]
     EdgeAccessToken {
         tenant: TenantId,
         org_id: OrganizationId,
@@ -119,7 +119,7 @@ pub enum IdempotencyErrorCode {
     InvalidArgument,
     /// Operation was rejected due to insufficient balance or other precondition.
     FailedPrecondition,
-    /// Resource (tenant, group, etc.) was not found.
+    /// Resource (tenant, org, etc.) was not found.
     NotFound,
     /// Request conflicts with existing state.
     AlreadyExists,

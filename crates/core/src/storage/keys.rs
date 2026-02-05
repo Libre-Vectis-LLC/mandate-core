@@ -8,7 +8,7 @@ use super::types::StorageError;
 
 /// Store for member key blobs, indexed by Rage public key.
 ///
-/// Keys are scoped by `(tenant, org_id, rage_pub)` to avoid cross-group and cross-tenant leaks.
+/// Keys are scoped by `(tenant, org_id, rage_pub)` to avoid cross-org and cross-tenant leaks.
 #[async_trait]
 pub trait KeyBlobStore {
     /// Insert multiple encrypted key blobs atomically.
@@ -26,7 +26,7 @@ pub trait KeyBlobStore {
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    /// * `StorageError::PreconditionFailed` - When tenant or group does not exist
+    /// * `StorageError::PreconditionFailed` - When tenant or org does not exist
     ///
     /// # Invariants
     /// * All blobs are inserted atomically (all or nothing)
@@ -98,7 +98,7 @@ pub trait AccessTokenBlobStore {
 /// Edge can fetch it via `GetEdgeAccessToken` RPC.
 #[async_trait]
 pub trait EdgeAccessTokenStore {
-    /// Upsert the current access token for a group.
+    /// Upsert the current access token for an org.
     ///
     /// The previous token is preserved for grace-period validation at Edge.
     async fn upsert(
@@ -111,7 +111,7 @@ pub trait EdgeAccessTokenStore {
         rotated_at_ms: u64,
     ) -> Result<(), StorageError>;
 
-    /// Get the current and previous access tokens for a group.
+    /// Get the current and previous access tokens for an org.
     ///
     /// Returns `(current_token, previous_token, rotated_at_ms)`.
     async fn get(

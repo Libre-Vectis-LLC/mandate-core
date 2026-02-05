@@ -1,4 +1,4 @@
-//! Group metadata and member management.
+//! Organization metadata and member management.
 
 use crate::ids::{MasterPublicKey, OrganizationId, TenantId};
 use async_trait::async_trait;
@@ -32,7 +32,7 @@ pub struct MemberInfo {
     pub joined_at_ms: i64,
 }
 
-/// Summary of a member's group membership.
+/// Summary of a member's org membership.
 /// This struct is returned by `list_organizations_for_member` for wallet restore flow.
 #[derive(Clone, Debug)]
 pub struct OrganizationMembershipInfo {
@@ -52,25 +52,25 @@ pub struct PendingMember {
 
 #[async_trait]
 pub trait OrganizationMetadataStore {
-    /// Create a new group record.
+    /// Create a new organization record.
     ///
     /// This method initializes a new org within a tenant's account and associates it
     /// with a Telegram group identifier.
     ///
     /// # Arguments
-    /// * `tenant` - The tenant identifier owning this group
+    /// * `tenant` - The tenant identifier owning this org
     /// * `tg_group_id` - The Telegram group ID (e.g., `-1001234567890`)
     ///
     /// # Returns
-    /// A newly generated `OrganizationId` for the created group.
+    /// A newly generated `OrganizationId` for the created organization.
     ///
     /// # Errors
-    /// * `StorageError::AlreadyExists` - When a group with this Telegram ID already exists
+    /// * `StorageError::AlreadyExists` - When an org with this Telegram ID already exists
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
     /// * org IDs are globally unique
-    /// * Each Telegram group ID maps to at most one Mandate group
+    /// * Each Telegram group ID maps to at most one Mandate org
     async fn create_organization(
         &self,
         tenant: TenantId,
@@ -86,7 +86,7 @@ pub trait OrganizationMetadataStore {
     /// A tuple of `(TenantId, tg_group_id)` containing the owning tenant and Telegram group ID.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the org does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_organization(
         &self,
@@ -104,7 +104,7 @@ pub trait OrganizationMetadataStore {
     /// * `owner_pubkey` - The owner's Nazgul master public key
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the org does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn set_owner_pubkey(
         &self,
@@ -121,7 +121,7 @@ pub trait OrganizationMetadataStore {
     /// The owner's `MasterPublicKey` if set, `None` if not yet configured.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the org does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_owner_pubkey(
         &self,

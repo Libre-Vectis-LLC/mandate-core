@@ -131,7 +131,7 @@ pub trait PollRingHashIndex {
     /// # Arguments
     /// * `tenant` - The tenant identifier
     /// * `org_id` - The org IDentifier
-    /// * `poll_id` - The poll identifier (unique within the group)
+    /// * `poll_id` - The poll identifier (unique within the org)
     /// * `ring_hash` - The ring hash at poll creation time
     ///
     /// # Returns

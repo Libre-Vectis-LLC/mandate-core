@@ -42,10 +42,10 @@ pub trait BillingStore: Send + Sync {
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
-    /// Transfer funds from tenant balance to a group's operational budget.
+    /// Transfer funds from tenant balance to an org's operational budget.
     ///
-    /// This method moves funds from the tenant's account to a specific group's budget,
-    /// which is used to pay for group operations (storage, compute, etc.).
+    /// This method moves funds from the tenant's account to a specific org's budget,
+    /// which is used to pay for org operations (storage, compute, etc.).
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
@@ -53,14 +53,14 @@ pub trait BillingStore: Send + Sync {
     /// * `amount` - Amount to transfer
     ///
     /// # Returns
-    /// The updated group balance after the transfer.
+    /// The updated org balance after the transfer.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
     /// * `StorageError::PreconditionFailed` - When tenant has insufficient balance
     ///
     /// # Invariants
-    /// * Transfers are atomic (tenant debit and group credit happen together)
+    /// * Transfers are atomic (tenant debit and org credit happen together)
     /// * Organization balance is always non-negative
     async fn transfer_to_organization(
         &self,
@@ -69,16 +69,16 @@ pub trait BillingStore: Send + Sync {
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
-    /// Retrieve the current operational budget balance for a group.
+    /// Retrieve the current operational budget balance for an org.
     ///
     /// # Arguments
     /// * `org_id` - The org IDentifier
     ///
     /// # Returns
-    /// The group's current balance.
+    /// The org's current balance.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the org does not exist
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn get_organization_balance(&self, org_id: OrganizationId)
         -> Result<Nanos, StorageError>;
@@ -97,20 +97,20 @@ pub trait BillingStore: Send + Sync {
     async fn get_tenant_balance(&self, tenant: TenantId)
         -> Result<TenantBalanceInfo, StorageError>;
 
-    /// Deduct funds from a group's operational budget.
+    /// Deduct funds from an org's operational budget.
     ///
-    /// This method is used to charge a group for resource consumption (verification, storage, etc.).
+    /// This method is used to charge an org for resource consumption (verification, storage, etc.).
     ///
     /// # Arguments
     /// * `org_id` - The org IDentifier
     /// * `amount` - Amount to deduct
     ///
     /// # Returns
-    /// The updated group balance after deduction.
+    /// The updated org balance after deduction.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Organization)` - When the group does not exist
-    /// * `StorageError::PreconditionFailed` - When group has insufficient balance
+    /// * `StorageError::NotFound(NotFound::Organization)` - When the org does not exist
+    /// * `StorageError::PreconditionFailed` - When org has insufficient balance
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
@@ -124,24 +124,24 @@ pub trait BillingStore: Send + Sync {
 
     /// Find a tenant by their Telegram user ID.
     ///
-    /// Returns the TenantId if found, regardless of whether they have any groups.
+    /// Returns the TenantId if found, regardless of whether they have any orgs.
     /// Use this for gift card redemption where we want to credit an existing tenant.
     async fn find_tenant_by_tg_user(
         &self,
         tg_user_id: &str,
     ) -> Result<Option<TenantId>, StorageError>;
 
-    /// Resolve a Telegram user ID to their associated tenant and group.
+    /// Resolve a Telegram user ID to their associated tenant and org.
     ///
     /// This method looks up the tenant record by the owner's Telegram user ID, then
-    /// finds the associated group. If the user owns multiple groups, the most recently
-    /// created group is returned.
+    /// finds the associated org. If the user owns multiple orgs, the most recently
+    /// created org is returned.
     ///
     /// # Arguments
     /// * `tg_user_id` - The Telegram user ID to resolve
     ///
     /// # Returns
-    /// `Some((TenantId, OrganizationId))` if found, `None` if no tenant or group exists.
+    /// `Some((TenantId, OrganizationId))` if found, `None` if no tenant or org exists.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
@@ -193,9 +193,9 @@ pub trait BillingStore: Send + Sync {
         ttl_secs: u64,
     ) -> Result<(), StorageError>;
 
-    /// Withdraw credits from group wallet back to tenant wallet.
+    /// Withdraw credits from org wallet back to tenant wallet.
     ///
-    /// This method moves funds from a group's operational budget back to the tenant's
+    /// This method moves funds from an org's operational budget back to the tenant's
     /// personal balance. This is the reverse operation of `transfer_to_organization`.
     ///
     /// # Arguments
@@ -208,11 +208,11 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    /// * `StorageError::PreconditionFailed` - When group has insufficient balance or group does not belong to tenant
-    /// * `StorageError::NotFound` - When tenant or group does not exist
+    /// * `StorageError::PreconditionFailed` - When org has insufficient balance or org does not belong to tenant
+    /// * `StorageError::NotFound` - When tenant or org does not exist
     ///
     /// # Invariants
-    /// * Withdrawals are atomic (group debit and tenant credit happen together)
+    /// * Withdrawals are atomic (org debit and tenant credit happen together)
     /// * Tenant balance is always non-negative
     async fn withdraw_from_org(
         &self,
@@ -221,13 +221,13 @@ pub trait BillingStore: Send + Sync {
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
-    /// Transfer credits between two group wallets (must be same tenant).
+    /// Transfer credits between two org wallets (must be same tenant).
     ///
-    /// This method moves funds from one group's operational budget to another group's
-    /// budget. Both groups must belong to the same tenant.
+    /// This method moves funds from one org's operational budget to another org's
+    /// budget. Both orgs must belong to the same tenant.
     ///
     /// # Arguments
-    /// * `tenant` - The tenant identifier (both groups must belong to this tenant)
+    /// * `tenant` - The tenant identifier (both orgs must belong to this tenant)
     /// * `source_org` - The source org IDentifier (funds withdrawn from here)
     /// * `dest_org` - The destination org IDentifier (funds deposited here)
     /// * `amount` - Amount to transfer
@@ -238,13 +238,13 @@ pub trait BillingStore: Send + Sync {
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    /// * `StorageError::PreconditionFailed` - When source group has insufficient balance or groups belong to different tenants
-    /// * `StorageError::NotFound` - When either group does not exist
+    /// * `StorageError::PreconditionFailed` - When source org has insufficient balance or orgs belong to different tenants
+    /// * `StorageError::NotFound` - When either org does not exist
     ///
     /// # Invariants
     /// * Transfers are atomic (source debit and destination credit happen together)
-    /// * Both group balances are always non-negative
-    /// * Both groups must belong to the same tenant
+    /// * Both org balances are always non-negative
+    /// * Both orgs must belong to the same tenant
     async fn transfer_between_orgs(
         &self,
         tenant: TenantId,

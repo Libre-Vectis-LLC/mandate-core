@@ -38,19 +38,19 @@ pub trait RingView {
         hash: &RingHash,
     ) -> Result<Arc<Ring>, StorageError>;
 
-    /// Retrieve the current (latest) ring for a group.
+    /// Retrieve the current (latest) ring for an org.
     ///
-    /// This method returns the ring corresponding to the most recent delta applied to the group.
+    /// This method returns the ring corresponding to the most recent delta applied to the org.
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
     /// * `org_id` - The org IDentifier
     ///
     /// # Returns
-    /// An `Arc<Ring>` representing the current group membership ring.
+    /// An `Arc<Ring>` representing the current org membership ring.
     ///
     /// # Errors
-    /// * `StorageError::NotFound(NotFound::Ring)` - When the group has no ring yet
+    /// * `StorageError::NotFound(NotFound::Ring)` - When the org has no ring yet
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn current_ring(
         &self,
@@ -93,9 +93,9 @@ pub trait RingView {
 /// Write-only interface for ring mutations (e.g., Postgres or in-memory log).
 #[async_trait]
 pub trait RingWriter {
-    /// Append a delta to the ring log, advancing the group's current ring.
+    /// Append a delta to the ring log, advancing the org's current ring.
     ///
-    /// This method applies a membership change (add or remove) to the group's ring and
+    /// This method applies a membership change (add or remove) to the org's ring and
     /// persists the delta to the log. The returned hash is the content-addressed hash
     /// of the new ring state.
     ///
@@ -109,7 +109,7 @@ pub trait RingWriter {
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
-    /// * `StorageError::PreconditionFailed` - When tenant or group does not exist
+    /// * `StorageError::PreconditionFailed` - When tenant or org does not exist
     ///
     /// # Invariants
     /// * Deltas are applied in strict append order
