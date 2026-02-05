@@ -1,6 +1,6 @@
 use crate::grpc::inmemory::{
-    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryOrgs,
-    InMemoryKeyBlobs, InMemoryPendingMembers, InMemoryPollRingHashes, InMemoryRings,
+    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryKeyBlobs,
+    InMemoryOrgs, InMemoryPendingMembers, InMemoryPollRingHashes, InMemoryRings,
     InMemoryTenantTokens, InMemoryVoteKeyImages,
 };
 use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};

@@ -124,9 +124,7 @@ impl StorageFacade {
         org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError> {
-        self.billing
-            .withdraw_from_org(tenant, org_id, amount)
-            .await
+        self.billing.withdraw_from_org(tenant, org_id, amount).await
     }
 
     /// Transfer credits between two group wallets.

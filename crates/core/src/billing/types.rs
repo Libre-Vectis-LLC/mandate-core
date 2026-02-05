@@ -304,7 +304,10 @@ mod tests {
         assert!(msg.contains("50"));
 
         let err = TransferError::OrgNotOwned("org_123".to_string());
-        assert_eq!(format!("{}", err), "organization org_123 not owned by tenant");
+        assert_eq!(
+            format!("{}", err),
+            "organization org_123 not owned by tenant"
+        );
 
         let err = TransferError::InvalidAmount("amount must be positive".to_string());
         assert_eq!(

@@ -352,8 +352,7 @@ impl BillingStore for InMemoryBilling {
 
         // Get source group
         let source_record =
-            orgs
-                .get(&source_org)
+            orgs.get(&source_org)
                 .ok_or(StorageError::NotFound(NotFound::Organization {
                     org_id: source_org,
                 }))?;
@@ -367,8 +366,7 @@ impl BillingStore for InMemoryBilling {
 
         // Get destination group
         let dest_record =
-            orgs
-                .get(&dest_org)
+            orgs.get(&dest_org)
                 .ok_or(StorageError::NotFound(NotFound::Organization {
                     org_id: dest_org,
                 }))?;
