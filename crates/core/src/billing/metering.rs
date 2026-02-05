@@ -101,7 +101,7 @@ pub trait EgressMeter: Send + Sync {
     /// This should be called **before** executing the actual data transfer.
     ///
     /// # Arguments
-    /// * `org_id` - The group being charged (as string for crate independence)
+    /// * `org_id` - The org being charged (as string for crate independence)
     /// * `estimated_bytes` - Estimated data size to be transferred
     ///
     /// # Returns
@@ -116,7 +116,7 @@ pub trait EgressMeter: Send + Sync {
     /// This should be called **after** successfully sending data to the client.
     ///
     /// # Arguments
-    /// * `org_id` - The group being charged
+    /// * `org_id` - The org being charged
     /// * `actual_bytes` - Actual data size transferred
     ///
     /// # Returns
@@ -248,7 +248,7 @@ mod tests {
         let meter = default_egress_meter();
 
         // Default meter should be NoOp, always succeeds
-        assert!(meter.check_egress("any_group", 999_999_999).await.is_ok());
-        assert!(meter.record_egress("any_group", 999_999_999).await.is_ok());
+        assert!(meter.check_egress("any_org", 999_999_999).await.is_ok());
+        assert!(meter.record_egress("any_org", 999_999_999).await.is_ok());
     }
 }

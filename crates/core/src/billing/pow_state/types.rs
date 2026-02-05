@@ -17,7 +17,7 @@ where
     Ok(normalize_max_multiplier(value))
 }
 
-/// Organization POW configuration (set by group owner).
+/// Organization POW configuration (set by org owner).
 ///
 /// Controls when POW is triggered and how difficulty escalates/recovers.
 ///
@@ -224,7 +224,7 @@ impl UpgradeStrategy {
     }
 }
 
-/// Current POW state for a group.
+/// Current POW state for an org.
 ///
 /// Tracks whether POW is required and at what difficulty level.
 ///

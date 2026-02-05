@@ -18,7 +18,7 @@ impl OrgPowState {
     ///
     /// # Parameters
     ///
-    /// - `config`: Group POW configuration
+    /// - `config`: Org POW configuration
     ///
     /// # Examples
     ///
@@ -71,7 +71,7 @@ impl OrgPowState {
     ///
     /// # Parameters
     ///
-    /// - `config`: Group POW configuration
+    /// - `config`: Org POW configuration
     ///
     /// # Examples
     ///

@@ -61,8 +61,8 @@ impl Add for AbstractResourceUnits {
 
 /// Entity that holds a balance.
 ///
-/// Balances can be held by tenants (account-level) or groups (project-level).
-/// Groups must transfer funds from their tenant before performing operations.
+/// Balances can be held by tenants (account-level) or orgs (project-level).
+/// Orgs must transfer funds from their tenant before performing operations.
 ///
 /// # Examples
 ///
@@ -70,7 +70,7 @@ impl Add for AbstractResourceUnits {
 /// use mandate_core::billing::BalanceHolder;
 ///
 /// let tenant = BalanceHolder::Tenant("tenant_123".to_string());
-/// let group = BalanceHolder::Organization("org_abc".to_string());
+/// let org = BalanceHolder::Organization("org_abc".to_string());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BalanceHolder {

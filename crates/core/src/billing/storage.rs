@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Per-group storage usage record.
+/// Per-org storage usage record.
 ///
 /// Tracks storage consumption across different data types within an organization.
 ///
@@ -38,7 +38,7 @@ pub struct OrgStorageUsage {
     /// Organization ID this usage belongs to.
     pub org_id: String,
 
-    /// Tenant ID that owns this group.
+    /// Tenant ID that owns this org.
     pub tenant_id: String,
 
     /// Total bytes used by event data.
@@ -117,7 +117,7 @@ impl OrgStorageUsage {
     }
 }
 
-/// Storage status for a group based on balance and usage.
+/// Storage status for an org based on balance and usage.
 ///
 /// Determines whether the org can accept new writes and how long until
 /// suspension or deletion.
@@ -135,16 +135,16 @@ impl OrgStorageUsage {
 /// ```
 /// use mandate_core::billing::OrgStorageStatus;
 ///
-/// // Group with sufficient balance
+/// // Org with sufficient balance
 /// let status = OrgStorageStatus::Normal;
 ///
-/// // Group with low balance
+/// // Org with low balance
 /// let status = OrgStorageStatus::Warning { days_remaining: 15 };
 ///
-/// // Group with zero balance
+/// // Org with zero balance
 /// let status = OrgStorageStatus::Suspended;
 ///
-/// // Group pending deletion
+/// // Org pending deletion
 /// let status = OrgStorageStatus::PendingDeletion { days_until_deletion: 20 };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

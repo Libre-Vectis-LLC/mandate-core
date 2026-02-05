@@ -37,7 +37,7 @@ pub enum KeyManagerError {
 
 const LABEL_IDENTITY: &[u8] = b"mandate-identity-v1";
 const LABEL_RAGE_MASTER: &[u8] = b"mandate-rage-master";
-const LABEL_GROUP_SHARED: &[u8] = b"mandate-org-shared-v1";
+const LABEL_ORG_SHARED: &[u8] = b"mandate-org-shared-v1";
 const LABEL_DELEGATE: &[u8] = b"mandate-delegate-signer-v1";
 const LABEL_MEMBER_SESSION: &[u8] = b"mandate-member-session-v1";
 const LABEL_EVENT_KEY: &[u8] = b"mandate-event-key-v1";
@@ -115,7 +115,7 @@ pub struct MasterNazgulKeyPair(pub NazgulKeyPair);
 #[derive(Clone, Debug)]
 pub struct DelegateNazgulKeyPair(pub NazgulKeyPair);
 
-/// Session keypair derived per (group, ring) for member signatures.
+/// Session keypair derived per (org, ring) for member signatures.
 #[derive(Clone, Debug)]
 pub struct SessionNazgulKeyPair(pub NazgulKeyPair);
 
@@ -211,11 +211,11 @@ impl KeyManager {
         id
     }
 
-    /// (Owner Only) Deterministically derive the Group Shared Secret ($K_{shared}$).
+    /// (Owner Only) Deterministically derive the Organization Shared Secret ($K_{shared}$).
     /// This key is distributed to members via "One Bucket Per Person".
     /// Path: HKDF(MasterSeed, "mandate-org-shared-v1" || OrganizationId)
     pub fn derive_org_shared_secret(&self, org_id: &OrganizationId) -> [u8; 32] {
-        let info = info(LABEL_GROUP_SHARED, &[&org_id.to_bytes()]);
+        let info = info(LABEL_ORG_SHARED, &[&org_id.to_bytes()]);
         KdfAlgorithm::Sha3_256.expand::<32>(&self.master_seed, &info)
     }
 
@@ -240,7 +240,7 @@ impl KeyManager {
     }
 }
 
-/// Helper to derive an Event Ephemeral Identity ($K_{event}$) from the Group Shared Secret.
+/// Helper to derive an Event Ephemeral Identity ($K_{event}$) from the Organization Shared Secret.
 /// Path: HKDF(SharedSecret, ULID)
 /// Returns a full RageIdentity, which can act as both Sender (encrypt) and Receiver (decrypt).
 pub fn derive_event_identity(shared_secret: &[u8; 32], event_ulid: &EventUlid) -> RageIdentity {
@@ -265,7 +265,7 @@ pub fn derive_poll_identity(shared_secret: &[u8; 32], poll_event_ulid: &EventUli
 ///
 /// This returns the same key material used by [`derive_poll_identity`], but as raw bytes
 /// instead of a RageIdentity. This allows auditors to decrypt a specific poll and its
-/// votes without needing K_shared (which would allow decryption of ALL group data).
+/// votes without needing K_shared (which would allow decryption of ALL org data).
 ///
 /// # Security
 ///
@@ -285,7 +285,7 @@ pub fn derive_poll_key_bytes(shared_secret: &[u8; 32], poll_event_ulid: &EventUl
     KdfAlgorithm::Sha3_256.expand::<32>(shared_secret, &info)
 }
 
-/// Encrypt the group-shared secret for a specific recipient (one bucket per person).
+/// Encrypt the org-shared secret for a specific recipient (one bucket per person).
 pub fn encrypt_shared_secret_for_recipient(
     shared_secret: &[u8; 32],
     recipient: &age::x25519::Recipient,
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_isolation() {
+    fn test_org_isolation() {
         let mut rng = rand::thread_rng();
         let (km, _) = KeyManager::new_random(&mut rng).unwrap();
         let g1 = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FAV");
@@ -463,7 +463,7 @@ mod tests {
         let s2 = km.derive_org_shared_secret(&g2);
         assert_ne!(s1, s2);
 
-        // Member Session Key Isolation (group + ring)
+        // Member Session Key Isolation (org + ring)
         let m1 = km.derive_member_session_key(&g1, &r1);
         let m2 = km.derive_member_session_key(&g2, &r1);
         let m3 = km.derive_member_session_key(&g1, &r2);

@@ -14,7 +14,7 @@ use crate::billing::{Nanos, TransferError, TransferReceipt};
 ///
 /// 1. All transfers must execute in database transactions
 /// 2. Transfer amounts must be > 0 and ≤ source balance
-/// 3. Groups can only transfer to same tenant.s orgs or back to tenant
+/// 3. Orgs can only transfer to same tenant's orgs or back to tenant
 /// 4. Complete audit logs must be maintained
 ///
 /// # Examples
