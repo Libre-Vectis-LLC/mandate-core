@@ -4,10 +4,10 @@ Mandate core provides audit-first primitives (hashing, signing, key derivation, 
 
 ## Hashing & IDs
 - Canonical JSON (sorted keys, no whitespace) with domain separation; SHA3-256 by default, SHA3-512 available when length is needed. Digest abstraction allows a future BLAKE3 swap without API breakage.
-- Strongly typed identifiers: `GroupId` / `TenantId` / `EventUlid` (ULID newtypes) and byte-based `EventId` / `ContentHash`.
+- Strongly typed identifiers: `OrganizationId` / `TenantId` / `EventUlid` (ULID newtypes) and byte-based `EventId` / `ContentHash`.
 
 ## Key Derivation & Encryption
-- HKDF-SHA3 helpers with labeled contexts: identities, group-shared secret (`K_shared`), delegate signer, member session (group + ring), event keys, and poll keys (VoteCast reuses the PollCreate ULID-derived key to avoid per-vote inflation).
+- HKDF-SHA3 helpers with labeled contexts: identities, group-shared secret (`K_shared`), delegate signer, member session (organization + ring), event keys, and poll keys (VoteCast reuses the PollCreate ULID-derived key to avoid per-vote inflation).
 - Public-only derivation mirrors private derivation via nazgul `Derivable`, so servers that hold only public keys can verify delegate/session keys without secrets.
 - Key blobs: “one bucket per person” helpers encrypt `K_shared` to a recipient’s rage public key with a versioned prefix check; pure logic, no I/O side effects.
 
@@ -21,19 +21,19 @@ Mandate core provides audit-first primitives (hashing, signing, key derivation, 
 
 ## Billing Semantics
 - Tenants hold a spendable balance in nanos; gift card redemption credits that balance.
-- Group budgets are funded by tenant transfers; `BillingStore` debits the tenant and credits the group in one transaction, rejecting overdrafts.
+- Organization budgets are funded by tenant transfers; `BillingStore` debits the tenant and credits the organization in one transaction, rejecting overdrafts.
 
 ## Ban & Anti-Replay Indices
 - `BanIndex` answers whether a key image is banned for a specific operation (`PostMessage`, `CreatePoll`, `CastVote`) based on `BanScope`.
-- `VoteKeyImageIndex` tracks `(tenant, group_id, poll_id, key_image)` reuse to prevent double voting; writers should update it atomically with event append.
+- `VoteKeyImageIndex` tracks `(tenant, org_id, poll_id, key_image)` reuse to prevent double voting; writers should update it atomically with event append.
 
-## Multi-Group Invariants
-- The external API boundary is `(tenant token, group_id)`: every RPC that reads or mutates group state must take a `group_id` and must never mix state across groups.
-- Rings are per group. Two groups may have identical membership sets (and therefore the same ring hash), but they are still distinct groups.
-- Key derivation is group-scoped:
-  - `K_shared` is derived from `group_id`, so event/poll encryption keys derived from `K_shared` inherit group isolation.
-  - Session signing keys are derived from `group_id || ring_hash`, so even identical rings across groups produce distinct session keys.
-- These invariants prevent cross-group privacy leaks and avoid derivation collisions in multi-group tenants.
+## Multi-Organization Invariants
+- The external API boundary is `(tenant token, org_id)`: every RPC that reads or mutates organization state must take an `org_id` and must never mix state across organizations.
+- Rings are per organization. Two organizations may have identical membership sets (and therefore the same ring hash), but they are still distinct organizations.
+- Key derivation is organization-scoped:
+  - `K_shared` is derived from `org_id`, so event/poll encryption keys derived from `K_shared` inherit organization isolation.
+  - Session signing keys are derived from `org_id || ring_hash`, so even identical rings across organizations produce distinct session keys.
+- These invariants prevent cross-organization privacy leaks and avoid derivation collisions in multi-organization tenants.
 
 ## Access After Ban (E2EE)
 - A removed member retains any prior `K_shared`, but cannot fetch new ciphertext after removal. Without the new ciphertext they cannot decrypt new events, even though old keys remain.
