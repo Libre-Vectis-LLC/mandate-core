@@ -21,7 +21,7 @@ pub(super) async fn list_members(
         }
     })?);
 
-    // Verify tenant owns the group
+    // Verify tenant owns the org
     let (org_tenant, _) = service
         .store
         .get_organization(org_id)
@@ -29,7 +29,7 @@ pub(super) async fn list_members(
         .map_err(to_status)?;
     if org_tenant != tenant {
         return Err(RpcError::NotFound {
-            resource: "group",
+            resource: "organization",
             id: format!("{}", org_id.0),
         }
         .into());

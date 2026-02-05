@@ -107,7 +107,7 @@ impl AuthService for AuthServiceImpl {
                 org_id: org_id.0.to_string(),
             })),
             None => Err(Status::not_found(format!(
-                "No tenant or group found for Telegram user: {}",
+                "No tenant or org found for Telegram user: {}",
                 body.tg_user_id
             ))),
         }

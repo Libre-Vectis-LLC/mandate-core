@@ -83,12 +83,12 @@ pub(crate) fn clamp_ring_limit(client_limit: u32) -> usize {
 pub(crate) fn to_status(err: crate::storage::StorageError) -> Status {
     match err {
         crate::storage::StorageError::NotFound(not_found) => {
-            // Never return internal debug identifiers (tenant/group/key bytes) to callers.
+            // Never return internal debug identifiers (tenant/org/key bytes) to callers.
             // Keep user-facing errors stable and non-enumerable.
             let (resource, id) = match not_found {
                 crate::storage::NotFound::Event { .. } => ("event", "not found"),
                 crate::storage::NotFound::Tenant { .. } => ("tenant", "not found"),
-                crate::storage::NotFound::Organization { .. } => ("group", "not found"),
+                crate::storage::NotFound::Organization { .. } => ("organization", "not found"),
                 crate::storage::NotFound::Tail { .. } => ("event_tail", "not found"),
                 crate::storage::NotFound::Ring { .. } => ("ring", "not found"),
                 crate::storage::NotFound::RingDeltaPath { .. } => ("ring_delta_path", "not found"),

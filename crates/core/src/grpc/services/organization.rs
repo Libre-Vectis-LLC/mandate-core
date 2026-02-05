@@ -100,11 +100,11 @@ impl OrganizationService for OrganizationServiceImpl {
             .await
             .map_err(to_status)?;
 
-        // Authorization check: verify authenticated tenant owns the group
+        // Authorization check: verify authenticated tenant owns the org
         if authenticated_tenant != org_tenant {
             return Err(RpcError::PermissionDenied {
-                resource: "group",
-                reason: "not authorized for requested group".into(),
+                resource: "organization",
+                reason: "not authorized for requested organization".into(),
             }
             .into());
         }
@@ -138,7 +138,7 @@ impl OrganizationService for OrganizationServiceImpl {
 
                 return Err(RpcError::FailedPrecondition {
                     operation: "set_owner_public_key",
-                    reason: "group ring already initialized".into(),
+                    reason: "organization ring already initialized".into(),
                 }
                 .into());
             }

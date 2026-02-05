@@ -73,7 +73,7 @@ impl BillingServiceImpl {
 
 #[tonic::async_trait]
 impl BillingService for BillingServiceImpl {
-    /// Transfer credits from tenant wallet to group wallet.
+    /// Transfer credits from tenant wallet to org wallet.
     ///
     /// # Authentication
     ///

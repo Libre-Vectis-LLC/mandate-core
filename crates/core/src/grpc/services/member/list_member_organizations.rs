@@ -31,8 +31,8 @@ pub(super) async fn list_member_organizations(
         body.filter_status.as_deref()
     };
 
-    // Query groups for this member
-    let (groups, next_page, total_count) = service
+    // Query orgs for this member
+    let (orgs, next_page, total_count) = service
         .store
         .list_organizations_for_member(
             tenant,
@@ -51,7 +51,7 @@ pub(super) async fn list_member_organizations(
         .map_err(to_status)?;
 
     // Convert to proto messages
-    let proto_groups = groups
+    let proto_orgs = orgs
         .into_iter()
         .map(|g| OrganizationMembership {
             org_id: g.org_id.to_string(),
@@ -61,7 +61,7 @@ pub(super) async fn list_member_organizations(
         .collect();
 
     Ok(Response::new(ListMemberOrganizationsResponse {
-        orgs: proto_groups,
+        orgs: proto_orgs,
         next_page_token: next_page.map(|value| PageToken { value }),
         total_count,
     }))

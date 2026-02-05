@@ -165,7 +165,7 @@ pub fn make_bot_secret_interceptor(
         req.extensions_mut().insert(provided);
 
         // Tenant context is optional at interceptor level - individual methods
-        // that require it (e.g., GroupService) should validate presence.
+        // that require it (e.g., OrganizationService) should validate presence.
         if let Ok(tenant_id) = extract_tenant_id(&req) {
             req.extensions_mut().insert(tenant_id);
         }
