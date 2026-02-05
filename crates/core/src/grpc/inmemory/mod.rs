@@ -70,21 +70,21 @@ mod tests {
     async fn ring_writer_roundtrip() {
         let rings = InMemoryRings::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = OrganizationId(ulid::Ulid::new());
+        let org = OrganizationId(ulid::Ulid::new());
 
         let h1 = rings
-            .append_delta(tenant, group, crate::ring_log::RingDelta::Add(mpk(b"a")))
+            .append_delta(tenant, org, crate::ring_log::RingDelta::Add(mpk(b"a")))
             .await
             .expect("append should succeed");
         let ring = rings
-            .current_ring(tenant, group)
+            .current_ring(tenant, org)
             .await
             .expect("ring exists");
         assert_eq!(ring_hash_sha3_256(&ring), h1);
 
         // Path from scratch to current should contain founder delta.
         let path = rings
-            .ring_delta_path(tenant, group, None, h1)
+            .ring_delta_path(tenant, org, None, h1)
             .await
             .expect("delta path should exist");
         assert_eq!(path.deltas.len(), 1);
@@ -94,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn pending_members_only_list_pending_after_ring_add() {
         let tenant = TenantId(ulid::Ulid::new());
-        let group = OrganizationId(ulid::Ulid::new());
+        let org = OrganizationId(ulid::Ulid::new());
         let pending = Arc::new(InMemoryPendingMembers::new());
         let events = InMemoryEvents::new(
             Arc::new(InMemoryBanIndex::new()),
@@ -104,19 +104,19 @@ mod tests {
 
         let member_key = MasterPublicKey([0x11; 32]);
         pending
-            .submit(tenant, group, "tg-user", member_key, [0x22; 32])
+            .submit(tenant, org, "tg-user", member_key, [0x22; 32])
             .await
             .expect("pending submit");
 
         let event = Event {
             event_ulid: EventUlid(ulid::Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            org_id: group,
+            org_id: org,
             sequence_no: None,
             processed_at: 0,
             serialization_version: 1,
             event_type: EventType::RingUpdate(RingUpdate {
-                org_id: group,
+                org_id: org,
                 ring_hash: RingHash([7u8; 32]),
                 operations: vec![RingOperation::AddMember {
                     public_key: member_key,
@@ -129,21 +129,21 @@ mod tests {
         events
             .append(
                 tenant,
-                group,
+                org,
                 serde_json::to_vec(&event).expect("serialize").into(),
             )
             .await
             .expect("append event");
 
         let (members, _) = pending
-            .list(tenant, group, 10, None)
+            .list(tenant, org, 10, None)
             .await
             .expect("list pending");
         assert!(members.is_empty());
     }
 
     #[tokio::test]
-    async fn rings_are_scoped_by_group() {
+    async fn rings_are_scoped_by_org() {
         let rings = InMemoryRings::new();
         let tenant = TenantId(ulid::Ulid::new());
         let g1 = OrganizationId(ulid::Ulid::new());
@@ -190,7 +190,7 @@ mod tests {
     async fn ban_index_respects_scope_and_revoke() {
         let ban_index = InMemoryBanIndex::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = OrganizationId(ulid::Ulid::new());
+        let org = OrganizationId(ulid::Ulid::new());
         let key_image = RistrettoPoint::default();
         let ban_event_id = EventId([42u8; 32]);
 
@@ -199,7 +199,7 @@ mod tests {
         ban_index
             .record_ban(
                 tenant,
-                group,
+                org,
                 key_image,
                 crate::event::BanScope::BanVote,
                 ban_event_id,
@@ -208,13 +208,13 @@ mod tests {
             .expect("ban recorded");
 
         let banned_vote = ban_index
-            .is_banned(tenant, group, &key_image, BannedOperation::CastVote)
+            .is_banned(tenant, org, &key_image, BannedOperation::CastVote)
             .await
             .expect("ban check");
         assert!(banned_vote);
 
         let banned_post = ban_index
-            .is_banned(tenant, group, &key_image, BannedOperation::PostMessage)
+            .is_banned(tenant, org, &key_image, BannedOperation::PostMessage)
             .await
             .expect("ban check");
         assert!(!banned_post);
@@ -222,7 +222,7 @@ mod tests {
         ban_index.revoke_ban(ban_event_id).expect("ban revoked");
 
         let banned_after = ban_index
-            .is_banned(tenant, group, &key_image, BannedOperation::CastVote)
+            .is_banned(tenant, org, &key_image, BannedOperation::CastVote)
             .await
             .expect("ban check");
         assert!(!banned_after);
@@ -232,28 +232,28 @@ mod tests {
     async fn vote_key_images_block_duplicates() {
         let vote_index = InMemoryVoteKeyImages::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = OrganizationId(ulid::Ulid::new());
+        let org = OrganizationId(ulid::Ulid::new());
         let key_image = RistrettoPoint::default();
         let poll_id = "poll-1";
 
         let used = vote_index
-            .is_used(tenant, group, poll_id, &key_image)
+            .is_used(tenant, org, poll_id, &key_image)
             .await
             .expect("check");
         assert!(!used);
 
         vote_index
-            .record_vote(tenant, group, poll_id, key_image)
+            .record_vote(tenant, org, poll_id, key_image)
             .expect("record vote");
 
         let used = vote_index
-            .is_used(tenant, group, poll_id, &key_image)
+            .is_used(tenant, org, poll_id, &key_image)
             .await
             .expect("check");
         assert!(used);
 
         let err = vote_index
-            .record_vote(tenant, group, poll_id, key_image)
+            .record_vote(tenant, org, poll_id, key_image)
             .expect_err("duplicate vote");
         assert!(matches!(
             err,
@@ -262,13 +262,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn billing_transfer_updates_group_balance() {
+    async fn billing_transfer_updates_org_balance() {
         let tenant = TenantId(ulid::Ulid::new());
         let orgs = InMemoryOrgs::new();
         let org_id = orgs
             .create_organization(tenant, "tg-group")
             .await
-            .expect("group created");
+            .expect("org created");
         let billing = InMemoryBilling::new(orgs.shared());
 
         let balance = billing
@@ -297,7 +297,7 @@ mod tests {
         let org_id = orgs
             .create_organization(tenant, "tg-group")
             .await
-            .expect("group created");
+            .expect("org created");
         let billing = InMemoryBilling::new(orgs.shared());
 
         billing
@@ -320,14 +320,14 @@ mod tests {
     async fn ban_index_counts_bans_per_ring_hash() {
         let ban_index = InMemoryBanIndex::new();
         let tenant = TenantId(ulid::Ulid::new());
-        let group = OrganizationId(ulid::Ulid::new());
+        let org = OrganizationId(ulid::Ulid::new());
 
         let ring_hash_a = RingHash([1u8; 32]);
         let ring_hash_b = RingHash([2u8; 32]);
 
         // Initially, count should be 0
         let count_a = ban_index
-            .count_bans_for_ring(tenant, group, &ring_hash_a)
+            .count_bans_for_ring(tenant, org, &ring_hash_a)
             .await
             .expect("count query");
         assert_eq!(count_a, 0, "should have 0 bans initially");
@@ -339,7 +339,7 @@ mod tests {
             ban_index
                 .record_ban(
                     tenant,
-                    group,
+                    org,
                     key_image,
                     crate::event::BanScope::BanAll,
                     event_id,
@@ -350,14 +350,14 @@ mod tests {
 
         // Count should be 3 for ring_hash_a
         let count_a = ban_index
-            .count_bans_for_ring(tenant, group, &ring_hash_a)
+            .count_bans_for_ring(tenant, org, &ring_hash_a)
             .await
             .expect("count query");
         assert_eq!(count_a, 3, "should have 3 bans for ring_hash_a");
 
         // Count should be 0 for ring_hash_b (different ring)
         let count_b = ban_index
-            .count_bans_for_ring(tenant, group, &ring_hash_b)
+            .count_bans_for_ring(tenant, org, &ring_hash_b)
             .await
             .expect("count query");
         assert_eq!(count_b, 0, "should have 0 bans for ring_hash_b");
@@ -368,7 +368,7 @@ mod tests {
         ban_index
             .record_ban(
                 tenant,
-                group,
+                org,
                 key_image_b,
                 crate::event::BanScope::BanPost,
                 event_id_b,
@@ -378,11 +378,11 @@ mod tests {
 
         // Verify counts are independent
         let count_a = ban_index
-            .count_bans_for_ring(tenant, group, &ring_hash_a)
+            .count_bans_for_ring(tenant, org, &ring_hash_a)
             .await
             .expect("count query");
         let count_b = ban_index
-            .count_bans_for_ring(tenant, group, &ring_hash_b)
+            .count_bans_for_ring(tenant, org, &ring_hash_b)
             .await
             .expect("count query");
 

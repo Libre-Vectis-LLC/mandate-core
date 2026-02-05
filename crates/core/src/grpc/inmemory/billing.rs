@@ -154,7 +154,7 @@ impl BillingStore for InMemoryBilling {
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
         if record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
-                "group does not belong to tenant".into(),
+                "org does not belong to tenant".into(),
             ));
         }
 
@@ -244,7 +244,7 @@ impl BillingStore for InMemoryBilling {
         };
         drop(tg_map);
 
-        // 2. Find the first group owned by this tenant
+        // 2. Find the first org owned by this tenant
         // (In production, we might want to return the most recently created one)
         let orgs = self.orgs.lock();
         let org_id = orgs.iter().find_map(|(gid, record)| {
@@ -301,21 +301,21 @@ impl BillingStore for InMemoryBilling {
             .get_mut(&org_id)
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
 
-        // Verify group belongs to tenant
+        // Verify org belongs to tenant
         if org_record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
-                "group does not belong to tenant".into(),
+                "org does not belong to tenant".into(),
             ));
         }
 
-        // Check group has sufficient balance
+        // Check org has sufficient balance
         if org_record.balance_nanos < delta {
             return Err(StorageError::PreconditionFailed(
-                "insufficient group balance".into(),
+                "insufficient org balance".into(),
             ));
         }
 
-        // Deduct from group
+        // Deduct from org
         org_record.balance_nanos -= delta;
 
         // Release orgs lock before acquiring tenants lock
@@ -350,39 +350,39 @@ impl BillingStore for InMemoryBilling {
 
         let mut orgs = self.orgs.lock();
 
-        // Get source group
+        // Get source org
         let source_record =
             orgs.get(&source_org)
                 .ok_or(StorageError::NotFound(NotFound::Organization {
                     org_id: source_org,
                 }))?;
 
-        // Verify source group belongs to tenant
+        // Verify source org belongs to tenant
         if source_record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
-                "source group does not belong to tenant".into(),
+                "source org does not belong to tenant".into(),
             ));
         }
 
-        // Get destination group
+        // Get destination org
         let dest_record =
             orgs.get(&dest_org)
                 .ok_or(StorageError::NotFound(NotFound::Organization {
                     org_id: dest_org,
                 }))?;
 
-        // Verify destination group belongs to tenant
+        // Verify destination org belongs to tenant
         if dest_record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
-                "destination group does not belong to tenant".into(),
+                "destination org does not belong to tenant".into(),
             ));
         }
 
-        // Check source group has sufficient balance
+        // Check source org has sufficient balance
         let source_balance = source_record.balance_nanos;
         if source_balance < delta {
             return Err(StorageError::PreconditionFailed(
-                "insufficient source group balance".into(),
+                "insufficient source org balance".into(),
             ));
         }
 

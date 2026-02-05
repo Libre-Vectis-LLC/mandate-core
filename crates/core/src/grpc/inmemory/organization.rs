@@ -18,7 +18,7 @@ impl InMemoryOrgs {
         Self::default()
     }
 
-    /// Returns a shared reference to the internal group map.
+    /// Returns a shared reference to the internal org map.
     ///
     /// This is primarily used for constructing `InMemoryBilling` in tests.
     pub fn shared(&self) -> Arc<Mutex<OrgMap>> {
@@ -29,10 +29,10 @@ impl InMemoryOrgs {
 /// In-memory organization metadata record.
 ///
 /// This type is exposed publicly to support test infrastructure that needs
-/// to share group maps between `InMemoryOrgs` and `InMemoryBilling`.
+/// to share org maps between `InMemoryOrgs` and `InMemoryBilling`.
 #[derive(Clone, Debug)]
 pub struct OrganizationRecord {
-    /// Tenant that owns this group.
+    /// Tenant that owns this org.
     pub tenant: TenantId,
     /// Telegram group ID.
     pub tg_group_id: String,
