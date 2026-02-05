@@ -4,10 +4,10 @@ use crate::storage::{PendingMember, StorageError};
 
 impl StorageFacade {
     // ─────────────────────────────────────────────────────────────────────────
-    // Group methods
+    // Organization methods
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Create a new group.
+    /// Create a new organization.
     pub async fn create_organization(
         &self,
         tenant: TenantId,
@@ -16,7 +16,7 @@ impl StorageFacade {
         self.orgs.create_organization(tenant, tg_group_id).await
     }
 
-    /// Get a group's metadata (tenant ID and Telegram group ID).
+    /// Get an org's metadata (tenant ID and Telegram group ID).
     pub async fn get_organization(
         &self,
         org_id: OrganizationId,
@@ -24,7 +24,7 @@ impl StorageFacade {
         self.orgs.get_organization(org_id).await
     }
 
-    /// Set the owner's Nazgul public key for a group.
+    /// Set the owner's Nazgul public key for an org.
     ///
     /// This key is used for verifying owner/delegate signatures on admin events.
     pub async fn set_owner_pubkey(
@@ -35,7 +35,7 @@ impl StorageFacade {
         self.orgs.set_owner_pubkey(org_id, owner_pubkey).await
     }
 
-    /// Get the owner's Nazgul public key for a group.
+    /// Get the owner's Nazgul public key for an org.
     ///
     /// Returns `None` if the owner pubkey has not been set yet.
     pub async fn get_owner_pubkey(
@@ -63,7 +63,7 @@ impl StorageFacade {
             .await
     }
 
-    /// List pending members for a group.
+    /// List pending members for an org.
     pub async fn list_pending_members(
         &self,
         tenant: TenantId,
@@ -132,9 +132,9 @@ impl StorageFacade {
             .await
     }
 
-    /// List all groups that a member belongs to, by their Nazgul public key.
+    /// List all orgs that a member belongs to, by their Nazgul public key.
     ///
-    /// Used for wallet restore flow to discover group memberships.
+    /// Used for wallet restore flow to discover org memberships.
     pub async fn list_organizations_for_member(
         &self,
         tenant: TenantId,

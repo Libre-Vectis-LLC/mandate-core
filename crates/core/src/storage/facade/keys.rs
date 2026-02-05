@@ -70,7 +70,7 @@ impl StorageFacade {
     // Edge access token methods (enterprise-only)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Upsert edge access token for a group.
+    /// Upsert edge access token for an org.
     pub async fn upsert_edge_access_token(
         &self,
         tenant: TenantId,
@@ -96,7 +96,7 @@ impl StorageFacade {
             .await
     }
 
-    /// Get edge access token for a group.
+    /// Get edge access token for an org.
     pub async fn get_edge_access_token(
         &self,
         tenant: TenantId,

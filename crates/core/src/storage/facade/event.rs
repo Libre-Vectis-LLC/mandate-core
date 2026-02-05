@@ -7,7 +7,7 @@ impl StorageFacade {
     // Event methods
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Get the tail (most recent) event for a group.
+    /// Get the tail (most recent) event for an org.
     pub async fn event_tail(
         &self,
         tenant: TenantId,
@@ -16,7 +16,7 @@ impl StorageFacade {
         self.event_reader.tail(tenant, org_id).await
     }
 
-    /// Stream events for a group, starting after the given sequence number.
+    /// Stream events for an org, starting after the given sequence number.
     pub async fn stream_events(
         &self,
         tenant: TenantId,

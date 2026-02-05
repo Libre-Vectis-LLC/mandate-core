@@ -21,7 +21,7 @@ impl StorageFacade {
         self.ring_view.ring_by_hash(tenant, org_id, hash).await
     }
 
-    /// Get the current ring for a group.
+    /// Get the current ring for an org.
     pub async fn current_ring(
         &self,
         tenant: TenantId,

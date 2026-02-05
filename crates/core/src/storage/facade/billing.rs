@@ -39,7 +39,7 @@ impl StorageFacade {
             .await
     }
 
-    /// Transfer funds from tenant balance to a group's budget.
+    /// Transfer funds from tenant balance to an org's budget.
     pub async fn transfer_to_organization(
         &self,
         tenant: TenantId,
@@ -51,7 +51,7 @@ impl StorageFacade {
             .await
     }
 
-    /// Get a group's current budget balance.
+    /// Get an org's current budget balance.
     pub async fn get_organization_balance(
         &self,
         org_id: OrganizationId,
@@ -69,7 +69,7 @@ impl StorageFacade {
 
     /// Find a tenant by their Telegram user ID.
     ///
-    /// Returns the TenantId if found, regardless of whether they have any groups.
+    /// Returns the TenantId if found, regardless of whether they have any orgs.
     pub async fn find_tenant_by_tg_user(
         &self,
         tg_user_id: &str,
@@ -77,9 +77,9 @@ impl StorageFacade {
         self.billing.find_tenant_by_tg_user(tg_user_id).await
     }
 
-    /// Resolve a Telegram user ID to their associated tenant and group.
+    /// Resolve a Telegram user ID to their associated tenant and org.
     ///
-    /// Returns `None` if no tenant or group is found for this user.
+    /// Returns `None` if no tenant or org is found for this user.
     pub async fn resolve_telegram_user(
         &self,
         tg_user_id: &str,
@@ -114,10 +114,10 @@ impl StorageFacade {
             .await
     }
 
-    /// Withdraw credits from group wallet back to tenant wallet.
+    /// Withdraw credits from org wallet back to tenant wallet.
     ///
     /// This is the reverse operation of `transfer_to_organization`, moving funds from
-    /// a group's operational budget back to the tenant's personal balance.
+    /// an org's operational budget back to the tenant's personal balance.
     pub async fn withdraw_from_org(
         &self,
         tenant: TenantId,
@@ -127,9 +127,9 @@ impl StorageFacade {
         self.billing.withdraw_from_org(tenant, org_id, amount).await
     }
 
-    /// Transfer credits between two group wallets.
+    /// Transfer credits between two org wallets.
     ///
-    /// Both groups must belong to the same tenant. Returns a tuple of
+    /// Both orgs must belong to the same tenant. Returns a tuple of
     /// (source_balance, dest_balance) after the transfer.
     pub async fn transfer_between_orgs(
         &self,
