@@ -76,10 +76,7 @@ mod tests {
             .append_delta(tenant, org, crate::ring_log::RingDelta::Add(mpk(b"a")))
             .await
             .expect("append should succeed");
-        let ring = rings
-            .current_ring(tenant, org)
-            .await
-            .expect("ring exists");
+        let ring = rings.current_ring(tenant, org).await.expect("ring exists");
         assert_eq!(ring_hash_sha3_256(&ring), h1);
 
         // Path from scratch to current should contain founder delta.
