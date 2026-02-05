@@ -93,7 +93,7 @@ pub trait OrganizationMetadataStore {
         org_id: OrganizationId,
     ) -> Result<(TenantId, String), StorageError>;
 
-    /// Set the owner's Nazgul master public key for a group.
+    /// Set the owner's Nazgul master public key for an org.
     ///
     /// This key is used to:
     /// - Verify owner signatures on admin events (RingUpdate, BanCreate, BanRevoke)
@@ -112,7 +112,7 @@ pub trait OrganizationMetadataStore {
         owner_pubkey: MasterPublicKey,
     ) -> Result<(), StorageError>;
 
-    /// Retrieve the owner's Nazgul master public key for a group.
+    /// Retrieve the owner's Nazgul master public key for an org.
     ///
     /// # Arguments
     /// * `org_id` - The org IDentifier
@@ -285,21 +285,21 @@ pub trait PendingMemberStore {
         filter_status: Option<&str>,
     ) -> Result<(Vec<MemberInfo>, Option<String>, u32), StorageError>;
 
-    /// List all groups that a member belongs to, by their Nazgul public key.
+    /// List all orgs that a member belongs to, by their Nazgul public key.
     ///
     /// This method is used for wallet restore flow where the client needs to discover
-    /// its group memberships after recovering from a seed phrase.
+    /// its org memberships after recovering from a seed phrase.
     ///
     /// # Arguments
     /// * `tenant` - The tenant identifier
     /// * `nazgul_pub` - The member's Nazgul master public key (32 bytes)
-    /// * `limit` - Maximum number of groups to return
+    /// * `limit` - Maximum number of orgs to return
     /// * `page_token` - Optional continuation token from a previous call
     /// * `filter_status` - Optional filter by membership status (if None, returns only "approved")
     ///
     /// # Returns
-    /// A tuple of `(groups, next_page_token, total_count)` where `next_page_token` is `None`
-    /// if no more results exist. `total_count` is the total number of groups matching criteria.
+    /// A tuple of `(orgs, next_page_token, total_count)` where `next_page_token` is `None`
+    /// if no more results exist. `total_count` is the total number of orgs matching criteria.
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
