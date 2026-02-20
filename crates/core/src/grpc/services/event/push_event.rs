@@ -40,6 +40,20 @@ impl EventServiceImpl {
                 reason: format!("invalid JSON payload: {e}"),
             })?;
 
+        // Verify tenant owns the organization referenced by this event
+        let (org_tenant, _) = self
+            .store
+            .get_organization(event.org_id)
+            .await
+            .map_err(to_status)?;
+        if tenant != org_tenant {
+            return Err(RpcError::NotFound {
+                resource: "organization",
+                id: "not found".into(),
+            }
+            .into());
+        }
+
         // Validate poll_id length for poll/vote events to prevent resource exhaustion
         let max_id_len = max_poll_id_length();
         match &event.event_type {

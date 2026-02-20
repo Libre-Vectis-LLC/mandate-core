@@ -25,6 +25,17 @@ impl EventServiceImpl {
                 reason: e.to_string(),
             }
         })?);
+
+        // Verify tenant owns the requested organization
+        let (org_tenant, _) = self.store.get_organization(org_id).await.map_err(to_status)?;
+        if tenant != org_tenant {
+            return Err(crate::rpc::RpcError::NotFound {
+                resource: "organization",
+                id: "not found".into(),
+            }
+            .into());
+        }
+
         let cursor = if body.start_sequence_no < 0 {
             None
         } else {

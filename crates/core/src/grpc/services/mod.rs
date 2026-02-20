@@ -200,12 +200,30 @@ pub(crate) async fn extract_tenant_id<T>(
 mod tests {
     use super::*;
     use crate::grpc::wiring::CoreServices;
-    use crate::ids::TenantId;
+    use crate::ids::{OrganizationId, TenantId};
     use mandate_proto::mandate::v1::event_service_server::EventService;
+    use mandate_proto::mandate::v1::organization_service_server::OrganizationService;
     use mandate_proto::mandate::v1::storage_service_server::StorageService;
     use mandate_proto::mandate::v1::{
-        KeyBlob, PushEventRequest, RagePublicKey, UploadKeyBlobsRequest,
+        CreateOrganizationRequest, KeyBlob, PushEventRequest, RagePublicKey, UploadKeyBlobsRequest,
     };
+
+    /// Create an organization owned by the given tenant for tests that need BOLA checks.
+    async fn create_test_org(services: &CoreServices, tenant: TenantId) -> OrganizationId {
+        let mut req = Request::new(CreateOrganizationRequest {
+            tenant_id: tenant.0.to_string(),
+            tg_group_id: "test-group".to_string(),
+        });
+        req.extensions_mut().insert(tenant);
+        let resp = services
+            .organization
+            .create_organization(req)
+            .await
+            .expect("create test org");
+        OrganizationId(
+            ulid::Ulid::from_string(&resp.into_inner().org_id).expect("parse org_id"),
+        )
+    }
     use tonic::Code;
 
     #[tokio::test]
@@ -278,15 +296,16 @@ mod tests {
     async fn push_event_rejects_oversized_poll_id() {
         use crate::crypto::ciphertext::Ciphertext;
         use crate::event::{Event, EventType, Poll, PollQuestion, PollQuestionKind};
-        use crate::ids::{EventId, EventUlid, OrganizationId, RingHash, Ulid};
+        use crate::ids::{EventId, EventUlid, RingHash, Ulid};
 
         let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
+        let org_id = create_test_org(&services, tenant).await;
 
         // Create a poll event with an oversized poll_id
         let oversized_poll_id = "x".repeat(max_poll_id_length() + 1);
         let poll = Poll {
-            org_id: OrganizationId(Ulid::new()),
+            org_id,
             ring_hash: RingHash([0u8; 32]),
             poll_id: oversized_poll_id,
             questions: vec![PollQuestion {
@@ -326,15 +345,16 @@ mod tests {
     async fn push_event_rejects_oversized_message_content() {
         use crate::crypto::ciphertext::Ciphertext;
         use crate::event::{AnonymousMessage, Event, EventType};
-        use crate::ids::{EventId, EventUlid, OrganizationId, RingHash, Ulid};
+        use crate::ids::{EventId, EventUlid, RingHash, Ulid};
 
         let services = CoreServices::new_in_memory().expect("in-memory services");
         let tenant = TenantId(ulid::Ulid::new());
+        let org_id = create_test_org(&services, tenant).await;
 
         // Create a message event with oversized content (in UTF-8 characters)
         let oversized_content = "x".repeat(max_message_content_chars() + 1);
         let message = AnonymousMessage {
-            org_id: OrganizationId(Ulid::new()),
+            org_id,
             ring_hash: RingHash([0u8; 32]),
             message_id: Ulid::new().to_string(),
             content: Ciphertext(oversized_content.into_bytes()),
@@ -344,7 +364,7 @@ mod tests {
         let event = Event {
             event_ulid: EventUlid(Ulid::new()),
             previous_event_hash: EventId([0u8; 32]),
-            org_id: OrganizationId(Ulid::new()),
+            org_id,
             sequence_no: None,
             processed_at: 123,
             serialization_version: 1,

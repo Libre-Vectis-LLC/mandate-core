@@ -165,6 +165,9 @@ impl OrganizationService for OrganizationServiceImpl {
         &self,
         request: Request<GetOrganizationRequest>,
     ) -> Result<Response<GetOrganizationResponse>, Status> {
+        let authenticated_tenant =
+            super::extract_tenant_id(&request, &self.store).await?;
+
         let body = request.into_inner();
         let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
             RpcError::InvalidArgument {
@@ -173,11 +176,21 @@ impl OrganizationService for OrganizationServiceImpl {
             }
         })?);
 
-        let (tenant_id, _tg_group_id) = self
+        let (org_tenant, _tg_group_id) = self
             .store
             .get_organization(org_id)
             .await
             .map_err(to_status)?;
+
+        // Prevent cross-tenant enumeration: return NotFound instead of PermissionDenied
+        if authenticated_tenant != org_tenant {
+            return Err(RpcError::NotFound {
+                resource: "organization",
+                id: "not found".into(),
+            }
+            .into());
+        }
+
         let owner_pubkey = self
             .store
             .get_owner_pubkey(org_id)
@@ -186,7 +199,7 @@ impl OrganizationService for OrganizationServiceImpl {
 
         Ok(Response::new(GetOrganizationResponse {
             org_id: org_id.to_string(),
-            tenant_id: tenant_id.0.to_string(),
+            tenant_id: org_tenant.0.to_string(),
             owner_pubkey: owner_pubkey.map(|pk| crate::proto::master_pub_to_proto(&pk)),
         }))
     }

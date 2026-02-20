@@ -17,6 +17,7 @@ pub(super) async fn submit_pending_member(
     service: &MemberServiceImpl,
     request: Request<SubmitPendingMemberRequest>,
 ) -> Result<Response<SubmitPendingMemberResponse>, Status> {
+    let authenticated_tenant = extract_tenant_id(&request, &service.store).await?;
     let body = request.into_inner();
     let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
         RpcError::InvalidArgument {
@@ -25,11 +26,19 @@ pub(super) async fn submit_pending_member(
         }
     })?);
 
-    let (tenant, _) = service
+    let (org_tenant, _) = service
         .store
         .get_organization(org_id)
         .await
         .map_err(to_status)?;
+    if authenticated_tenant != org_tenant {
+        return Err(RpcError::NotFound {
+            resource: "organization",
+            id: "not found".into(),
+        }
+        .into());
+    }
+    let tenant = org_tenant;
 
     let nazgul_pub = body
         .nazgul_pub
