@@ -27,7 +27,11 @@ impl EventServiceImpl {
         })?);
 
         // Verify tenant owns the requested organization
-        let (org_tenant, _) = self.store.get_organization(org_id).await.map_err(to_status)?;
+        let (org_tenant, _) = self
+            .store
+            .get_organization(org_id)
+            .await
+            .map_err(to_status)?;
         if tenant != org_tenant {
             return Err(crate::rpc::RpcError::NotFound {
                 resource: "organization",

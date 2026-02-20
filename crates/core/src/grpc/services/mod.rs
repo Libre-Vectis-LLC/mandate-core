@@ -220,9 +220,7 @@ mod tests {
             .create_organization(req)
             .await
             .expect("create test org");
-        OrganizationId(
-            ulid::Ulid::from_string(&resp.into_inner().org_id).expect("parse org_id"),
-        )
+        OrganizationId(ulid::Ulid::from_string(&resp.into_inner().org_id).expect("parse org_id"))
     }
     use tonic::Code;
 

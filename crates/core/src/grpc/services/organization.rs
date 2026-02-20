@@ -165,8 +165,7 @@ impl OrganizationService for OrganizationServiceImpl {
         &self,
         request: Request<GetOrganizationRequest>,
     ) -> Result<Response<GetOrganizationResponse>, Status> {
-        let authenticated_tenant =
-            super::extract_tenant_id(&request, &self.store).await?;
+        let authenticated_tenant = super::extract_tenant_id(&request, &self.store).await?;
 
         let body = request.into_inner();
         let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
