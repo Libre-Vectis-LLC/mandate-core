@@ -114,9 +114,22 @@ impl EventServiceImpl {
                 .get_poll_ring_hash(tenant, event.org_id, &vote.poll_id)
                 .await
             {
-                Ok(_) => {
-                    // Poll exists in index, fast-path validation passed.
-                    // Signature verification (step 3) will validate ring hash matches.
+                Ok(poll_ring_hash) => {
+                    // Poll exists — verify the vote's declared poll_ring_hash matches
+                    // the ring hash snapshot stored at poll creation time.
+                    //
+                    // SECURITY: Without this check, an attacker could cast a vote using
+                    // a newer (or different) ring while claiming it targets a poll that
+                    // was created under a different ring. This binds votes to the exact
+                    // ring membership that existed when the poll was created.
+                    if vote.poll_ring_hash != poll_ring_hash {
+                        return Err(RpcError::FailedPrecondition {
+                            operation: "vote_ring_binding",
+                            reason: "vote.poll_ring_hash does not match poll snapshot"
+                                .into(),
+                        }
+                        .into());
+                    }
                 }
                 Err(crate::storage::StorageError::NotFound(_)) => {
                     // Poll not found in ring-hash index - reject the vote.
@@ -190,9 +203,11 @@ impl EventServiceImpl {
             }
         }
 
-        // 2b. Verify owner/delegate for admin ban events
+        // 2b. Verify owner/delegate for admin events (ban + ring management)
         let delegate_external_ring = match &event.event_type {
-            crate::event::EventType::BanCreate(_) | crate::event::EventType::BanRevoke(_) => {
+            crate::event::EventType::BanCreate(_)
+            | crate::event::EventType::BanRevoke(_)
+            | crate::event::EventType::RingUpdate(_) => {
                 // Get owner's public key from storage
                 let owner_pubkey = self
                     .store
@@ -325,6 +340,40 @@ impl EventServiceImpl {
                 reason: "verification failed".into(),
             }
             .into());
+        }
+
+        // 3b. Archival ring_hash consistency check
+        //
+        // For Archival signatures, the ring is embedded in the signature itself.
+        // Verify that the embedded ring's hash matches the ring_hash declared in
+        // the event body. Without this check, an attacker could declare ring_hash X
+        // (matching a legitimate ring) but embed a different ring Y in the signature.
+        //
+        // Admin events (BanCreate/BanRevoke/RingUpdate) are excluded because their
+        // ring hash was already verified against the delegate ring in step 2b.
+        if matches!(
+            sig.mode(),
+            crate::crypto::signature::StorageMode::Archival
+        ) {
+            let is_admin_event = matches!(
+                &event.event_type,
+                crate::event::EventType::BanCreate(_)
+                    | crate::event::EventType::BanRevoke(_)
+                    | crate::event::EventType::RingUpdate(_)
+            );
+            if !is_admin_event {
+                if let Some(declared_hash) = event.event_type.ring_hash() {
+                    let sig_ring_hash = sig.ring_hash();
+                    if sig_ring_hash != declared_hash {
+                        return Err(RpcError::FailedPrecondition {
+                            operation: "archival_ring_hash_consistency",
+                            reason: "embedded ring hash does not match declared ring_hash"
+                                .into(),
+                        }
+                        .into());
+                    }
+                }
+            }
         }
 
         if let crate::event::EventType::RingUpdate(update) = &event.event_type {
