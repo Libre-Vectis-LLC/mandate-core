@@ -9,7 +9,7 @@ use rand::{CryptoRng, RngCore};
 use sha3::{Sha3_256, Sha3_512};
 use std::io::{Read, Write};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[derive(Debug, Error)]
 pub enum KeyManagerError {
@@ -290,7 +290,9 @@ pub fn encrypt_shared_secret_for_recipient(
     shared_secret: &[u8; 32],
     recipient: &age::x25519::Recipient,
 ) -> Result<Vec<u8>, KeyManagerError> {
-    let mut plaintext = Vec::with_capacity(KEY_BLOB_PREFIX.len() + shared_secret.len());
+    let mut plaintext = Zeroizing::new(Vec::with_capacity(
+        KEY_BLOB_PREFIX.len() + shared_secret.len(),
+    ));
     plaintext.extend_from_slice(KEY_BLOB_PREFIX);
     plaintext.extend_from_slice(shared_secret);
 
@@ -318,7 +320,7 @@ pub fn decrypt_shared_secret(
         .decrypt(std::iter::once(identity as &dyn age::Identity))
         .map_err(|e| KeyManagerError::Decryption(e.to_string()))?;
 
-    let mut plaintext = Vec::new();
+    let mut plaintext = Zeroizing::new(Vec::new());
     reader.read_to_end(&mut plaintext)?;
 
     if plaintext.len() != KEY_BLOB_PREFIX.len() + 32 || !plaintext.starts_with(KEY_BLOB_PREFIX) {
@@ -338,7 +340,9 @@ pub fn encrypt_access_token_for_recipient(
     token: &[u8; 32],
     recipient: &age::x25519::Recipient,
 ) -> Result<Vec<u8>, KeyManagerError> {
-    let mut plaintext = Vec::with_capacity(ACCESS_TOKEN_BLOB_PREFIX.len() + token.len());
+    let mut plaintext = Zeroizing::new(Vec::with_capacity(
+        ACCESS_TOKEN_BLOB_PREFIX.len() + token.len(),
+    ));
     plaintext.extend_from_slice(ACCESS_TOKEN_BLOB_PREFIX);
     plaintext.extend_from_slice(token);
 
@@ -366,7 +370,7 @@ pub fn decrypt_access_token_blob(
         .decrypt(std::iter::once(identity as &dyn age::Identity))
         .map_err(|e| KeyManagerError::Decryption(e.to_string()))?;
 
-    let mut plaintext = Vec::new();
+    let mut plaintext = Zeroizing::new(Vec::new());
     reader.read_to_end(&mut plaintext)?;
 
     if plaintext.len() != ACCESS_TOKEN_BLOB_PREFIX.len() + 32
