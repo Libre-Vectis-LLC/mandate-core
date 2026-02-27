@@ -109,7 +109,7 @@ impl BillingService for BillingServiceImpl {
 
         // If idempotency key is provided, check for existing result
         if let Some(ref key) = idempotency_key {
-            match self.store.check_idempotency_key(key).await {
+            match self.store.check_idempotency_key(tenant_id, key).await {
                 Ok(Some(IdempotencyResult::Success { balance_nanos })) => {
                     // Replay successful result
                     let balance_i64 =
@@ -161,7 +161,9 @@ impl BillingService for BillingServiceImpl {
             .transfer_to_organization(tenant_id, org_id, Nanos::new(amount))
             .await;
 
-        // Record result if idempotency key was provided
+        // Record result if idempotency key was provided.
+        // Uses atomic upsert: if a concurrent request already recorded a result
+        // (TOCTOU race), we get back the winning result and replay it instead.
         if let Some(ref key) = idempotency_key {
             let idempotency_result = match &result {
                 Ok(balance) => IdempotencyResult::Success {
@@ -173,12 +175,38 @@ impl BillingService for BillingServiceImpl {
                 },
             };
 
-            // Record result - ignore errors (best effort)
-            // Logging is handled at the storage layer.
-            let _ = self
+            match self
                 .store
-                .record_idempotency_result(key, idempotency_result, IDEMPOTENCY_TTL_SECS)
-                .await;
+                .record_idempotency_result(
+                    tenant_id,
+                    key,
+                    idempotency_result,
+                    IDEMPOTENCY_TTL_SECS,
+                )
+                .await
+            {
+                Ok(Some(IdempotencyResult::Success { balance_nanos })) => {
+                    // A concurrent request already recorded a result -- replay it
+                    let balance_i64 =
+                        i64::try_from(balance_nanos).map_err(|_| RpcError::Internal {
+                            operation: "transfer_to_organization",
+                            details: "cached balance exceeds i64::MAX".into(),
+                        })?;
+                    return Ok(Response::new(TransferToOrganizationResponse {
+                        balance_after_nanos: balance_i64,
+                    }));
+                }
+                Ok(Some(IdempotencyResult::Error { code, message })) => {
+                    return Err(Status::new(from_idempotency_error_code(code), message));
+                }
+                Ok(None) => {
+                    // Our result was recorded successfully, proceed normally
+                }
+                Err(_) => {
+                    // Backend error recording idempotency key - proceed with our result.
+                    // Logging is handled at the storage layer.
+                }
+            }
         }
 
         // Return result

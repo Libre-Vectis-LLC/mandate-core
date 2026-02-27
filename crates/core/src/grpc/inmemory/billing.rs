@@ -263,6 +263,7 @@ impl BillingStore for InMemoryBilling {
 
     async fn check_idempotency_key(
         &self,
+        _tenant: TenantId,
         key: &str,
     ) -> Result<Option<IdempotencyResult>, StorageError> {
         let keys = self.idempotency_keys.lock();
@@ -274,17 +275,25 @@ impl BillingStore for InMemoryBilling {
 
     async fn record_idempotency_result(
         &self,
+        _tenant: TenantId,
         key: &str,
         result: IdempotencyResult,
         ttl_secs: u64,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<IdempotencyResult>, StorageError> {
         let mut keys = self.idempotency_keys.lock();
+        // Atomic first-write-wins: if entry already exists and is not expired,
+        // return the existing result without overwriting.
+        if let Some(existing) = keys.get(key) {
+            if existing.expires_at > Instant::now() {
+                return Ok(Some(existing.result.clone()));
+            }
+        }
         let entry = IdempotencyEntry {
             result,
             expires_at: Instant::now() + Duration::from_secs(ttl_secs),
         };
         keys.insert(key.to_string(), entry);
-        Ok(())
+        Ok(None)
     }
 
     async fn withdraw_from_org(

@@ -92,25 +92,32 @@ impl StorageFacade {
     /// Returns `Some(result)` if the key was previously used, allowing the
     /// caller to replay the original response. Returns `None` if the key
     /// is new and the operation should proceed.
+    ///
+    /// Keys are scoped per-tenant to prevent cross-tenant collisions.
     pub async fn check_idempotency_key(
         &self,
+        tenant: TenantId,
         key: &str,
     ) -> Result<Option<IdempotencyResult>, StorageError> {
-        self.billing.check_idempotency_key(key).await
+        self.billing.check_idempotency_key(tenant, key).await
     }
 
-    /// Record the result of an idempotent operation.
+    /// Atomically record the result of an idempotent operation.
     ///
-    /// Stores the result with the given TTL so future requests with the same
-    /// key can replay this response.
+    /// Uses an atomic upsert to prevent TOCTOU races. Returns `None` if this
+    /// was the first write, or `Some(existing_result)` if a previous result
+    /// already existed (first-write wins).
+    ///
+    /// Keys are scoped per-tenant to prevent cross-tenant collisions.
     pub async fn record_idempotency_result(
         &self,
+        tenant: TenantId,
         key: &str,
         result: IdempotencyResult,
         ttl_secs: u64,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<IdempotencyResult>, StorageError> {
         self.billing
-            .record_idempotency_result(key, result, ttl_secs)
+            .record_idempotency_result(tenant, key, result, ttl_secs)
             .await
     }
 

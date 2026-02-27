@@ -15,6 +15,8 @@ use sha3::Sha3_512;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
+use mandate_proto::mandate::v1::PowChallenge;
+
 use super::super::{
     extract_tenant_id, max_event_bytes, max_message_content_chars, max_poll_id_length, to_status,
 };
@@ -289,7 +291,32 @@ impl EventServiceImpl {
             }
         }
 
-        // 3. Verify Signature
+        // 3. POW gate: if this org is in POW mode, require valid proof before
+        //    spending CPU on expensive signature verification.
+        {
+            let pow_key = (tenant, event.org_id);
+            let pow_required = self
+                .pow_states
+                .get(&pow_key)
+                .map(|s| s.should_require_pow())
+                .unwrap_or(false);
+
+            if pow_required {
+                match &body.pow_submission {
+                    None => {
+                        // POW required but not provided — return challenge parameters.
+                        return Err(self.make_pow_challenge_status(tenant, event.org_id));
+                    }
+                    Some(proto_sub) => {
+                        // Validate the submitted POW proof.
+                        self.verify_pow_submission(tenant, event.org_id, proto_sub)
+                            .await?;
+                    }
+                }
+            }
+        }
+
+        // 3b. Verify Signature
         // Load ring if needed (Compact signature)
         let external_ring = if let Some(ring) = delegate_external_ring {
             Some(ring)
@@ -335,11 +362,33 @@ impl EventServiceImpl {
                     details: e.to_string(),
                 })?;
         if !results[0] {
+            // Record failure in POW state machine — may trigger or escalate POW requirement.
+            {
+                let pow_key = (tenant, event.org_id);
+                let mut state = self.pow_states.entry(pow_key).or_default();
+                state.on_verification_failure(&self.pow_config);
+
+                // If POW just became required, return ResourceExhausted with challenge
+                // so the client knows to submit POW on retry.
+                if state.should_require_pow() {
+                    drop(state);
+                    return Err(self.make_pow_challenge_status(tenant, event.org_id));
+                }
+            }
+
             return Err(RpcError::Unauthenticated {
                 credential: "signature",
                 reason: "verification failed".into(),
             }
             .into());
+        }
+
+        // Signature verified successfully — record success, potentially recover from POW mode.
+        {
+            let pow_key = (tenant, event.org_id);
+            if let Some(mut state) = self.pow_states.get_mut(&pow_key) {
+                state.on_verification_success(&self.pow_config);
+            }
         }
 
         // 3b. Archival ring_hash consistency check
@@ -467,5 +516,142 @@ impl EventServiceImpl {
             sequence_no: id.1.as_i64(),
             event_url: None, // Set by Edge proxy for poll events with Onion URL
         }))
+    }
+
+    /// Build a `ResourceExhausted` status with POW challenge parameters encoded in details.
+    ///
+    /// The challenge is serialized as a protobuf `PowChallenge` message in the status details,
+    /// allowing clients to parse the difficulty parameters and compute a valid proof.
+    fn make_pow_challenge_status(
+        &self,
+        tenant: crate::ids::TenantId,
+        org_id: crate::ids::OrganizationId,
+    ) -> Status {
+        use prost::Message;
+
+        let pow_key = (tenant, org_id);
+        let multiplier = self
+            .pow_states
+            .get(&pow_key)
+            .map(|s| s.get_current_multiplier())
+            .unwrap_or(3.0);
+
+        // Calculate POW parameters based on a conservative ring size estimate.
+        // The actual ring size is unknown at this point (we haven't loaded it yet),
+        // so we use a reasonable upper bound that produces adequate difficulty.
+        let params = self.pow_calculator.calculate_pow_params(
+            16,   // conservative ring size estimate
+            1024, // conservative message size estimate
+            multiplier,
+        );
+
+        // Generate deterministic challenge bytes from tenant + org + current timestamp.
+        // This makes challenges verifiable without server-side state.
+        let challenge = Self::generate_challenge(tenant, org_id);
+
+        let pow_challenge = PowChallenge {
+            bits: params.bits,
+            required_proofs: params.required_proofs as u32,
+            time_window_secs: params.time_window_secs,
+            challenge: challenge.to_vec(),
+        };
+
+        // Encode PowChallenge into status details so clients can parse it.
+        let details = pow_challenge.encode_to_vec();
+
+        Status::with_details(
+            tonic::Code::ResourceExhausted,
+            format!(
+                "pow_required: {} proofs at {} bits difficulty",
+                params.required_proofs, params.bits
+            ),
+            details.into(),
+        )
+    }
+
+    /// Verify a POW submission from the client.
+    ///
+    /// Converts the proto `PowSubmission` to the internal type and delegates
+    /// to `PowVerifier`. Returns `Ok(())` if valid, or an appropriate `Status` error.
+    async fn verify_pow_submission(
+        &self,
+        tenant: crate::ids::TenantId,
+        org_id: crate::ids::OrganizationId,
+        proto_sub: &mandate_proto::mandate::v1::PowSubmission,
+    ) -> Result<(), Status> {
+        // Convert client_nonce from Vec<u8> to [u8; 32]
+        let client_nonce: [u8; 32] =
+            proto_sub
+                .client_nonce
+                .as_slice()
+                .try_into()
+                .map_err(|_| RpcError::InvalidArgument {
+                    field: "pow_submission.client_nonce",
+                    reason: format!(
+                        "expected 32 bytes, got {}",
+                        proto_sub.client_nonce.len()
+                    ),
+                })?;
+
+        let submission = crate::pow::PowSubmission::new(
+            proto_sub.timestamp as u64,
+            client_nonce,
+            proto_sub.proof_bundle.clone(),
+        );
+
+        // Get current POW parameters for verification
+        let pow_key = (tenant, org_id);
+        let multiplier = self
+            .pow_states
+            .get(&pow_key)
+            .map(|s| s.get_current_multiplier())
+            .unwrap_or(3.0);
+
+        let params = self.pow_calculator.calculate_pow_params(16, 1024, multiplier);
+
+        match self
+            .pow_verifier
+            .verify_submission(&submission, &params)
+            .await
+        {
+            Ok(result) if result.valid => Ok(()),
+            Ok(_) => Err(RpcError::ResourceExhausted {
+                resource: "pow_verification",
+                limit: "proof verification failed".into(),
+            }
+            .into()),
+            Err(e) => Err(RpcError::ResourceExhausted {
+                resource: "pow_verification",
+                limit: e.to_string(),
+            }
+            .into()),
+        }
+    }
+
+    /// Generate deterministic challenge bytes from tenant, org, and current time bucket.
+    ///
+    /// Uses a 60-second time bucket to make challenges stable within the POW time window,
+    /// allowing clients to solve and submit within the same window without the challenge
+    /// changing underneath them.
+    fn generate_challenge(
+        tenant: crate::ids::TenantId,
+        org_id: crate::ids::OrganizationId,
+    ) -> [u8; 32] {
+        use sha3::{Digest, Sha3_256};
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before UNIX epoch")
+            .as_secs();
+
+        // 60-second time bucket aligns with PowParams::time_window_secs
+        let time_bucket = now / 60;
+
+        let mut hasher = Sha3_256::new();
+        hasher.update(b"mandate-pow-challenge-v1");
+        hasher.update(tenant.0.to_bytes());
+        hasher.update(org_id.0.to_bytes());
+        hasher.update(time_bucket.to_le_bytes());
+        hasher.finalize().into()
     }
 }

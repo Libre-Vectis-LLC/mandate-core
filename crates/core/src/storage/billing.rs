@@ -152,11 +152,11 @@ pub trait BillingStore: Send + Sync {
 
     /// Check if an idempotency key has been used and return the cached result.
     ///
-    /// This method is called before executing an idempotent operation to check
-    /// if the same operation was previously completed. If found, the cached result
-    /// is returned instead of re-executing the operation.
+    /// Idempotency keys are scoped per-tenant to prevent cross-tenant collisions
+    /// where different tenants using the same key would interfere with each other.
     ///
     /// # Arguments
+    /// * `tenant` - The tenant identifier (scoping key)
     /// * `key` - The client-provided idempotency key (typically UUID or ULID)
     ///
     /// # Returns
@@ -167,31 +167,41 @@ pub trait BillingStore: Send + Sync {
     /// * `StorageError::Backend` - When the underlying storage layer fails
     async fn check_idempotency_key(
         &self,
+        tenant: TenantId,
         key: &str,
     ) -> Result<Option<IdempotencyResult>, StorageError>;
 
-    /// Record the result of an idempotent operation for future replays.
+    /// Atomically record the result of an idempotent operation for future replays.
     ///
-    /// This method stores the result of an operation so that retries with the same
-    /// idempotency key return the cached result instead of re-executing.
+    /// This method uses an atomic upsert pattern to prevent TOCTOU race conditions:
+    /// if two concurrent requests attempt to record the same key, only the first
+    /// one succeeds. The method returns the winning result (either the one just
+    /// recorded, or the previously existing one).
+    ///
+    /// Idempotency keys are scoped per-tenant to prevent cross-tenant collisions.
     ///
     /// # Arguments
+    /// * `tenant` - The tenant identifier (scoping key)
     /// * `key` - The client-provided idempotency key
     /// * `result` - The result to cache (success with balance or error)
     /// * `ttl_secs` - Time-to-live in seconds (typically 24 hours = 86400)
+    ///
+    /// # Returns
+    /// * `None` - If this was the first write (our result was recorded)
+    /// * `Some(IdempotencyResult)` - If a previous result already existed (first-write wins)
     ///
     /// # Errors
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Notes
-    /// * If the key already exists, implementations should NOT overwrite it (first-write wins)
     /// * Expired keys may be automatically cleaned up by the storage layer
     async fn record_idempotency_result(
         &self,
+        tenant: TenantId,
         key: &str,
         result: IdempotencyResult,
         ttl_secs: u64,
-    ) -> Result<(), StorageError>;
+    ) -> Result<Option<IdempotencyResult>, StorageError>;
 
     /// Withdraw credits from org wallet back to tenant wallet.
     ///
