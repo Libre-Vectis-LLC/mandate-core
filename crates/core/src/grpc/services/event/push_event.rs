@@ -127,8 +127,7 @@ impl EventServiceImpl {
                     if vote.poll_ring_hash != poll_ring_hash {
                         return Err(RpcError::FailedPrecondition {
                             operation: "vote_ring_binding",
-                            reason: "vote.poll_ring_hash does not match poll snapshot"
-                                .into(),
+                            reason: "vote.poll_ring_hash does not match poll snapshot".into(),
                         }
                         .into());
                     }
@@ -400,10 +399,7 @@ impl EventServiceImpl {
         //
         // Admin events (BanCreate/BanRevoke/RingUpdate) are excluded because their
         // ring hash was already verified against the delegate ring in step 2b.
-        if matches!(
-            sig.mode(),
-            crate::crypto::signature::StorageMode::Archival
-        ) {
+        if matches!(sig.mode(), crate::crypto::signature::StorageMode::Archival) {
             let is_admin_event = matches!(
                 &event.event_type,
                 crate::event::EventType::BanCreate(_)
@@ -416,8 +412,7 @@ impl EventServiceImpl {
                     if sig_ring_hash != declared_hash {
                         return Err(RpcError::FailedPrecondition {
                             operation: "archival_ring_hash_consistency",
-                            reason: "embedded ring hash does not match declared ring_hash"
-                                .into(),
+                            reason: "embedded ring hash does not match declared ring_hash".into(),
                         }
                         .into());
                     }
@@ -581,17 +576,12 @@ impl EventServiceImpl {
     ) -> Result<(), Status> {
         // Convert client_nonce from Vec<u8> to [u8; 32]
         let client_nonce: [u8; 32] =
-            proto_sub
-                .client_nonce
-                .as_slice()
-                .try_into()
-                .map_err(|_| RpcError::InvalidArgument {
+            proto_sub.client_nonce.as_slice().try_into().map_err(|_| {
+                RpcError::InvalidArgument {
                     field: "pow_submission.client_nonce",
-                    reason: format!(
-                        "expected 32 bytes, got {}",
-                        proto_sub.client_nonce.len()
-                    ),
-                })?;
+                    reason: format!("expected 32 bytes, got {}", proto_sub.client_nonce.len()),
+                }
+            })?;
 
         let submission = crate::pow::PowSubmission::new(
             proto_sub.timestamp as u64,
@@ -607,7 +597,9 @@ impl EventServiceImpl {
             .map(|s| s.get_current_multiplier())
             .unwrap_or(3.0);
 
-        let params = self.pow_calculator.calculate_pow_params(16, 1024, multiplier);
+        let params = self
+            .pow_calculator
+            .calculate_pow_params(16, 1024, multiplier);
 
         match self
             .pow_verifier

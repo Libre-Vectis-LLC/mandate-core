@@ -177,12 +177,7 @@ impl BillingService for BillingServiceImpl {
 
             match self
                 .store
-                .record_idempotency_result(
-                    tenant_id,
-                    key,
-                    idempotency_result,
-                    IDEMPOTENCY_TTL_SECS,
-                )
+                .record_idempotency_result(tenant_id, key, idempotency_result, IDEMPOTENCY_TTL_SECS)
                 .await
             {
                 Ok(Some(IdempotencyResult::Success { balance_nanos })) => {

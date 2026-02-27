@@ -224,7 +224,10 @@ mod tests {
     }
     use crate::crypto::ciphertext::Ciphertext;
     use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
-    use crate::event::{AnonymousMessage, Event, EventType, Poll, PollQuestion, PollQuestionKind, Vote, VoteSelection};
+    use crate::event::{
+        AnonymousMessage, Event, EventType, Poll, PollQuestion, PollQuestionKind, Vote,
+        VoteSelection,
+    };
     use crate::hashing::ring_hash_sha3_256;
     use crate::ids::{EventId, EventUlid, Ulid};
     use nazgul::keypair::KeyPair;

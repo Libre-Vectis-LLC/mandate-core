@@ -3,11 +3,11 @@
 //! This module is gated behind `#[cfg(not(target_arch = "wasm32"))]` at the crate root,
 //! so all code here is host-only (no WASM).
 
+use crate::billing::OrgPowState;
 use crate::billing::{
     default_egress_meter, OrgPowConfig, PowDifficultyCalculator, SharedEgressMeter,
     VerificationCostModel,
 };
-use crate::billing::OrgPowState;
 use crate::ids::{OrganizationId, TenantId};
 use crate::pow::PowVerifier;
 use crate::storage::facade::StorageFacade;
