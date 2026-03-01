@@ -2,6 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bincode::Options;
 use moka::future::Cache;
 use sha3::{Digest, Sha3_256};
 use thiserror::Error;
@@ -11,6 +12,10 @@ use super::types::{PowParams, PowSubmission, PowVerifyResult};
 /// POW verification errors.
 #[derive(Debug, Error)]
 pub enum PowVerifyError {
+    /// System clock is invalid for UNIX timestamp conversion.
+    #[error("invalid system clock: {0}")]
+    InvalidSystemClock(String),
+
     /// POW submission expired (outside time window).
     #[error("POW expired: timestamp {timestamp} is outside valid window")]
     Expired { timestamp: u64 },
@@ -22,6 +27,13 @@ pub enum PowVerifyError {
     /// Failed to deserialize proof bundle.
     #[error("Failed to deserialize proof bundle: {0}")]
     DeserializationFailed(String),
+
+    /// Proof bundle exceeds verifier size limit.
+    #[error("proof bundle too large: {actual_bytes} bytes exceeds {max_bytes} bytes")]
+    ProofBundleTooLarge {
+        max_bytes: usize,
+        actual_bytes: usize,
+    },
 
     /// Insufficient proofs in bundle.
     #[error("Insufficient proofs: expected {expected}, got {actual}")]
@@ -46,6 +58,12 @@ pub enum PowVerifyError {
 /// - Same proof_bundle is reused with different client_nonce values
 /// - Same client_nonce is reused with different proof_bundle (though unlikely valid)
 type ReplayKey = [u8; 64];
+
+/// Upper bound for serialized rspow proof bundle payload.
+///
+/// This keeps deserialization predictable and limits CPU/memory amplification
+/// from untrusted inputs.
+const MAX_PROOF_BUNDLE_BYTES: usize = 1024 * 1024;
 
 /// POW verifier using rspow near-stateless protocol.
 ///
@@ -118,7 +136,7 @@ impl PowVerifier {
         // Check timestamp validity (within time window)
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system time before UNIX epoch")
+            .map_err(|e| PowVerifyError::InvalidSystemClock(e.to_string()))?
             .as_secs();
 
         let time_diff = current_time.abs_diff(submission.timestamp);
@@ -149,8 +167,17 @@ impl PowVerifier {
             return Err(PowVerifyError::ReplayDetected);
         }
 
+        if submission.proof_bundle.len() > MAX_PROOF_BUNDLE_BYTES {
+            return Err(PowVerifyError::ProofBundleTooLarge {
+                max_bytes: MAX_PROOF_BUNDLE_BYTES,
+                actual_bytes: submission.proof_bundle.len(),
+            });
+        }
+
         // Deserialize proof bundle from rspow
-        let bundle: rspow::ProofBundle = bincode::deserialize(&submission.proof_bundle)
+        let bundle: rspow::ProofBundle = bincode::DefaultOptions::new()
+            .with_limit(MAX_PROOF_BUNDLE_BYTES as u64)
+            .deserialize(&submission.proof_bundle)
             .map_err(|e| PowVerifyError::DeserializationFailed(e.to_string()))?;
 
         // Check proof count
@@ -276,5 +303,25 @@ mod tests {
 
         let result = verifier.verify_submission(&submission, &params).await;
         assert!(matches!(result, Err(PowVerifyError::ReplayDetected)));
+    }
+
+    #[tokio::test]
+    async fn test_rejects_oversized_proof_bundle() {
+        let verifier = PowVerifier::new(10000, 300);
+        let params = PowParams::new(7, 1, 60);
+        let submission = PowSubmission::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            [7u8; 32],
+            vec![0u8; MAX_PROOF_BUNDLE_BYTES + 1],
+        );
+
+        let result = verifier.verify_submission(&submission, &params).await;
+        assert!(matches!(
+            result,
+            Err(PowVerifyError::ProofBundleTooLarge { .. })
+        ));
     }
 }
