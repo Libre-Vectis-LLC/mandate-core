@@ -42,8 +42,9 @@ pub use balance_transfer::BalanceTransferService;
 pub use cost_models::{PowVerificationCostModel, VerificationCostModel};
 pub use difficulty::PowDifficultyCalculator;
 pub use metering::{
-    default_egress_meter, EgressMeter, MeteringError, NoOpEgressMeter, SharedEgressMeter,
-    UsageEvent,
+    default_egress_meter, default_verification_meter, EgressMeter, MeteringError, NoOpEgressMeter,
+    NoOpVerificationMeter, SharedEgressMeter, SharedVerificationMeter, UsageEvent,
+    VerificationMeter,
 };
 pub use pow_state::{
     EscalationStrategy, OrgPowConfig, OrgPowState, RecoveryStrategy, UpgradeStrategy,

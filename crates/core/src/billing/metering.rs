@@ -4,6 +4,7 @@
 //! - `MeteringError`: Errors during balance checks and deductions
 //! - `UsageEvent`: Records of resource consumption for audit and billing
 //! - `EgressMeter`: Trait for egress (outbound data) metering
+//! - `VerificationMeter`: Trait for verification-attempt charging
 
 use crate::billing::{AbstractResourceUnits, Nanos};
 use async_trait::async_trait;
@@ -125,6 +126,28 @@ pub trait EgressMeter: Send + Sync {
     async fn record_egress(&self, org_id: &str, actual_bytes: usize) -> Result<(), MeteringError>;
 }
 
+/// Trait for charging signature verification attempts.
+///
+/// This is used on the event ingestion path to charge for CPU-heavy verification
+/// before executing the cryptographic verification itself.
+#[async_trait]
+pub trait VerificationMeter: Send + Sync {
+    /// Charge one verification attempt.
+    ///
+    /// # Arguments
+    /// * `org_id` - The org being charged
+    /// * `ring_size` - Number of ring members involved in the verification
+    /// * `message_bytes` - Canonical signed message size in bytes
+    /// * `pow_proofs` - Optional number of POW proofs verified for this request
+    async fn charge_verification(
+        &self,
+        org_id: &str,
+        ring_size: usize,
+        message_bytes: usize,
+        pow_proofs: Option<usize>,
+    ) -> Result<(), MeteringError>;
+}
+
 /// No-op egress meter for community edition or when metering is disabled.
 ///
 /// This implementation always succeeds, effectively making egress free.
@@ -151,12 +174,36 @@ impl EgressMeter for NoOpEgressMeter {
     }
 }
 
+/// No-op verification meter for community edition or when attempt charging is disabled.
+#[derive(Clone, Debug, Default)]
+pub struct NoOpVerificationMeter;
+
+#[async_trait]
+impl VerificationMeter for NoOpVerificationMeter {
+    async fn charge_verification(
+        &self,
+        _org_id: &str,
+        _ring_size: usize,
+        _message_bytes: usize,
+        _pow_proofs: Option<usize>,
+    ) -> Result<(), MeteringError> {
+        Ok(())
+    }
+}
+
 /// Type alias for a shared egress meter reference.
 pub type SharedEgressMeter = Arc<dyn EgressMeter>;
+/// Type alias for a shared verification meter reference.
+pub type SharedVerificationMeter = Arc<dyn VerificationMeter>;
 
 /// Create a default no-op egress meter.
 pub fn default_egress_meter() -> SharedEgressMeter {
     Arc::new(NoOpEgressMeter)
+}
+
+/// Create a default no-op verification meter.
+pub fn default_verification_meter() -> SharedVerificationMeter {
+    Arc::new(NoOpVerificationMeter)
 }
 
 #[cfg(test)]
@@ -250,5 +297,16 @@ mod tests {
         // Default meter should be NoOp, always succeeds
         assert!(meter.check_egress("any_org", 999_999_999).await.is_ok());
         assert!(meter.record_egress("any_org", 999_999_999).await.is_ok());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn test_default_verification_meter() {
+        let meter = default_verification_meter();
+
+        assert!(meter
+            .charge_verification("any_org", 16, 1024, Some(3))
+            .await
+            .is_ok());
     }
 }

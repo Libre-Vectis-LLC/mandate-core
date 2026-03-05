@@ -5,8 +5,8 @@
 
 use crate::billing::OrgPowState;
 use crate::billing::{
-    default_egress_meter, OrgPowConfig, PowDifficultyCalculator, SharedEgressMeter,
-    VerificationCostModel,
+    default_egress_meter, default_verification_meter, OrgPowConfig, PowDifficultyCalculator,
+    SharedEgressMeter, SharedVerificationMeter, VerificationCostModel,
 };
 use crate::ids::{OrganizationId, RingHash, TenantId};
 use crate::pow::PowVerifier;
@@ -31,6 +31,7 @@ pub struct EventServiceImpl {
     pub(super) store: StorageFacade,
     pub(super) verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
     pub(super) egress_meter: SharedEgressMeter,
+    pub(super) verification_meter: SharedVerificationMeter,
 
     /// Per-(tenant, org) POW state machine tracking verification failures.
     pub(super) pow_states: Arc<DashMap<PowStateKey, OrgPowState>>,
@@ -49,7 +50,7 @@ pub struct EventServiceImpl {
 }
 
 impl EventServiceImpl {
-    /// Create a new EventService with the default no-op egress meter.
+    /// Create a new EventService with default no-op meters.
     pub fn new(
         store: StorageFacade,
         verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
@@ -58,6 +59,7 @@ impl EventServiceImpl {
             store,
             verifier,
             egress_meter: default_egress_meter(),
+            verification_meter: default_verification_meter(),
             pow_states: Arc::new(DashMap::new()),
             pow_verifier: Arc::new(PowVerifier::new(100_000, 300)),
             pow_config: OrgPowConfig::default(),
@@ -66,22 +68,33 @@ impl EventServiceImpl {
         }
     }
 
-    /// Create a new EventService with a custom egress meter.
-    pub fn with_egress_meter(
+    /// Create a new EventService with custom meters.
+    pub fn with_meters(
         store: StorageFacade,
         verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
         egress_meter: SharedEgressMeter,
+        verification_meter: SharedVerificationMeter,
     ) -> Self {
         Self {
             store,
             verifier,
             egress_meter,
+            verification_meter,
             pow_states: Arc::new(DashMap::new()),
             pow_verifier: Arc::new(PowVerifier::new(100_000, 300)),
             pow_config: OrgPowConfig::default(),
             pow_calculator: Arc::new(Self::default_pow_calculator()),
             vote_signing_ring_cache: Arc::new(Self::default_vote_signing_ring_cache()),
         }
+    }
+
+    /// Create a new EventService with a custom egress meter and default verification meter.
+    pub fn with_egress_meter(
+        store: StorageFacade,
+        verifier: Arc<dyn crate::crypto::verifier::SignatureVerifier>,
+        egress_meter: SharedEgressMeter,
+    ) -> Self {
+        Self::with_meters(store, verifier, egress_meter, default_verification_meter())
     }
 
     /// Default POW difficulty calculator using benchmark-derived coefficients.

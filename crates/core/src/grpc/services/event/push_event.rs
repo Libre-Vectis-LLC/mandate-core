@@ -2,6 +2,7 @@
 
 use super::service::EventServiceImpl;
 use super::validation::banned_operation_for_event;
+use crate::billing::MeteringError;
 use crate::event::Event;
 use crate::hashing::ring_hash_sha3_256;
 use crate::key_manager::manager::derive_poll_signing_ring;
@@ -10,7 +11,7 @@ use crate::rpc::RpcError;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use mandate_proto::mandate::v1::{PushEventRequest, PushEventResponse};
 use nazgul::keypair::KeyPair as NazgulKeyPair;
-use nazgul::ring::Ring;
+use nazgul::ring::{Ring, RingContext};
 use nazgul::traits::Derivable;
 use sha3::Sha3_512;
 use std::sync::Arc;
@@ -392,6 +393,20 @@ impl EventServiceImpl {
             details: format!("canonical serialization failed: {e}"),
         })?;
 
+        let ring_size =
+            Self::verification_ring_size(sig, external_ring.as_deref()).ok_or_else(|| {
+                RpcError::Internal {
+                    operation: "verification_meter",
+                    details: "compact signature missing external ring".into(),
+                }
+            })?;
+        let message_bytes = signed_msg.len();
+
+        self.verification_meter
+            .charge_verification(&event.org_id.to_string(), ring_size, message_bytes, None)
+            .await
+            .map_err(Self::verification_meter_error_to_status)?;
+
         let item = crate::crypto::verifier::SignatureItem {
             signature: sig.clone(),
             message: signed_msg,
@@ -718,5 +733,43 @@ impl EventServiceImpl {
         hasher.update(org_id.0.to_bytes());
         hasher.update(time_bucket.to_le_bytes());
         hasher.finalize().into()
+    }
+
+    fn verification_ring_size(
+        sig: &crate::crypto::signature::Signature,
+        external_ring: Option<&Ring>,
+    ) -> Option<usize> {
+        match sig.ring_context() {
+            RingContext::Compact(_) => external_ring.map(|ring| ring.members().len()),
+            RingContext::Archival(ring) => Some(ring.members().len()),
+        }
+    }
+
+    fn verification_meter_error_to_status(error: MeteringError) -> Status {
+        match error {
+            MeteringError::InsufficientBalance {
+                required,
+                available,
+            } => RpcError::ResourceExhausted {
+                resource: "verification_balance",
+                limit: format!("required {required}, available {available}"),
+            }
+            .into(),
+            MeteringError::OrgNotFound(org_id) => RpcError::NotFound {
+                resource: "organization",
+                id: org_id,
+            }
+            .into(),
+            MeteringError::TenantNotFound(tenant_id) => RpcError::NotFound {
+                resource: "tenant",
+                id: tenant_id,
+            }
+            .into(),
+            MeteringError::StoreError(details) => RpcError::Internal {
+                operation: "verification_meter",
+                details,
+            }
+            .into(),
+        }
     }
 }
