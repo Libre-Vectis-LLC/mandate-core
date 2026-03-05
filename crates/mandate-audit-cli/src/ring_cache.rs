@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use crate::client::AuditClient;
 
 pub struct RingLogCache {
-    log: RingDeltaLog,
-    cache: HashMap<RingHash, Ring>,
+    pub(crate) log: RingDeltaLog,
+    pub(crate) cache: HashMap<RingHash, Ring>,
 }
 
 impl RingLogCache {

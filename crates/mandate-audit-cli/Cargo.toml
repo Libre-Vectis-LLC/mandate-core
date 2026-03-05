@@ -26,3 +26,6 @@ secrecy = "0.10"
 
 [features]
 default = []
+
+[dev-dependencies]
+rand.workspace = true

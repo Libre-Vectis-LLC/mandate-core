@@ -1,7 +1,8 @@
 /// In-memory billing store and gift card management.
 use crate::ids::{Nanos, OrganizationId, TenantId};
 use crate::storage::{
-    BillingStore, GiftCard, GiftCardStore, IdempotencyResult, NotFound, StorageError,
+    BillingStore, GiftCard, GiftCardStore, IdempotencyErrorCode, IdempotencyResult, NotFound,
+    StorageError,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -19,6 +20,8 @@ struct TenantBalance {
 }
 
 type TenantBalanceMap = HashMap<TenantId, TenantBalance>;
+type ScopedIdempotencyKey = (TenantId, String);
+type IdempotencyMap = HashMap<ScopedIdempotencyKey, IdempotencyEntry>;
 
 /// Get current Unix timestamp in milliseconds.
 fn current_timestamp_ms() -> i64 {
@@ -26,6 +29,15 @@ fn current_timestamp_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time before UNIX epoch")
         .as_millis() as i64
+}
+
+fn storage_error_to_idempotency(err: &StorageError) -> IdempotencyErrorCode {
+    match err {
+        StorageError::NotFound(_) => IdempotencyErrorCode::NotFound,
+        StorageError::AlreadyExists => IdempotencyErrorCode::AlreadyExists,
+        StorageError::PreconditionFailed(_) => IdempotencyErrorCode::FailedPrecondition,
+        StorageError::Backend(_) => IdempotencyErrorCode::Internal,
+    }
 }
 
 /// Cached idempotency result with expiration.
@@ -80,7 +92,7 @@ pub struct InMemoryBilling {
     tenants: Arc<Mutex<TenantBalanceMap>>,
     orgs: Arc<Mutex<OrgMap>>,
     tg_user_to_tenant: Arc<Mutex<HashMap<String, TenantId>>>,
-    idempotency_keys: Arc<Mutex<HashMap<String, IdempotencyEntry>>>,
+    idempotency_keys: Arc<Mutex<IdempotencyMap>>,
 }
 
 impl InMemoryBilling {
@@ -168,6 +180,93 @@ impl BillingStore for InMemoryBilling {
         let balance_u64 = u64::try_from(record.balance_nanos)
             .map_err(|_| StorageError::Backend("corrupted balance: negative value".into()))?;
         Ok(Nanos::new(balance_u64))
+    }
+
+    async fn transfer_to_organization_idempotent(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        amount: Nanos,
+        idempotency_key: Option<&str>,
+        ttl_secs: u64,
+    ) -> Result<IdempotencyResult, StorageError> {
+        let Some(key) = idempotency_key.filter(|k| !k.is_empty()) else {
+            let balance = self
+                .transfer_to_organization(tenant, org_id, amount)
+                .await?;
+            return Ok(IdempotencyResult::Success {
+                balance_nanos: balance.as_u64(),
+            });
+        };
+        if key.len() > 128 {
+            return Err(StorageError::PreconditionFailed(
+                "idempotency key too long".into(),
+            ));
+        }
+
+        let now = Instant::now();
+        let expires_at = now + Duration::from_secs(ttl_secs);
+        let scoped_key = (tenant, key.to_string());
+        let mut keys = self.idempotency_keys.lock();
+        if let Some(existing) = keys.get(&scoped_key) {
+            if existing.expires_at > now {
+                return Ok(existing.result.clone());
+            }
+        }
+
+        let delta = i64::try_from(amount.as_u64())
+            .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+        let transfer_result = {
+            let mut tenants = self.tenants.lock();
+            let mut orgs = self.orgs.lock();
+            let tenant_record = tenants.entry(tenant).or_insert(TenantBalance {
+                balance: 0,
+                updated_at_ms: current_timestamp_ms(),
+            });
+            if tenant_record.balance < delta {
+                Err(StorageError::PreconditionFailed(
+                    "insufficient balance".into(),
+                ))
+            } else {
+                let record = orgs
+                    .get_mut(&org_id)
+                    .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
+                if record.tenant != tenant {
+                    Err(StorageError::PreconditionFailed(
+                        "org does not belong to tenant".into(),
+                    ))
+                } else {
+                    tenant_record.balance -= delta;
+                    tenant_record.updated_at_ms = current_timestamp_ms();
+                    record.balance_nanos =
+                        record.balance_nanos.checked_add(delta).ok_or_else(|| {
+                            StorageError::PreconditionFailed("balance overflow".into())
+                        })?;
+                    let balance_u64 = u64::try_from(record.balance_nanos).map_err(|_| {
+                        StorageError::Backend("corrupted balance: negative value".into())
+                    })?;
+                    Ok(Nanos::new(balance_u64))
+                }
+            }
+        };
+
+        let result = match transfer_result {
+            Ok(balance) => IdempotencyResult::Success {
+                balance_nanos: balance.as_u64(),
+            },
+            Err(err) => IdempotencyResult::Error {
+                code: storage_error_to_idempotency(&err),
+                message: err.to_string(),
+            },
+        };
+        keys.insert(
+            scoped_key,
+            IdempotencyEntry {
+                result: result.clone(),
+                expires_at,
+            },
+        );
+        Ok(result)
     }
 
     async fn get_organization_balance(
@@ -263,11 +362,12 @@ impl BillingStore for InMemoryBilling {
 
     async fn check_idempotency_key(
         &self,
-        _tenant: TenantId,
+        tenant: TenantId,
         key: &str,
     ) -> Result<Option<IdempotencyResult>, StorageError> {
         let keys = self.idempotency_keys.lock();
-        match keys.get(key) {
+        let scoped_key = (tenant, key.to_string());
+        match keys.get(&scoped_key) {
             Some(entry) if entry.expires_at > Instant::now() => Ok(Some(entry.result.clone())),
             _ => Ok(None),
         }
@@ -275,15 +375,16 @@ impl BillingStore for InMemoryBilling {
 
     async fn record_idempotency_result(
         &self,
-        _tenant: TenantId,
+        tenant: TenantId,
         key: &str,
         result: IdempotencyResult,
         ttl_secs: u64,
     ) -> Result<Option<IdempotencyResult>, StorageError> {
         let mut keys = self.idempotency_keys.lock();
+        let scoped_key = (tenant, key.to_string());
         // Atomic first-write-wins: if entry already exists and is not expired,
         // return the existing result without overwriting.
-        if let Some(existing) = keys.get(key) {
+        if let Some(existing) = keys.get(&scoped_key) {
             if existing.expires_at > Instant::now() {
                 return Ok(Some(existing.result.clone()));
             }
@@ -292,7 +393,7 @@ impl BillingStore for InMemoryBilling {
             result,
             expires_at: Instant::now() + Duration::from_secs(ttl_secs),
         };
-        keys.insert(key.to_string(), entry);
+        keys.insert(scoped_key, entry);
         Ok(None)
     }
 

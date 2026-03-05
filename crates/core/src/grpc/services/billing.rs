@@ -39,17 +39,6 @@ fn from_idempotency_error_code(code: IdempotencyErrorCode) -> Code {
     }
 }
 
-/// Map a storage error reference to idempotency error code (without consuming it).
-fn storage_error_to_idempotency(err: &crate::storage::StorageError) -> IdempotencyErrorCode {
-    use crate::storage::StorageError;
-    match err {
-        StorageError::NotFound(_) => IdempotencyErrorCode::NotFound,
-        StorageError::AlreadyExists => IdempotencyErrorCode::AlreadyExists,
-        StorageError::PreconditionFailed(_) => IdempotencyErrorCode::FailedPrecondition,
-        StorageError::Backend(_) => IdempotencyErrorCode::Internal,
-    }
-}
-
 fn payments_disabled_status() -> Option<Status> {
     if cfg!(feature = "payments") {
         None
@@ -107,34 +96,6 @@ impl BillingService for BillingServiceImpl {
         // Extract optional idempotency key
         let idempotency_key = body.idempotency_key.filter(|k| !k.is_empty());
 
-        // If idempotency key is provided, check for existing result
-        if let Some(ref key) = idempotency_key {
-            match self.store.check_idempotency_key(tenant_id, key).await {
-                Ok(Some(IdempotencyResult::Success { balance_nanos })) => {
-                    // Replay successful result
-                    let balance_i64 =
-                        i64::try_from(balance_nanos).map_err(|_| RpcError::Internal {
-                            operation: "transfer_to_organization",
-                            details: "cached balance exceeds i64::MAX".into(),
-                        })?;
-                    return Ok(Response::new(TransferToOrganizationResponse {
-                        balance_after_nanos: balance_i64,
-                    }));
-                }
-                Ok(Some(IdempotencyResult::Error { code, message })) => {
-                    // Replay error result
-                    return Err(Status::new(from_idempotency_error_code(code), message));
-                }
-                Ok(None) => {
-                    // Key not found, proceed with operation
-                }
-                Err(_) => {
-                    // Backend error checking idempotency key - proceed without idempotency
-                    // to avoid blocking operations. Logging is handled at the storage layer.
-                }
-            }
-        }
-
         // Parse and validate request parameters
         // Note: body.tenant_id is ignored - we use the authenticated tenant_id from context
         let org_id = OrganizationId(crate::proto::parse_ulid(&body.org_id).map_err(|e| {
@@ -155,64 +116,32 @@ impl BillingService for BillingServiceImpl {
             reason: "too large for u64".into(),
         })?;
 
-        // Execute the transfer
         let result = self
             .store
-            .transfer_to_organization(tenant_id, org_id, Nanos::new(amount))
-            .await;
+            .transfer_to_organization_idempotent(
+                tenant_id,
+                org_id,
+                Nanos::new(amount),
+                idempotency_key.as_deref(),
+                IDEMPOTENCY_TTL_SECS,
+            )
+            .await
+            .map_err(to_status)?;
 
-        // Record result if idempotency key was provided.
-        // Uses atomic upsert: if a concurrent request already recorded a result
-        // (TOCTOU race), we get back the winning result and replay it instead.
-        if let Some(ref key) = idempotency_key {
-            let idempotency_result = match &result {
-                Ok(balance) => IdempotencyResult::Success {
-                    balance_nanos: balance.as_u64(),
-                },
-                Err(e) => IdempotencyResult::Error {
-                    code: storage_error_to_idempotency(e),
-                    message: e.to_string(),
-                },
-            };
-
-            match self
-                .store
-                .record_idempotency_result(tenant_id, key, idempotency_result, IDEMPOTENCY_TTL_SECS)
-                .await
-            {
-                Ok(Some(IdempotencyResult::Success { balance_nanos })) => {
-                    // A concurrent request already recorded a result -- replay it
-                    let balance_i64 =
-                        i64::try_from(balance_nanos).map_err(|_| RpcError::Internal {
-                            operation: "transfer_to_organization",
-                            details: "cached balance exceeds i64::MAX".into(),
-                        })?;
-                    return Ok(Response::new(TransferToOrganizationResponse {
-                        balance_after_nanos: balance_i64,
-                    }));
-                }
-                Ok(Some(IdempotencyResult::Error { code, message })) => {
-                    return Err(Status::new(from_idempotency_error_code(code), message));
-                }
-                Ok(None) => {
-                    // Our result was recorded successfully, proceed normally
-                }
-                Err(_) => {
-                    // Backend error recording idempotency key - proceed with our result.
-                    // Logging is handled at the storage layer.
-                }
+        match result {
+            IdempotencyResult::Success { balance_nanos } => {
+                let balance_i64 = i64::try_from(balance_nanos).map_err(|_| RpcError::Internal {
+                    operation: "transfer_to_organization",
+                    details: "balance exceeds i64::MAX".into(),
+                })?;
+                Ok(Response::new(TransferToOrganizationResponse {
+                    balance_after_nanos: balance_i64,
+                }))
+            }
+            IdempotencyResult::Error { code, message } => {
+                Err(Status::new(from_idempotency_error_code(code), message))
             }
         }
-
-        // Return result
-        let balance = result.map_err(to_status)?;
-        let balance_i64 = balance.try_as_i64().ok_or_else(|| RpcError::Internal {
-            operation: "transfer_to_organization",
-            details: "balance exceeds i64::MAX".into(),
-        })?;
-        Ok(Response::new(TransferToOrganizationResponse {
-            balance_after_nanos: balance_i64,
-        }))
     }
 
     async fn get_organization_balance(

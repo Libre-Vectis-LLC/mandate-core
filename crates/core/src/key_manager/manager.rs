@@ -3,6 +3,7 @@ use age::x25519::Identity as RageIdentity;
 use bip39::{Language, Mnemonic};
 use hkdf::Hkdf;
 use nazgul::keypair::KeyPair as NazgulKeyPair;
+use nazgul::ring::Ring;
 use nazgul::scalar::Scalar;
 use nazgul::traits::Derivable;
 use rand::{CryptoRng, RngCore};
@@ -40,6 +41,7 @@ const LABEL_RAGE_MASTER: &[u8] = b"mandate-rage-master";
 const LABEL_ORG_SHARED: &[u8] = b"mandate-org-shared-v1";
 const LABEL_DELEGATE: &[u8] = b"mandate-delegate-signer-v1";
 const LABEL_MEMBER_SESSION: &[u8] = b"mandate-member-session-v1";
+const LABEL_MEMBER_POLL_SIGNING: &[u8] = b"mandate-member-poll-signing-v1";
 const LABEL_EVENT_KEY: &[u8] = b"mandate-event-key-v1";
 const LABEL_POLL_KEY: &[u8] = b"mandate-poll-key-v1";
 
@@ -145,6 +147,12 @@ pub trait MandateDerivable {
     fn derive_delegate(&self, org_id: &OrganizationId) -> DelegateNazgulKeyPair;
     fn derive_session(&self, org_id: &OrganizationId, ring_hash: &RingHash)
         -> SessionNazgulKeyPair;
+    fn derive_poll_signing(
+        &self,
+        org_id: &OrganizationId,
+        poll_ring_hash: &RingHash,
+        poll_id: &str,
+    ) -> SessionNazgulKeyPair;
 }
 
 impl MandateDerivable for NazgulKeyPair {
@@ -159,6 +167,16 @@ impl MandateDerivable for NazgulKeyPair {
         ring_hash: &RingHash,
     ) -> SessionNazgulKeyPair {
         let ctx = info(LABEL_MEMBER_SESSION, &[&org_id.to_bytes(), &ring_hash.0]);
+        SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
+    }
+
+    fn derive_poll_signing(
+        &self,
+        org_id: &OrganizationId,
+        poll_ring_hash: &RingHash,
+        poll_id: &str,
+    ) -> SessionNazgulKeyPair {
+        let ctx = poll_signing_context(org_id, poll_ring_hash, poll_id);
         SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
     }
 }
@@ -238,6 +256,55 @@ impl KeyManager {
         let parent = self.derive_nazgul_master_keypair();
         parent.0.derive_session(org_id, ring_hash)
     }
+
+    /// Derive a member poll-signing key scoped to (org, poll_ring_hash, poll_id).
+    /// This prevents cross-poll key-image linkability while preserving deterministic
+    /// public derivation on the server side.
+    pub fn derive_member_poll_signing_key(
+        &self,
+        org_id: &OrganizationId,
+        poll_ring_hash: &RingHash,
+        poll_id: &str,
+    ) -> SessionNazgulKeyPair {
+        let parent = self.derive_nazgul_master_keypair();
+        parent
+            .0
+            .derive_poll_signing(org_id, poll_ring_hash, poll_id)
+    }
+}
+
+fn poll_signing_context(
+    org_id: &OrganizationId,
+    poll_ring_hash: &RingHash,
+    poll_id: &str,
+) -> Vec<u8> {
+    info(
+        LABEL_MEMBER_POLL_SIGNING,
+        &[&org_id.to_bytes(), &poll_ring_hash.0, poll_id.as_bytes()],
+    )
+}
+
+/// Derive the per-poll signing ring from a membership ring of master public keys.
+///
+/// Each member public key is non-hardenedly derived using the same poll-scoped
+/// context as the client-side signer key.
+pub fn derive_poll_signing_ring(
+    org_id: &OrganizationId,
+    poll_ring_hash: &RingHash,
+    poll_id: &str,
+    member_ring: &Ring,
+) -> Ring {
+    let members = member_ring
+        .members()
+        .iter()
+        .map(|member| {
+            let public_only = NazgulKeyPair::from_public_key_only(*member);
+            *public_only
+                .derive_poll_signing(org_id, poll_ring_hash, poll_id)
+                .public()
+        })
+        .collect::<Vec<_>>();
+    Ring::new(members)
 }
 
 /// Helper to derive an Event Ephemeral Identity ($K_{event}$) from the Organization Shared Secret.
@@ -576,6 +643,43 @@ mod tests {
             private.public(),
             public.public(),
             "public-only derivation must equal private derivation"
+        );
+    }
+
+    #[test]
+    fn poll_signing_key_isolated_by_poll_id() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let org = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB1");
+        let ring = RingHash([8u8; 32]);
+
+        let poll_a = km.derive_member_poll_signing_key(&org, &ring, "poll-a");
+        let poll_b = km.derive_member_poll_signing_key(&org, &ring, "poll-b");
+
+        assert_ne!(
+            poll_a.public(),
+            poll_b.public(),
+            "poll-signing keys must differ across poll_id"
+        );
+    }
+
+    #[test]
+    fn public_derivation_matches_private_for_poll_signing() {
+        let mut rng = rand::thread_rng();
+        let (km, _) = KeyManager::new_random(&mut rng).unwrap();
+        let org = org_id_from_str("01ARZ3NDEKTSV4RRFFQ69G5FB2");
+        let ring = RingHash([9u8; 32]);
+        let poll_id = "poll-derive-match";
+
+        let private = km.derive_member_poll_signing_key(&org, &ring, poll_id);
+        let public =
+            NazgulKeyPair::from_public_key_only(*km.derive_nazgul_master_keypair().0.public())
+                .derive_poll_signing(&org, &ring, poll_id);
+
+        assert_eq!(
+            private.public(),
+            public.public(),
+            "public-only poll derivation must equal private derivation"
         );
     }
 

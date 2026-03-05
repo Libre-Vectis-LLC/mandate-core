@@ -3,7 +3,7 @@
 use crate::ids::{Nanos, OrganizationId, TenantId};
 use async_trait::async_trait;
 
-use super::types::{IdempotencyResult, StorageError};
+use super::types::{IdempotencyErrorCode, IdempotencyResult, StorageError};
 
 /// Tenant balance information with metadata.
 #[derive(Debug, Clone, Copy)]
@@ -12,6 +12,15 @@ pub struct TenantBalanceInfo {
     pub balance: Nanos,
     /// Unix timestamp (milliseconds) when balance was last updated.
     pub updated_at_ms: i64,
+}
+
+fn storage_error_to_idempotency(err: &StorageError) -> IdempotencyErrorCode {
+    match err {
+        StorageError::NotFound(_) => IdempotencyErrorCode::NotFound,
+        StorageError::AlreadyExists => IdempotencyErrorCode::AlreadyExists,
+        StorageError::PreconditionFailed(_) => IdempotencyErrorCode::FailedPrecondition,
+        StorageError::Backend(_) => IdempotencyErrorCode::Internal,
+    }
 }
 
 #[async_trait]
@@ -68,6 +77,54 @@ pub trait BillingStore: Send + Sync {
         org_id: OrganizationId,
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
+
+    /// Transfer funds from tenant balance to an org with optional idempotency replay.
+    ///
+    /// Implementations should prefer an atomic "claim key -> execute -> persist result"
+    /// strategy when `idempotency_key` is provided, to avoid TOCTOU races under retries.
+    ///
+    /// Default behavior composes `check_idempotency_key`, `transfer_to_organization`,
+    /// and `record_idempotency_result`, which is functionally correct but not fully
+    /// race-free under high concurrency.
+    async fn transfer_to_organization_idempotent(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        amount: Nanos,
+        idempotency_key: Option<&str>,
+        ttl_secs: u64,
+    ) -> Result<IdempotencyResult, StorageError> {
+        let Some(key) = idempotency_key.filter(|k| !k.is_empty()) else {
+            let balance = self
+                .transfer_to_organization(tenant, org_id, amount)
+                .await?;
+            return Ok(IdempotencyResult::Success {
+                balance_nanos: balance.as_u64(),
+            });
+        };
+
+        if let Some(existing) = self.check_idempotency_key(tenant, key).await? {
+            return Ok(existing);
+        }
+
+        let op_result = match self.transfer_to_organization(tenant, org_id, amount).await {
+            Ok(balance) => IdempotencyResult::Success {
+                balance_nanos: balance.as_u64(),
+            },
+            Err(err) => IdempotencyResult::Error {
+                code: storage_error_to_idempotency(&err),
+                message: err.to_string(),
+            },
+        };
+
+        match self
+            .record_idempotency_result(tenant, key, op_result.clone(), ttl_secs)
+            .await?
+        {
+            Some(existing) => Ok(existing),
+            None => Ok(op_result),
+        }
+    }
 
     /// Retrieve the current operational budget balance for an org.
     ///

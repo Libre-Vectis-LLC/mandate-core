@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Vote {
     pub org_id: OrganizationId,
+    /// Hash of the per-poll derived signing ring used for this vote signature.
     pub ring_hash: RingHash,
     pub poll_id: String,
     pub poll_hash: ContentHash,

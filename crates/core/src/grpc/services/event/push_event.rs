@@ -4,6 +4,7 @@ use super::service::EventServiceImpl;
 use super::validation::banned_operation_for_event;
 use crate::event::Event;
 use crate::hashing::ring_hash_sha3_256;
+use crate::key_manager::manager::derive_poll_signing_ring;
 use crate::ring_log::{apply_delta, RingDelta};
 use crate::rpc::RpcError;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
@@ -322,23 +323,69 @@ impl EventServiceImpl {
         } else {
             match sig.mode() {
                 crate::crypto::signature::StorageMode::Compact => {
-                    // Get ring hash from event body if available, otherwise use signature's ring hash.
-                    // BanRevoke events don't store ring_hash in body, so we use the signature's.
-                    let ring_hash = event
-                        .event_type
-                        .ring_hash()
-                        .unwrap_or_else(|| sig.ring_hash());
+                    if let crate::event::EventType::VoteCast(vote) = &event.event_type {
+                        let vote_signing_ring = self
+                            .get_or_derive_vote_signing_ring(
+                                tenant,
+                                event.org_id,
+                                vote.poll_ring_hash,
+                                &vote.poll_id,
+                            )
+                            .await?;
+                        let expected_vote_ring_hash =
+                            ring_hash_sha3_256(vote_signing_ring.as_ref());
+                        if vote.ring_hash != expected_vote_ring_hash {
+                            return Err(RpcError::FailedPrecondition {
+                                operation: "vote_signing_ring_binding",
+                                reason:
+                                    "vote.ring_hash does not match derived per-poll signing ring"
+                                        .into(),
+                            }
+                            .into());
+                        }
+                        Some(vote_signing_ring)
+                    } else {
+                        // Get ring hash from event body if available, otherwise use signature's ring hash.
+                        // BanRevoke events don't store ring_hash in body, so we use the signature's.
+                        let ring_hash = event
+                            .event_type
+                            .ring_hash()
+                            .unwrap_or_else(|| sig.ring_hash());
 
-                    Some(
-                        self.store
-                            .ring_by_hash(tenant, event.org_id, &ring_hash)
-                            .await
-                            .map_err(to_status)?,
-                    )
+                        Some(
+                            self.store
+                                .ring_by_hash(tenant, event.org_id, &ring_hash)
+                                .await
+                                .map_err(to_status)?,
+                        )
+                    }
                 }
                 crate::crypto::signature::StorageMode::Archival => None,
             }
         };
+
+        // Enforce per-poll vote signing ring derivation for archival votes.
+        if matches!(sig.mode(), crate::crypto::signature::StorageMode::Archival) {
+            if let crate::event::EventType::VoteCast(vote) = &event.event_type {
+                let vote_signing_ring = self
+                    .get_or_derive_vote_signing_ring(
+                        tenant,
+                        event.org_id,
+                        vote.poll_ring_hash,
+                        &vote.poll_id,
+                    )
+                    .await?;
+                let expected_vote_ring_hash = ring_hash_sha3_256(vote_signing_ring.as_ref());
+                if vote.ring_hash != expected_vote_ring_hash {
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "vote_signing_ring_binding",
+                        reason: "vote.ring_hash does not match derived per-poll signing ring"
+                            .into(),
+                    }
+                    .into());
+                }
+            }
+        }
 
         let signed_msg = event.to_signing_bytes().map_err(|e| RpcError::Internal {
             operation: "event_serialization",
@@ -511,6 +558,32 @@ impl EventServiceImpl {
             sequence_no: id.1.as_i64(),
             event_url: None, // Set by Edge proxy for poll events with Onion URL
         }))
+    }
+
+    async fn get_or_derive_vote_signing_ring(
+        &self,
+        tenant: crate::ids::TenantId,
+        org_id: crate::ids::OrganizationId,
+        poll_ring_hash: crate::ids::RingHash,
+        poll_id: &str,
+    ) -> Result<Arc<Ring>, Status> {
+        let cache_key = (tenant, org_id, poll_ring_hash, poll_id.to_string());
+        if let Some(cached) = self.vote_signing_ring_cache.get(&cache_key).await {
+            return Ok(cached);
+        }
+
+        let poll_member_ring = self
+            .store
+            .ring_by_hash(tenant, org_id, &poll_ring_hash)
+            .await
+            .map_err(to_status)?;
+        let vote_signing_ring =
+            derive_poll_signing_ring(&org_id, &poll_ring_hash, poll_id, &poll_member_ring);
+        let vote_signing_ring = Arc::new(vote_signing_ring);
+        self.vote_signing_ring_cache
+            .insert(cache_key, Arc::clone(&vote_signing_ring))
+            .await;
+        Ok(vote_signing_ring)
     }
 
     /// Build a `ResourceExhausted` status with POW challenge parameters encoded in details.

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use mandate_core::crypto::signature::Signature;
 use mandate_core::event::{Event, EventType, Poll, Vote};
+use mandate_core::hashing::ring_hash_sha3_256;
 use mandate_core::ids::{ContentHash, EventUlid, RingHash};
+use mandate_core::key_manager::manager::derive_poll_signing_ring;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -208,36 +210,6 @@ fn verify_signature(
         details: "event signature missing".to_string(),
     })?;
 
-    // Get ring hash from event body if available, otherwise use signature's ring hash.
-    // BanRevoke events don't store ring_hash in body, so we use the signature's ring_hash.
-    let ring_hash = match event.event_type.ring_hash() {
-        Some(body_hash) => {
-            if sig.ring_hash() != body_hash {
-                return Err(VerificationIssue {
-                    sequence_no,
-                    event_ulid: event.event_ulid.to_string(),
-                    kind: "signature_ring_hash".to_string(),
-                    details: format!(
-                        "signature ring hash mismatch sig={}, event={}",
-                        hex::encode(sig.ring_hash().0),
-                        hex::encode(body_hash.0)
-                    ),
-                });
-            }
-            body_hash
-        }
-        None => sig.ring_hash(),
-    };
-
-    let ring = ring_cache
-        .ring_for_hash(&ring_hash)
-        .map_err(|e| VerificationIssue {
-            sequence_no,
-            event_ulid: event.event_ulid.to_string(),
-            kind: "signature_ring_lookup".to_string(),
-            details: e.to_string(),
-        })?;
-
     let msg = event.to_signing_bytes().map_err(|e| VerificationIssue {
         sequence_no,
         event_ulid: event.event_ulid.to_string(),
@@ -245,8 +217,85 @@ fn verify_signature(
         details: format!("canonical bytes failed: {e}"),
     })?;
 
+    let vote_derived_ring;
+    let ring = if let EventType::VoteCast(vote) = &event.event_type {
+        if sig.ring_hash() != vote.ring_hash {
+            return Err(VerificationIssue {
+                sequence_no,
+                event_ulid: event.event_ulid.to_string(),
+                kind: "signature_ring_hash".to_string(),
+                details: format!(
+                    "signature ring hash mismatch sig={}, event={}",
+                    hex::encode(sig.ring_hash().0),
+                    hex::encode(vote.ring_hash.0)
+                ),
+            });
+        }
+
+        let poll_member_ring = ring_cache
+            .ring_for_hash(&vote.poll_ring_hash)
+            .map_err(|e| VerificationIssue {
+                sequence_no,
+                event_ulid: event.event_ulid.to_string(),
+                kind: "signature_ring_lookup".to_string(),
+                details: e.to_string(),
+            })?;
+        vote_derived_ring = derive_poll_signing_ring(
+            &event.org_id,
+            &vote.poll_ring_hash,
+            &vote.poll_id,
+            &poll_member_ring,
+        );
+        let expected_vote_ring_hash = ring_hash_sha3_256(&vote_derived_ring);
+        if vote.ring_hash != expected_vote_ring_hash {
+            return Err(VerificationIssue {
+                sequence_no,
+                event_ulid: event.event_ulid.to_string(),
+                kind: "signature_vote_ring_binding".to_string(),
+                details: format!(
+                    "vote ring hash mismatch expected={}, got={}",
+                    hex::encode(expected_vote_ring_hash.0),
+                    hex::encode(vote.ring_hash.0)
+                ),
+            });
+        }
+        &vote_derived_ring
+    } else {
+        // Get ring hash from event body if available, otherwise use signature's ring hash.
+        // BanRevoke events don't store ring_hash in body, so we use the signature's ring_hash.
+        let ring_hash = match event.event_type.ring_hash() {
+            Some(body_hash) => {
+                if sig.ring_hash() != body_hash {
+                    return Err(VerificationIssue {
+                        sequence_no,
+                        event_ulid: event.event_ulid.to_string(),
+                        kind: "signature_ring_hash".to_string(),
+                        details: format!(
+                            "signature ring hash mismatch sig={}, event={}",
+                            hex::encode(sig.ring_hash().0),
+                            hex::encode(body_hash.0)
+                        ),
+                    });
+                }
+                body_hash
+            }
+            None => sig.ring_hash(),
+        };
+
+        let ring = ring_cache
+            .ring_for_hash(&ring_hash)
+            .map_err(|e| VerificationIssue {
+                sequence_no,
+                event_ulid: event.event_ulid.to_string(),
+                kind: "signature_ring_lookup".to_string(),
+                details: e.to_string(),
+            })?;
+        vote_derived_ring = ring;
+        &vote_derived_ring
+    };
+
     let ok = sig
-        .verify(Some(&ring), &msg)
+        .verify(Some(ring), &msg)
         .map_err(|e| VerificationIssue {
             sequence_no,
             event_ulid: event.event_ulid.to_string(),
@@ -315,15 +364,15 @@ fn handle_vote(
                 });
             }
         }
-        if vote.ring_hash != *expected_ring {
+        if vote.poll_ring_hash != *expected_ring {
             return Err(VerificationIssue {
                 sequence_no,
                 event_ulid: event_ulid.to_string(),
                 kind: "poll_ring_hash_mismatch".to_string(),
                 details: format!(
-                    "vote ring hash mismatch expected={}, got={}",
+                    "vote poll_ring_hash mismatch expected={}, got={}",
                     hex::encode(expected_ring.0),
-                    hex::encode(vote.ring_hash.0)
+                    hex::encode(vote.poll_ring_hash.0)
                 ),
             });
         }
@@ -367,5 +416,181 @@ fn event_type_name(event_type: &EventType) -> &'static str {
         EventType::BanCreate(_) => "BanCreate",
         EventType::BanRevoke(_) => "BanRevoke",
         EventType::ProofOfInnocence(_) => "ProofOfInnocence",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mandate_core::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
+    use mandate_core::hashing::ring_hash_sha3_256;
+    use mandate_core::ids::{EventId, EventUlid, OrganizationId, RingHash, Ulid};
+    use mandate_core::key_manager::manager::{derive_poll_signing_ring, MandateDerivable};
+    use nazgul::keypair::KeyPair;
+    use nazgul::ring::Ring;
+    use rand::rngs::OsRng;
+    use std::collections::HashMap;
+
+    struct TestContext {
+        org_id: OrganizationId,
+        owner: KeyPair,
+        ring: Ring,
+        ring_hash: RingHash,
+        ring_cache: crate::ring_cache::RingLogCache,
+    }
+
+    fn setup_test_context() -> TestContext {
+        let mut csprng = OsRng;
+        let org_id = OrganizationId(Ulid::new());
+        let owner = KeyPair::generate(&mut csprng);
+        let ring = Ring::new(vec![*owner.public()]);
+        let ring_hash = ring_hash_sha3_256(&ring);
+
+        let ring_cache = crate::ring_cache::RingLogCache {
+            log: Default::default(),
+            cache: {
+                let mut map = HashMap::new();
+                map.insert(ring_hash, ring.clone());
+                map
+            },
+        };
+
+        TestContext {
+            org_id,
+            owner,
+            ring,
+            ring_hash,
+            ring_cache,
+        }
+    }
+
+    #[test]
+    fn test_verify_vote_valid() {
+        let mut ctx = setup_test_context();
+        let poll_id = "poll-1".to_string();
+        let poll = Poll {
+            org_id: ctx.org_id,
+            ring_hash: ctx.ring_hash,
+            poll_id: poll_id.clone(),
+            questions: vec![],
+            created_at: 1,
+            instructions: None,
+            deadline: None,
+        };
+        let poll_hash = poll.hash().unwrap();
+
+        let vote_signing_ring =
+            derive_poll_signing_ring(&ctx.org_id, &ctx.ring_hash, &poll_id, &ctx.ring);
+        let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
+        let vote_signer = ctx
+            .owner
+            .derive_poll_signing(&ctx.org_id, &ctx.ring_hash, &poll_id);
+
+        let vote = Vote {
+            org_id: ctx.org_id,
+            ring_hash: vote_signing_ring_hash,
+            poll_id: poll_id.clone(),
+            poll_hash,
+            poll_ring_hash: ctx.ring_hash,
+            selections: vec![],
+        };
+
+        let mut event = Event {
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([0u8; 32]),
+            org_id: ctx.org_id,
+            sequence_no: None,
+            processed_at: 2,
+            serialization_version: 1,
+            event_type: EventType::VoteCast(vote),
+            signature: None,
+        };
+
+        let signing_bytes = event.to_signing_bytes().unwrap();
+        let signature = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Archival,
+            vote_signer.as_keypair(),
+            &vote_signing_ring,
+            &signing_bytes,
+        )
+        .unwrap();
+        event.signature = Some(signature.clone());
+
+        // 1. Verify signature logic (including ring derivation)
+        verify_signature(1, &event, &mut ctx.ring_cache)
+            .expect("signature verification should pass");
+
+        // 2. Verify vote logic (duplicate detection, poll hash)
+        let mut poll_hashes = HashMap::new();
+        poll_hashes.insert(
+            poll_id.clone(),
+            (poll_hash, ctx.ring_hash, event.event_ulid),
+        );
+        let mut vote_key_images = HashMap::new();
+
+        if let EventType::VoteCast(vote) = &event.event_type {
+            handle_vote(
+                1,
+                &event.event_ulid.to_string(),
+                vote,
+                &event.signature,
+                &mut poll_hashes,
+                &mut vote_key_images,
+                false,
+            )
+            .expect("handle_vote should pass");
+        }
+    }
+
+    #[test]
+    fn test_verify_vote_reject_master_ring() {
+        let mut ctx = setup_test_context();
+        let poll_id = "poll-1".to_string();
+        let poll = Poll {
+            org_id: ctx.org_id,
+            ring_hash: ctx.ring_hash,
+            poll_id: poll_id.clone(),
+            questions: vec![],
+            created_at: 1,
+            instructions: None,
+            deadline: None,
+        };
+        let poll_hash = poll.hash().unwrap();
+
+        // Vote uses master ring hash instead of derived poll ring hash
+        let vote = Vote {
+            org_id: ctx.org_id,
+            ring_hash: ctx.ring_hash,
+            poll_id: poll_id.clone(),
+            poll_hash,
+            poll_ring_hash: ctx.ring_hash,
+            selections: vec![],
+        };
+
+        let mut event = Event {
+            event_ulid: EventUlid(Ulid::new()),
+            previous_event_hash: EventId([0u8; 32]),
+            org_id: ctx.org_id,
+            sequence_no: None,
+            processed_at: 2,
+            serialization_version: 1,
+            event_type: EventType::VoteCast(vote),
+            signature: None,
+        };
+
+        let signing_bytes = event.to_signing_bytes().unwrap();
+        let signature = sign_contextual(
+            SignatureKind::Anonymous,
+            StorageMode::Archival,
+            &ctx.owner,
+            &ctx.ring,
+            &signing_bytes,
+        )
+        .unwrap();
+        event.signature = Some(signature);
+
+        let err = verify_signature(1, &event, &mut ctx.ring_cache).unwrap_err();
+        assert_eq!(err.kind, "signature_vote_ring_binding");
     }
 }

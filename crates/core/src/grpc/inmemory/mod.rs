@@ -314,6 +314,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn billing_idempotency_keys_are_tenant_scoped() {
+        let tenant_a = TenantId(ulid::Ulid::new());
+        let tenant_b = TenantId(ulid::Ulid::new());
+        let orgs = InMemoryOrgs::new();
+        let org_a = orgs
+            .create_organization(tenant_a, "tg-org-a")
+            .await
+            .expect("org A created");
+        let org_b = orgs
+            .create_organization(tenant_b, "tg-org-b")
+            .await
+            .expect("org B created");
+        let billing = InMemoryBilling::new(orgs.shared());
+
+        billing
+            .credit_tenant(tenant_a, "tg-user-a", Nanos::new(200))
+            .await
+            .expect("tenant A credited");
+        billing
+            .credit_tenant(tenant_b, "tg-user-b", Nanos::new(200))
+            .await
+            .expect("tenant B credited");
+
+        let shared_key = "same-idempotency-key";
+        let first = billing
+            .transfer_to_organization_idempotent(
+                tenant_a,
+                org_a,
+                Nanos::new(70),
+                Some(shared_key),
+                60,
+            )
+            .await
+            .expect("tenant A transfer");
+        let second = billing
+            .transfer_to_organization_idempotent(
+                tenant_b,
+                org_b,
+                Nanos::new(30),
+                Some(shared_key),
+                60,
+            )
+            .await
+            .expect("tenant B transfer");
+
+        assert_eq!(
+            first,
+            crate::storage::IdempotencyResult::Success { balance_nanos: 70 }
+        );
+        assert_eq!(
+            second,
+            crate::storage::IdempotencyResult::Success { balance_nanos: 30 }
+        );
+        assert_eq!(
+            billing
+                .get_organization_balance(org_a)
+                .await
+                .expect("org A balance"),
+            Nanos::new(70)
+        );
+        assert_eq!(
+            billing
+                .get_organization_balance(org_b)
+                .await
+                .expect("org B balance"),
+            Nanos::new(30)
+        );
+    }
+
+    #[tokio::test]
     async fn ban_index_counts_bans_per_ring_hash() {
         let ban_index = InMemoryBanIndex::new();
         let tenant = TenantId(ulid::Ulid::new());

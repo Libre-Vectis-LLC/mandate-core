@@ -51,6 +51,20 @@ impl StorageFacade {
             .await
     }
 
+    /// Transfer funds with optional idempotency replay.
+    pub async fn transfer_to_organization_idempotent(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        amount: Nanos,
+        idempotency_key: Option<&str>,
+        ttl_secs: u64,
+    ) -> Result<IdempotencyResult, StorageError> {
+        self.billing
+            .transfer_to_organization_idempotent(tenant, org_id, amount, idempotency_key, ttl_secs)
+            .await
+    }
+
     /// Get an org's current budget balance.
     pub async fn get_organization_balance(
         &self,
