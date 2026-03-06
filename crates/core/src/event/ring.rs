@@ -22,7 +22,7 @@ pub struct CredentialRef {
 /// Identity source - how the member was onboarded
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum IdentitySource {
-    /// Telegram-based identity (default for backward compatibility)
+    /// Telegram-based identity
     #[default]
     Telegram,
     /// Standalone mode identity (invite-based registration)
@@ -53,17 +53,6 @@ pub struct MemberIdentity {
 }
 
 impl MemberIdentity {
-    /// Create legacy identity for backward compatibility with old data
-    /// Old RingOperation::AddMember events had no identity field
-    pub fn legacy() -> Self {
-        MemberIdentity {
-            external_id: None,
-            display_name: None,
-            credential_ref: None,
-            source: IdentitySource::Telegram, // Old data was all Telegram
-        }
-    }
-
     /// Create a Telegram identity
     pub fn telegram(tg_user_id: impl Into<String>, tg_username: Option<String>) -> Self {
         MemberIdentity {
@@ -92,9 +81,6 @@ pub enum RingOperation {
         /// Member's Nazgul master public key
         public_key: MasterPublicKey,
         /// Member identity metadata (required)
-        /// For backward compatibility, old events without identity field
-        /// will deserialize with MemberIdentity::legacy()
-        #[serde(default = "MemberIdentity::legacy")]
         identity: MemberIdentity,
     },
     /// Remove a member from the ring
@@ -119,32 +105,17 @@ mod tests {
     }
 
     #[test]
-    fn test_ring_operation_old_format_deserialize() {
-        // Old format: AddMember without identity field
+    fn test_ring_operation_deserialize_requires_identity() {
         let old_json = r#"{
             "AddMember": {
                 "public_key": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
             }
         }"#;
 
-        let operation: RingOperation =
-            serde_json::from_str(old_json).expect("Should deserialize old format successfully");
+        let error = serde_json::from_str::<RingOperation>(old_json)
+            .expect_err("AddMember without identity metadata should be rejected");
 
-        match operation {
-            RingOperation::AddMember {
-                public_key,
-                identity,
-            } => {
-                assert_eq!(public_key, test_public_key());
-                // Should default to legacy identity
-                assert_eq!(identity, MemberIdentity::legacy());
-                assert_eq!(identity.source, IdentitySource::Telegram);
-                assert!(identity.external_id.is_none());
-                assert!(identity.display_name.is_none());
-                assert!(identity.credential_ref.is_none());
-            }
-            _ => panic!("Expected AddMember variant"),
-        }
+        assert!(error.to_string().contains("identity"));
     }
 
     #[test]
@@ -328,10 +299,12 @@ mod tests {
     #[test]
     fn test_identity_source_other_roundtrip() {
         // Test IdentitySource::Other(String) variant roundtrip
-        let mut identity = MemberIdentity::legacy();
-        identity.source = IdentitySource::Other("custom_source".to_string());
-        identity.external_id = Some("custom_id_123".to_string());
-        identity.display_name = Some("Custom User".to_string());
+        let identity = MemberIdentity {
+            external_id: Some("custom_id_123".to_string()),
+            display_name: Some("Custom User".to_string()),
+            credential_ref: None,
+            source: IdentitySource::Other("custom_source".to_string()),
+        };
 
         let operation = RingOperation::AddMember {
             public_key: test_public_key(),

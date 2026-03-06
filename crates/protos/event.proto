@@ -211,9 +211,15 @@ message PowChallenge {
   // Submissions outside this window are rejected to prevent replay attacks.
   uint64 time_window_secs = 3;
 
-  // Server-generated challenge bytes (deterministic, no server-side caching).
-  // Client must include this in PowSubmission for verification.
+  // Legacy alias for the server-issued deterministic nonce.
+  // Kept populated during migration so older clients can still decode the challenge.
   bytes challenge = 4;
+
+  // Server-issued deterministic nonce used by rspow's near-stateless binding model.
+  bytes deterministic_nonce = 5;
+
+  // Server timestamp used to derive the deterministic nonce.
+  uint64 timestamp = 6;
 }
 
 // Request to get aggregated poll results.

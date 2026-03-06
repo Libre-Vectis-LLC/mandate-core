@@ -6,14 +6,13 @@ use crate::billing::MeteringError;
 use crate::event::Event;
 use crate::hashing::ring_hash_sha3_256;
 use crate::key_manager::manager::derive_poll_signing_ring;
+use crate::key_manager::MandateDerivable;
 use crate::ring_log::{apply_delta, RingDelta};
 use crate::rpc::RpcError;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use mandate_proto::mandate::v1::{PushEventRequest, PushEventResponse};
 use nazgul::keypair::KeyPair as NazgulKeyPair;
 use nazgul::ring::{Ring, RingContext};
-use nazgul::traits::Derivable;
-use sha3::Sha3_512;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
@@ -240,14 +239,9 @@ impl EventServiceImpl {
                 // Create owner keypair (public key only) for derivation
                 let owner_kp = NazgulKeyPair::from_public_key_only(owner_point);
 
-                // Derive delegate key using org_id as context
-                let org_bytes = event.org_id.to_bytes();
-                let mut ctx =
-                    Vec::with_capacity(b"mandate-delegate-signer-v1".len() + org_bytes.len());
-                ctx.extend_from_slice(b"mandate-delegate-signer-v1");
-                ctx.extend_from_slice(&org_bytes);
-
-                let delegate_kp = owner_kp.derive_child::<Sha3_512>(&ctx);
+                // Derive delegate key using the canonical MandateDerivable trait
+                // (ensures consistent info() encoding with client-side derivation)
+                let delegate_kp = owner_kp.derive_delegate(&event.org_id);
 
                 // Build single-element ring containing only the delegate public key
                 let delegate_ring = Ring::new(vec![*delegate_kp.public()]);
@@ -647,15 +641,20 @@ impl EventServiceImpl {
             multiplier,
         );
 
-        // Generate deterministic challenge bytes from tenant + org + current timestamp.
-        // This makes challenges verifiable without server-side state.
-        let challenge = Self::generate_challenge(tenant, org_id);
+        let issued = match self.pow_verifier.issue_params(&params) {
+            Ok(issued) => issued,
+            Err(err) => {
+                return Status::internal(format!("failed to issue POW challenge: {err}"));
+            }
+        };
 
         let pow_challenge = PowChallenge {
             bits: params.bits,
             required_proofs: params.required_proofs as u32,
             time_window_secs: params.time_window_secs,
-            challenge: challenge.to_vec(),
+            challenge: issued.deterministic_nonce.to_vec(),
+            deterministic_nonce: issued.deterministic_nonce.to_vec(),
+            timestamp: issued.timestamp,
         };
 
         // Encode PowChallenge into status details so clients can parse it.
@@ -681,6 +680,24 @@ impl EventServiceImpl {
         org_id: crate::ids::OrganizationId,
         proto_sub: &mandate_proto::mandate::v1::PowSubmission,
     ) -> Result<(), Status> {
+        let submission_timestamp =
+            u64::try_from(proto_sub.timestamp).map_err(|_| RpcError::InvalidArgument {
+                field: "pow_submission.timestamp",
+                reason: format!(
+                    "expected non-negative timestamp, got {}",
+                    proto_sub.timestamp
+                ),
+            })?;
+
+        let expected_deterministic_nonce = self
+            .pow_verifier
+            .deterministic_nonce_for_timestamp(submission_timestamp);
+        if !proto_sub.challenge.is_empty()
+            && proto_sub.challenge.as_slice() != expected_deterministic_nonce
+        {
+            return Err(self.make_pow_challenge_status(tenant, org_id));
+        }
+
         // Convert client_nonce from Vec<u8> to [u8; 32]
         let client_nonce: [u8; 32] =
             proto_sub.client_nonce.as_slice().try_into().map_err(|_| {
@@ -691,7 +708,7 @@ impl EventServiceImpl {
             })?;
 
         let submission = crate::pow::PowSubmission::new(
-            proto_sub.timestamp as u64,
+            submission_timestamp,
             client_nonce,
             proto_sub.proof_bundle.clone(),
         );
@@ -725,33 +742,6 @@ impl EventServiceImpl {
             }
             .into()),
         }
-    }
-
-    /// Generate deterministic challenge bytes from tenant, org, and current time bucket.
-    ///
-    /// Uses a 60-second time bucket to make challenges stable within the POW time window,
-    /// allowing clients to solve and submit within the same window without the challenge
-    /// changing underneath them.
-    fn generate_challenge(
-        tenant: crate::ids::TenantId,
-        org_id: crate::ids::OrganizationId,
-    ) -> [u8; 32] {
-        use sha3::{Digest, Sha3_256};
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time before UNIX epoch")
-            .as_secs();
-
-        // 60-second time bucket aligns with PowParams::time_window_secs
-        let time_bucket = now / 60;
-
-        let mut hasher = Sha3_256::new();
-        hasher.update(b"mandate-pow-challenge-v1");
-        hasher.update(tenant.0.to_bytes());
-        hasher.update(org_id.0.to_bytes());
-        hasher.update(time_bucket.to_le_bytes());
-        hasher.finalize().into()
     }
 
     fn verification_ring_size(
