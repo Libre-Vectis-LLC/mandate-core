@@ -294,6 +294,7 @@ impl EventServiceImpl {
 
         // 3. POW gate: if this org is in POW mode, require valid proof before
         //    spending CPU on expensive signature verification.
+        let mut pow_proof_count: Option<usize> = None;
         {
             let pow_key = (tenant, event.org_id);
             let pow_required = self
@@ -312,6 +313,16 @@ impl EventServiceImpl {
                         // Validate the submitted POW proof.
                         self.verify_pow_submission(tenant, event.org_id, proto_sub)
                             .await?;
+                        // Track proof count for billing after signature verification.
+                        let multiplier = self
+                            .pow_states
+                            .get(&pow_key)
+                            .map(|s| s.get_current_multiplier())
+                            .unwrap_or(3.0);
+                        let params = self
+                            .pow_calculator
+                            .calculate_pow_params(16, 1024, multiplier);
+                        pow_proof_count = Some(params.required_proofs as usize);
                     }
                 }
             }
@@ -402,11 +413,6 @@ impl EventServiceImpl {
             })?;
         let message_bytes = signed_msg.len();
 
-        self.verification_meter
-            .charge_verification(&event.org_id.to_string(), ring_size, message_bytes, None)
-            .await
-            .map_err(Self::verification_meter_error_to_status)?;
-
         let item = crate::crypto::verifier::SignatureItem {
             signature: sig.clone(),
             message: signed_msg,
@@ -451,6 +457,19 @@ impl EventServiceImpl {
                 state.on_verification_success(&self.pow_config);
             }
         }
+
+        // Charge verification AFTER successful signature verification.
+        // This prevents economic DoS where attackers drain balance with invalid signatures.
+        // PoW proof count is included when applicable so CPU-heavy PoW work is billed.
+        self.verification_meter
+            .charge_verification(
+                &event.org_id.to_string(),
+                ring_size,
+                message_bytes,
+                pow_proof_count,
+            )
+            .await
+            .map_err(Self::verification_meter_error_to_status)?;
 
         // 3b. Archival ring_hash consistency check
         //
