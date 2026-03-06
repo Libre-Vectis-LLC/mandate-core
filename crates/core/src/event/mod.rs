@@ -392,36 +392,20 @@ mod tests {
         );
     }
 
-    // Backward compatibility tests for RingOperation serialization
+    // RingOperation serialization tests
 
     #[test]
-    fn test_ring_operation_deserialize_legacy_format_no_identity() {
-        // Old format: AddMember without identity field
-        // This simulates data persisted before the identity field was added
+    fn test_ring_operation_deserialize_requires_identity() {
         let json = r#"{
             "AddMember": {
                 "public_key": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
             }
         }"#;
 
-        let op: RingOperation = serde_json::from_str(json).expect("should deserialize");
+        let error = serde_json::from_str::<RingOperation>(json)
+            .expect_err("AddMember without identity metadata should be rejected");
 
-        match op {
-            RingOperation::AddMember {
-                public_key,
-                identity,
-            } => {
-                // Verify public key deserialized correctly
-                assert_eq!(public_key.0, [0u8; 32]);
-
-                // Verify identity defaults to legacy()
-                assert_eq!(identity.source, IdentitySource::Telegram);
-                assert!(identity.external_id.is_none());
-                assert!(identity.display_name.is_none());
-                assert!(identity.credential_ref.is_none());
-            }
-            _ => panic!("expected AddMember"),
-        }
+        assert!(error.to_string().contains("identity"));
     }
 
     #[test]
@@ -521,16 +505,6 @@ mod tests {
         );
         assert!(id.display_name.is_none());
         assert_eq!(id.source, IdentitySource::Standalone);
-    }
-
-    #[test]
-    fn test_member_identity_legacy_constructor() {
-        let id = MemberIdentity::legacy();
-
-        assert!(id.external_id.is_none());
-        assert!(id.display_name.is_none());
-        assert!(id.credential_ref.is_none());
-        assert_eq!(id.source, IdentitySource::Telegram);
     }
 
     #[test]

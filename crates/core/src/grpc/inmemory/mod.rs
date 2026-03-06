@@ -117,7 +117,7 @@ mod tests {
                 ring_hash: RingHash([7u8; 32]),
                 operations: vec![RingOperation::AddMember {
                     public_key: member_key,
-                    identity: MemberIdentity::legacy(),
+                    identity: MemberIdentity::telegram("tg-user", None),
                 }],
             }),
             signature: None,

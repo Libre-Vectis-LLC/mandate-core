@@ -1,13 +1,22 @@
 //! POW verifier service.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bincode::Options;
 use moka::future::Cache;
+use rspow::near_stateless::prf::DeterministicNonceProvider;
+use rspow::near_stateless::{
+    Blake3NonceProvider, MokaReplayCache, NearStatelessVerifier, Submission as NsSubmission,
+    SystemTimeProvider, VerifierConfig,
+};
+use rspow::ProofBundle;
 use sha3::{Digest, Sha3_256};
 use thiserror::Error;
 
-use super::types::{PowParams, PowSubmission, PowVerifyResult};
+use super::types::{PowIssuedParams, PowParams, PowSubmission, PowVerifyResult};
+
+type NsVerifier = NearStatelessVerifier<Blake3NonceProvider, MokaReplayCache, SystemTimeProvider>;
 
 /// POW verification errors.
 #[derive(Debug, Error)]
@@ -25,7 +34,7 @@ pub enum PowVerifyError {
     ReplayDetected,
 
     /// Failed to deserialize proof bundle.
-    #[error("Failed to deserialize proof bundle: {0}")]
+    #[error("failed to deserialize proof bundle: {0}")]
     DeserializationFailed(String),
 
     /// Proof bundle exceeds verifier size limit.
@@ -36,15 +45,15 @@ pub enum PowVerifyError {
     },
 
     /// Insufficient proofs in bundle.
-    #[error("Insufficient proofs: expected {expected}, got {actual}")]
+    #[error("insufficient proofs: expected {expected}, got {actual}")]
     InsufficientProofs { expected: usize, actual: usize },
 
     /// Proof verification failed.
-    #[error("Proof verification failed: {0}")]
+    #[error("proof verification failed: {0}")]
     VerificationFailed(String),
 
     /// Invalid difficulty bits.
-    #[error("Invalid difficulty: expected {expected} bits, got {actual} bits")]
+    #[error("invalid difficulty: expected {expected} bits, got {actual} bits")]
     InvalidDifficulty { expected: u32, actual: u32 },
 
     /// rspow error.
@@ -52,65 +61,211 @@ pub enum PowVerifyError {
     RspowError(String),
 }
 
-/// Composite key for POW replay detection: `[proof_bundle_hash (32) || client_nonce (32)]`.
-///
-/// Using both components prevents attacks where:
-/// - Same proof_bundle is reused with different client_nonce values
-/// - Same client_nonce is reused with different proof_bundle (though unlikely valid)
+/// Composite key for the legacy replay cache: `[proof_bundle_hash (32) || client_nonce (32)]`.
 type ReplayKey = [u8; 64];
 
 /// Upper bound for serialized rspow proof bundle payload.
-///
-/// This keeps deserialization predictable and limits CPU/memory amplification
-/// from untrusted inputs.
 const MAX_PROOF_BUNDLE_BYTES: usize = 1024 * 1024;
+const DEFAULT_SERVER_SECRET_TAG: &[u8] = b"mandate:pow:server-secret:v1";
+const SERVER_SECRET_ENV: &str = "MANDATE_POW_SERVER_SECRET_HEX";
+const LEGACY_FALLBACK_ENV: &str = "MANDATE_POW_USE_LEGACY_FALLBACK";
 
-/// POW verifier using rspow near-stateless protocol.
+/// POW verifier using rspow's near-stateless protocol.
 ///
-/// Maintains a replay cache to prevent reuse of POW submissions.
-/// The cache key combines proof_bundle hash and client_nonce to ensure
-/// each unique (proof, nonce) pair can only be used once.
+/// The near-stateless path is the default. The legacy dual-cache verifier is
+/// retained as an env-switched fallback during migration.
 pub struct PowVerifier {
-    /// Replay cache: maps (proof_bundle_hash || client_nonce) to timestamp.
+    near_stateless_replay_cache: Arc<MokaReplayCache>,
+    nonce_provider: Arc<Blake3NonceProvider>,
+    time_provider: Arc<SystemTimeProvider>,
+    server_secret: [u8; 32],
+    use_legacy_fallback: bool,
+    // Legacy replay state kept for the transitional fallback path.
     replay_cache: Cache<ReplayKey, u64>,
-    /// Secondary cache: tracks proof_bundle hashes to prevent reuse with any nonce.
     proof_bundle_cache: Cache<[u8; 32], u64>,
 }
 
 impl PowVerifier {
     /// Creates a new POW verifier.
     ///
-    /// # Arguments
-    ///
-    /// * `cache_capacity` - Maximum number of entries to keep in replay cache.
-    /// * `cache_ttl_secs` - Time-to-live for cache entries in seconds.
+    /// The verifier loads `MANDATE_POW_SERVER_SECRET_HEX` when available.
+    /// Otherwise it falls back to a deterministic baked-in secret so server and
+    /// edge stay aligned until dedicated secret plumbing lands.
     pub fn new(cache_capacity: u64, cache_ttl_secs: u64) -> Self {
+        Self::with_server_secret(
+            cache_capacity,
+            cache_ttl_secs,
+            Self::load_server_secret_from_env().unwrap_or_else(Self::default_server_secret),
+        )
+    }
+
+    /// Creates a new POW verifier with an explicit shared server secret.
+    pub fn with_server_secret(
+        cache_capacity: u64,
+        cache_ttl_secs: u64,
+        server_secret: [u8; 32],
+    ) -> Self {
         let replay_cache = Cache::builder()
             .max_capacity(cache_capacity)
-            .time_to_live(std::time::Duration::from_secs(cache_ttl_secs))
+            .time_to_live(Duration::from_secs(cache_ttl_secs))
             .build();
-
-        // Separate cache for proof_bundle hashes to prevent bundle reuse attacks.
-        // This cache tracks which proof bundles have been used, regardless of nonce.
         let proof_bundle_cache = Cache::builder()
             .max_capacity(cache_capacity)
-            .time_to_live(std::time::Duration::from_secs(cache_ttl_secs))
+            .time_to_live(Duration::from_secs(cache_ttl_secs))
             .build();
 
         Self {
+            near_stateless_replay_cache: Arc::new(MokaReplayCache::new(cache_capacity)),
+            nonce_provider: Arc::new(Blake3NonceProvider),
+            time_provider: Arc::new(SystemTimeProvider),
+            server_secret,
+            use_legacy_fallback: Self::env_flag(LEGACY_FALLBACK_ENV),
             replay_cache,
             proof_bundle_cache,
         }
     }
 
-    /// Computes SHA3-256 hash of proof bundle for replay detection.
+    fn env_flag(key: &str) -> bool {
+        std::env::var(key)
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    }
+
+    fn load_server_secret_from_env() -> Option<[u8; 32]> {
+        let value = std::env::var(SERVER_SECRET_ENV).ok()?;
+        let decoded = hex::decode(value).ok()?;
+        decoded.as_slice().try_into().ok()
+    }
+
+    fn default_server_secret() -> [u8; 32] {
+        let mut hasher = Sha3_256::new();
+        hasher.update(DEFAULT_SERVER_SECRET_TAG);
+        hasher.finalize().into()
+    }
+
+    fn verifier_config(params: &PowParams) -> Result<VerifierConfig, PowVerifyError> {
+        let config = VerifierConfig {
+            time_window: Duration::from_secs(params.time_window_secs),
+            min_difficulty: params.bits,
+            min_required_proofs: params.required_proofs,
+        };
+        config
+            .validate()
+            .map_err(|err| PowVerifyError::RspowError(err.to_string()))?;
+        Ok(config)
+    }
+
+    fn build_near_stateless_verifier(
+        &self,
+        params: &PowParams,
+    ) -> Result<NsVerifier, PowVerifyError> {
+        NearStatelessVerifier::new(
+            Self::verifier_config(params)?,
+            self.server_secret,
+            self.nonce_provider.clone(),
+            self.near_stateless_replay_cache.clone(),
+            self.time_provider.clone(),
+        )
+        .map_err(|err| PowVerifyError::RspowError(err.to_string()))
+    }
+
+    fn deserialize_proof_bundle(submission: &PowSubmission) -> Result<ProofBundle, PowVerifyError> {
+        if submission.proof_bundle.len() > MAX_PROOF_BUNDLE_BYTES {
+            return Err(PowVerifyError::ProofBundleTooLarge {
+                max_bytes: MAX_PROOF_BUNDLE_BYTES,
+                actual_bytes: submission.proof_bundle.len(),
+            });
+        }
+
+        bincode::DefaultOptions::new()
+            .with_limit(MAX_PROOF_BUNDLE_BYTES as u64)
+            .deserialize(&submission.proof_bundle)
+            .map_err(|err| PowVerifyError::DeserializationFailed(err.to_string()))
+    }
+
+    /// Derive the deterministic nonce for a previously issued timestamp.
+    pub fn deterministic_nonce_for_timestamp(&self, timestamp: u64) -> [u8; 32] {
+        self.nonce_provider.derive(self.server_secret, timestamp)
+    }
+
+    /// Create the concrete challenge parameters to return to a client.
+    pub fn issue_params(&self, params: &PowParams) -> Result<PowIssuedParams, PowVerifyError> {
+        let solve_params = self.build_near_stateless_verifier(params)?.issue_params();
+        Ok(PowIssuedParams::from_params(
+            params,
+            solve_params.deterministic_nonce,
+            solve_params.timestamp,
+        ))
+    }
+
+    /// Verifies a POW submission.
+    pub async fn verify_submission(
+        &self,
+        submission: &PowSubmission,
+        params: &PowParams,
+    ) -> Result<PowVerifyResult, PowVerifyError> {
+        if self.use_legacy_fallback {
+            // TODO: remove the legacy dual-cache verifier once all supported
+            // deployments have migrated to rspow near-stateless verification.
+            return self.verify_submission_legacy(submission, params).await;
+        }
+
+        let bundle = Self::deserialize_proof_bundle(submission)?;
+        let proofs_verified = bundle.proofs.len();
+
+        if proofs_verified < params.required_proofs {
+            return Err(PowVerifyError::InsufficientProofs {
+                expected: params.required_proofs,
+                actual: proofs_verified,
+            });
+        }
+
+        if bundle.config.bits != params.bits {
+            return Err(PowVerifyError::InvalidDifficulty {
+                expected: params.bits,
+                actual: bundle.config.bits,
+            });
+        }
+
+        let ns_submission = NsSubmission {
+            timestamp: submission.timestamp,
+            client_nonce: submission.client_nonce,
+            proof_bundle: bundle,
+        };
+
+        match self
+            .build_near_stateless_verifier(params)?
+            .verify_submission(&ns_submission)
+        {
+            Ok(()) => Ok(PowVerifyResult::success(proofs_verified)),
+            Err(rspow::near_stateless::NsError::StaleTimestamp)
+            | Err(rspow::near_stateless::NsError::FutureTimestamp) => {
+                Err(PowVerifyError::Expired {
+                    timestamp: submission.timestamp,
+                })
+            }
+            Err(rspow::near_stateless::NsError::Replay) => Err(PowVerifyError::ReplayDetected),
+            Err(rspow::near_stateless::NsError::MasterChallengeMismatch) => Err(
+                PowVerifyError::VerificationFailed("master challenge mismatch".to_string()),
+            ),
+            Err(rspow::near_stateless::NsError::Verify(err)) => {
+                Err(PowVerifyError::VerificationFailed(err.to_string()))
+            }
+            Err(rspow::near_stateless::NsError::InvalidConfig(err)) => {
+                Err(PowVerifyError::RspowError(err))
+            }
+            Err(rspow::near_stateless::NsError::Cache(err)) => {
+                Err(PowVerifyError::RspowError(err.to_string()))
+            }
+        }
+    }
+
     fn hash_proof_bundle(proof_bundle: &[u8]) -> [u8; 32] {
         let mut hasher = Sha3_256::new();
         hasher.update(proof_bundle);
         hasher.finalize().into()
     }
 
-    /// Creates a composite replay key from proof_bundle hash and client_nonce.
     fn make_replay_key(proof_bundle_hash: &[u8; 32], client_nonce: &[u8; 32]) -> ReplayKey {
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(proof_bundle_hash);
@@ -118,40 +273,24 @@ impl PowVerifier {
         key
     }
 
-    /// Verifies a POW submission.
-    ///
-    /// # Arguments
-    ///
-    /// * `submission` - The POW submission from the client.
-    /// * `params` - The POW parameters that were sent to the client.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(PowVerifyResult)` if verification succeeds, or a `PowVerifyError` if it fails.
-    pub async fn verify_submission(
+    async fn verify_submission_legacy(
         &self,
         submission: &PowSubmission,
         params: &PowParams,
     ) -> Result<PowVerifyResult, PowVerifyError> {
-        // Check timestamp validity (within time window)
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| PowVerifyError::InvalidSystemClock(e.to_string()))?
             .as_secs();
 
         let time_diff = current_time.abs_diff(submission.timestamp);
-
         if time_diff > params.time_window_secs {
             return Err(PowVerifyError::Expired {
                 timestamp: submission.timestamp,
             });
         }
 
-        // Compute proof_bundle hash for replay detection
         let proof_bundle_hash = Self::hash_proof_bundle(&submission.proof_bundle);
-
-        // Check if this proof_bundle has been used before (with ANY nonce)
-        // This is the critical fix: prevents reusing the same proof with different nonces
         if self
             .proof_bundle_cache
             .get(&proof_bundle_hash)
@@ -161,34 +300,18 @@ impl PowVerifier {
             return Err(PowVerifyError::ReplayDetected);
         }
 
-        // Also check composite key for paranoia (belt + suspenders)
         let replay_key = Self::make_replay_key(&proof_bundle_hash, &submission.client_nonce);
         if self.replay_cache.get(&replay_key).await.is_some() {
             return Err(PowVerifyError::ReplayDetected);
         }
 
-        if submission.proof_bundle.len() > MAX_PROOF_BUNDLE_BYTES {
-            return Err(PowVerifyError::ProofBundleTooLarge {
-                max_bytes: MAX_PROOF_BUNDLE_BYTES,
-                actual_bytes: submission.proof_bundle.len(),
-            });
-        }
-
-        // Deserialize proof bundle from rspow
-        let bundle: rspow::ProofBundle = bincode::DefaultOptions::new()
-            .with_limit(MAX_PROOF_BUNDLE_BYTES as u64)
-            .deserialize(&submission.proof_bundle)
-            .map_err(|e| PowVerifyError::DeserializationFailed(e.to_string()))?;
-
-        // Check proof count
+        let bundle = Self::deserialize_proof_bundle(submission)?;
         if bundle.proofs.len() < params.required_proofs {
             return Err(PowVerifyError::InsufficientProofs {
                 expected: params.required_proofs,
                 actual: bundle.proofs.len(),
             });
         }
-
-        // Verify difficulty bits
         if bundle.config.bits != params.bits {
             return Err(PowVerifyError::InvalidDifficulty {
                 expected: params.bits,
@@ -196,19 +319,14 @@ impl PowVerifier {
             });
         }
 
-        // Verify the entire bundle using rspow's verify_strict method
         bundle
             .verify_strict(params.bits, params.required_proofs)
-            .map_err(|e| PowVerifyError::VerificationFailed(e.to_string()))?;
+            .map_err(|err| PowVerifyError::VerificationFailed(err.to_string()))?;
 
         let proofs_verified = bundle.proofs.len();
-
-        // All proofs verified successfully, add to both replay caches:
-        // 1. proof_bundle_hash cache - prevents this proof from being reused with any nonce
         self.proof_bundle_cache
             .insert(proof_bundle_hash, submission.timestamp)
             .await;
-        // 2. composite key cache - belt + suspenders
         self.replay_cache
             .insert(replay_key, submission.timestamp)
             .await;
@@ -216,98 +334,86 @@ impl PowVerifier {
         Ok(PowVerifyResult::success(proofs_verified))
     }
 
-    /// Clears all replay caches (for testing purposes).
     #[cfg(test)]
     pub async fn clear_cache(&self) {
         self.replay_cache.invalidate_all();
         self.proof_bundle_cache.invalidate_all();
-        // Wait for invalidation to propagate
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
+    use rspow::equix::EquixEngineBuilder;
+    use rspow::near_stateless::derive_master_challenge;
+    use rspow::pow::PowEngine;
+
     use super::*;
+
+    fn build_submission(
+        verifier: &PowVerifier,
+        issued: &PowIssuedParams,
+        client_nonce: [u8; 32],
+    ) -> PowSubmission {
+        let progress = Arc::new(AtomicU64::new(0));
+        let mut engine = EquixEngineBuilder::default()
+            .bits(issued.bits)
+            .threads(1)
+            .required_proofs(issued.required_proofs)
+            .progress(progress)
+            .build_validated()
+            .expect("engine should build");
+
+        let master = derive_master_challenge(issued.deterministic_nonce, client_nonce);
+        let bundle = engine.solve_bundle(master).expect("solve should succeed");
+        let serialized = bincode::DefaultOptions::new()
+            .serialize(&bundle)
+            .expect("serialize bundle");
+        let _ = verifier;
+
+        PowSubmission::new(issued.timestamp, client_nonce, serialized)
+    }
 
     #[tokio::test]
     async fn test_verifier_creation() {
-        let verifier = PowVerifier::new(10000, 300);
-        assert_eq!(verifier.replay_cache.entry_count(), 0);
+        let verifier = PowVerifier::new(10_000, 300);
+        let issued = verifier
+            .issue_params(&PowParams::new(1, 1, 60))
+            .expect("issue params");
+        assert!(issued.timestamp > 0);
+        assert_ne!(issued.deterministic_nonce, [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_issue_params_matches_deterministic_nonce_derivation() {
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [7u8; 32]);
+        let issued = verifier
+            .issue_params(&PowParams::new(1, 1, 60))
+            .expect("issue params");
+        assert_eq!(
+            issued.deterministic_nonce,
+            verifier.deterministic_nonce_for_timestamp(issued.timestamp)
+        );
     }
 
     #[tokio::test]
     async fn test_expired_submission() {
-        let verifier = PowVerifier::new(10000, 300);
-        let params = PowParams::new(7, 1, 60);
-
-        // Submission from 2 hours ago
-        let old_timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - 7200;
-
-        let submission = PowSubmission::new(old_timestamp, [1u8; 32], vec![]);
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [6u8; 32]);
+        let params = PowParams::new(1, 1, 60);
+        let issued = verifier.issue_params(&params).expect("issue params");
+        let mut submission = build_submission(&verifier, &issued, [1u8; 32]);
+        submission.timestamp = submission.timestamp.saturating_sub(7_200);
 
         let result = verifier.verify_submission(&submission, &params).await;
         assert!(matches!(result, Err(PowVerifyError::Expired { .. })));
     }
 
     #[tokio::test]
-    async fn test_replay_detection_via_proof_bundle() {
-        let verifier = PowVerifier::new(10000, 300);
-        let proof_bundle = vec![1u8, 2, 3, 4]; // Dummy proof bundle
-        let proof_bundle_hash = PowVerifier::hash_proof_bundle(&proof_bundle);
-
-        // Insert proof_bundle hash into cache (simulates previously used proof)
-        verifier
-            .proof_bundle_cache
-            .insert(proof_bundle_hash, 1234567890)
-            .await;
-
-        let params = PowParams::new(7, 1, 60);
-        let submission = PowSubmission::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            [42u8; 32], // Different nonce, but same proof_bundle should be rejected
-            proof_bundle,
-        );
-
-        let result = verifier.verify_submission(&submission, &params).await;
-        assert!(matches!(result, Err(PowVerifyError::ReplayDetected)));
-    }
-
-    #[tokio::test]
-    async fn test_replay_detection_via_composite_key() {
-        let verifier = PowVerifier::new(10000, 300);
-        let proof_bundle = vec![5u8, 6, 7, 8]; // Dummy proof bundle
-        let nonce = [42u8; 32];
-        let proof_bundle_hash = PowVerifier::hash_proof_bundle(&proof_bundle);
-        let replay_key = PowVerifier::make_replay_key(&proof_bundle_hash, &nonce);
-
-        // Insert composite key into replay cache
-        verifier.replay_cache.insert(replay_key, 1234567890).await;
-
-        let params = PowParams::new(7, 1, 60);
-        let submission = PowSubmission::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            nonce,
-            proof_bundle,
-        );
-
-        let result = verifier.verify_submission(&submission, &params).await;
-        assert!(matches!(result, Err(PowVerifyError::ReplayDetected)));
-    }
-
-    #[tokio::test]
     async fn test_rejects_oversized_proof_bundle() {
-        let verifier = PowVerifier::new(10000, 300);
+        let verifier = PowVerifier::new(10_000, 300);
         let params = PowParams::new(7, 1, 60);
         let submission = PowSubmission::new(
             SystemTime::now()
@@ -323,5 +429,49 @@ mod tests {
             result,
             Err(PowVerifyError::ProofBundleTooLarge { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn test_round_trip_verification_uses_near_stateless_binding() {
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [9u8; 32]);
+        let params = PowParams::new(1, 1, 60);
+        let issued = verifier.issue_params(&params).expect("issue params");
+        let submission = build_submission(&verifier, &issued, [11u8; 32]);
+
+        let result = verifier
+            .verify_submission(&submission, &params)
+            .await
+            .expect("verification should succeed");
+        assert!(result.valid);
+        assert_eq!(result.proofs_verified, 1);
+    }
+
+    #[tokio::test]
+    async fn test_replay_detection_uses_near_stateless_cache() {
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [3u8; 32]);
+        let params = PowParams::new(1, 1, 60);
+        let issued = verifier.issue_params(&params).expect("issue params");
+        let submission = build_submission(&verifier, &issued, [5u8; 32]);
+
+        verifier
+            .verify_submission(&submission, &params)
+            .await
+            .expect("first verification should succeed");
+
+        let result = verifier.verify_submission(&submission, &params).await;
+        assert!(matches!(result, Err(PowVerifyError::ReplayDetected)));
+    }
+
+    #[tokio::test]
+    async fn test_master_challenge_mismatch_is_rejected() {
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [2u8; 32]);
+        let params = PowParams::new(1, 1, 60);
+        let issued = verifier.issue_params(&params).expect("issue params");
+
+        let mut submission = build_submission(&verifier, &issued, [8u8; 32]);
+        submission.client_nonce = [9u8; 32];
+
+        let result = verifier.verify_submission(&submission, &params).await;
+        assert!(matches!(result, Err(PowVerifyError::VerificationFailed(_))));
     }
 }

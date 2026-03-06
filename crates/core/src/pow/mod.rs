@@ -17,7 +17,7 @@ pub mod types;
 pub mod verifier;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use types::{PowParams, PowSubmission, PowVerifyResult};
+pub use types::{PowIssuedParams, PowParams, PowSubmission, PowVerifyResult};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use verifier::PowVerifier;
