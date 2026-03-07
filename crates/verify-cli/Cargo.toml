@@ -1,0 +1,21 @@
+[package]
+name = "mandate-verify-cli"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "mandate-verify"
+path = "src/main.rs"
+
+[dependencies]
+mandate-verify.workspace = true
+
+# CLI
+clap = { workspace = true, features = ["derive"] }
+
+# Progress display
+indicatif.workspace = true
+
+# Error handling
+anyhow.workspace = true
