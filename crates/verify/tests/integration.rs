@@ -126,10 +126,11 @@ fn export_report(
 }
 
 /// Expected English sheet names for the exported XLSX.
-const EXPECTED_EN_SHEETS: [&str; 4] = [
+const EXPECTED_EN_SHEETS: [&str; 5] = [
     "Verification Summary",
     "Registry Mapping",
     "Tally Results",
+    "Vote Audit",
     "Charts",
 ];
 
@@ -201,10 +202,18 @@ fn test_e2e_happy_path_5_voters_4_votes() {
     let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
 
-    assert_eq!(sheets.len(), 4, "exported workbook should have 4 sheets");
+    assert_eq!(sheets.len(), 5, "exported workbook should have 5 sheets");
     for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
         assert_eq!(sheets[i], *expected, "sheet {i} name mismatch");
     }
+
+    // Vote Audit sheet: header + 4 votes = 5 rows
+    let audit_range = wb.worksheet_range("Vote Audit").expect("vote audit sheet");
+    assert_eq!(
+        audit_range.rows().count(),
+        5,
+        "vote audit: 1 header + 4 votes"
+    );
 
     // Tally Results sheet: header + 2 options + 1 not-voted + 1 total = 5 rows
     let tally_range = wb
@@ -272,7 +281,7 @@ fn test_e2e_single_voter_single_vote() {
 
     let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
-    assert_eq!(sheets.len(), 4);
+    assert_eq!(sheets.len(), 5);
     for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
         assert_eq!(sheets[i], *expected);
     }
@@ -282,6 +291,10 @@ fn test_e2e_single_voter_single_vote() {
         .worksheet_range("Tally Results")
         .expect("tally results sheet");
     assert_eq!(tally_range.rows().count(), 4);
+
+    // Vote Audit: header + 1 vote = 2 rows
+    let audit_range = wb.worksheet_range("Vote Audit").expect("vote audit sheet");
+    assert_eq!(audit_range.rows().count(), 2);
 
     let _ = std::fs::remove_file(&xlsx_path);
 }
@@ -328,7 +341,7 @@ fn test_e2e_ten_voters_zero_votes() {
 
     let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
-    assert_eq!(sheets.len(), 4);
+    assert_eq!(sheets.len(), 5);
     for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
         assert_eq!(sheets[i], *expected);
     }
@@ -343,11 +356,19 @@ fn test_e2e_ten_voters_zero_votes() {
         "tally should have header + not-voted + total row only"
     );
 
+    // Vote Audit: header only (no votes)
+    let audit_range = wb.worksheet_range("Vote Audit").expect("vote audit sheet");
+    assert_eq!(
+        audit_range.rows().count(),
+        1,
+        "vote audit: header only for zero votes"
+    );
+
     let _ = std::fs::remove_file(&xlsx_path);
 }
 
 // =========================================================================
-// Test 4: Bilingual export preserves 4-sheet structure
+// Test 4: Bilingual export preserves 5-sheet structure
 // =========================================================================
 
 #[test]
@@ -372,7 +393,7 @@ fn test_e2e_bilingual_export() {
     let wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
 
-    assert_eq!(sheets.len(), 4, "bilingual export should have 4 sheets");
+    assert_eq!(sheets.len(), 5, "bilingual export should have 5 sheets");
 
     // All sheet names should contain " | " separator for bilingual
     // (uses "|" instead of "/" because Excel sheet names prohibit "/")

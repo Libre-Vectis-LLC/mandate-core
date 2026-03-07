@@ -246,10 +246,7 @@ pub fn verify_poll(
         .collect();
     let key_image_check = key_image::check_key_image_uniqueness(&key_images);
 
-    // --- Step 7: Shuffle vote checks ---
-    shuffle::secure_shuffle(&mut vote_checks);
-
-    // --- Step 8: Tally votes ---
+    // --- Step 7: Tally votes ---
     //
     // Build an option lookup table from PollBundle.option_definitions.
     // When option_definitions is non-empty, use it for human-readable text.
@@ -293,7 +290,23 @@ pub fn verify_poll(
 
     let tally_result = tally::tally_votes(&choices);
 
-    // --- Step 9: Assemble report ---
+    // --- Step 8: Enrich vote checks with key image + chosen option ---
+    //
+    // vote_checks, key_images, and choices are all indexed by vote index
+    // (0..vote_count), so we can zip them to attach audit data before shuffle.
+    for (i, vc) in vote_checks.iter_mut().enumerate() {
+        if let Some(ki) = key_images.get(i) {
+            vc.key_image_bs58 = ki.clone();
+        }
+        if let Some(choice) = choices.get(i) {
+            vc.chosen_option.clone_from(&choice.option_text);
+        }
+    }
+
+    // --- Step 9: Shuffle vote checks (anti-temporal-correlation) ---
+    shuffle::secure_shuffle(&mut vote_checks);
+
+    // --- Step 10: Assemble report ---
     let ring_size = bundle.ring_member_pubs.len();
     let votes_cast = bundle.vote_events_raw.len();
     let turnout = if ring_size > 0 {

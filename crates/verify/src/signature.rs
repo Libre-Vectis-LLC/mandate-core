@@ -84,6 +84,10 @@ pub struct VoteCheck {
     /// Optional error message if verification encountered an error
     /// (as opposed to a clean `false`).
     pub error: Option<String>,
+    /// KeyImage in bs58 encoding (for voter self-audit).
+    pub key_image_bs58: String,
+    /// The option the voter selected.
+    pub chosen_option: String,
 }
 
 /// Options controlling the batch verification strategy.
@@ -182,6 +186,8 @@ fn verify_parallel(
                     id: item.id.clone(),
                     valid,
                     error: None,
+                    key_image_bs58: String::new(),
+                    chosen_option: String::new(),
                 }),
                 Err(e) => {
                     // Record the error but don't abort the whole batch.
@@ -189,6 +195,8 @@ fn verify_parallel(
                         id: item.id.clone(),
                         valid: false,
                         error: Some(e.to_string()),
+                        key_image_bs58: String::new(),
+                        chosen_option: String::new(),
                     })
                 }
             }
@@ -486,16 +494,22 @@ pub(crate) mod tests {
             id: "v1".into(),
             valid: true,
             error: None,
+            key_image_bs58: String::new(),
+            chosen_option: String::new(),
         };
         let b = VoteCheck {
             id: "v1".into(),
             valid: true,
             error: None,
+            key_image_bs58: String::new(),
+            chosen_option: String::new(),
         };
         let c = VoteCheck {
             id: "v1".into(),
             valid: false,
             error: None,
+            key_image_bs58: String::new(),
+            chosen_option: String::new(),
         };
         assert_eq!(a, b);
         assert_ne!(a, c);

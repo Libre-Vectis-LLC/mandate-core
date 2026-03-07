@@ -1,11 +1,12 @@
 //! XLSX report export for verification results.
 //!
-//! Generates a 4-sheet Excel workbook from a [`VerificationReport`]:
+//! Generates a 5-sheet Excel workbook from a [`VerificationReport`]:
 //!
 //! 1. **Verification Summary** — key-value overview of poll integrity checks.
 //! 2. **Registry Mapping** — voter registry member listing.
 //! 3. **Tally Results** — per-option vote counts including non-voters.
-//! 4. **Charts** — pie chart and bar chart referencing tally data.
+//! 4. **Vote Audit** — per-vote key image + choice for voter self-verification.
+//! 5. **Charts** — pie chart and bar chart referencing tally data.
 
 use std::path::Path;
 
@@ -56,6 +57,7 @@ pub fn export_xlsx(
     write_summary_sheet(&mut workbook, report, locale, &header_fmt, &pct_fmt)?;
     write_registry_sheet(&mut workbook, report, locale, &header_fmt)?;
     let tally_sheet_name = write_tally_sheet(&mut workbook, report, locale, &header_fmt, &pct_fmt)?;
+    write_vote_audit_sheet(&mut workbook, report, locale, &header_fmt)?;
     write_charts_sheet(
         &mut workbook,
         report,
@@ -289,6 +291,41 @@ fn write_tally_sheet(
 }
 
 // ---------------------------------------------------------------------------
+// Sheet 4: Vote Audit (Key Image + Vote Choice per vote)
+// ---------------------------------------------------------------------------
+
+fn write_vote_audit_sheet(
+    workbook: &mut Workbook,
+    report: &VerificationReport,
+    locale: &Locale,
+    header_fmt: &Format,
+) -> Result<(), ExportError> {
+    let sheet_name = truncate_sheet_name(&t(TranslationKey::VoteAudit, locale));
+    let ws = workbook.add_worksheet();
+    ws.set_name(&sheet_name)?;
+
+    let headers = [
+        t(TranslationKey::KeyImageBs58, locale),
+        t(TranslationKey::VoteChoice, locale),
+    ];
+
+    for (col, header) in headers.iter().enumerate() {
+        ws.write_string_with_format(0, col as u16, header, header_fmt)?;
+    }
+
+    ws.set_column_width(0, 55)?;
+    ws.set_column_width(1, 30)?;
+
+    for (i, vc) in report.vote_checks.iter().enumerate() {
+        let row = (i + 1) as u32;
+        ws.write_string(row, 0, &vc.key_image_bs58)?;
+        ws.write_string(row, 1, &vc.chosen_option)?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Sheet 5: Charts (Pie + Bar, referencing Tally Results data)
 // ---------------------------------------------------------------------------
 
@@ -398,21 +435,29 @@ mod tests {
                 id: "vote-0".into(),
                 valid: true,
                 error: None,
+                key_image_bs58: "ki_AAAA".into(),
+                chosen_option: "Red".into(),
             },
             VoteCheck {
                 id: "vote-1".into(),
                 valid: true,
                 error: None,
+                key_image_bs58: "ki_BBBB".into(),
+                chosen_option: "Blue".into(),
             },
             VoteCheck {
                 id: "vote-2".into(),
                 valid: false,
                 error: Some("simulated failure".into()),
+                key_image_bs58: "ki_CCCC".into(),
+                chosen_option: "Red".into(),
             },
             VoteCheck {
                 id: "vote-3".into(),
                 valid: true,
                 error: None,
+                key_image_bs58: "ki_DDDD".into(),
+                chosen_option: "Green".into(),
             },
         ];
 
@@ -468,11 +513,12 @@ mod tests {
         let mut wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
 
-        assert_eq!(sheets.len(), 4, "should have 4 sheets");
+        assert_eq!(sheets.len(), 5, "should have 5 sheets");
         assert_eq!(sheets[0], "Verification Summary");
         assert_eq!(sheets[1], "Registry Mapping");
         assert_eq!(sheets[2], "Tally Results");
-        assert_eq!(sheets[3], "Charts");
+        assert_eq!(sheets[3], "Vote Audit");
+        assert_eq!(sheets[4], "Charts");
 
         // Tally Results: header + 3 options + 1 not-voted + 1 total = 6 rows
         let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
@@ -480,6 +526,14 @@ mod tests {
             tally_range.rows().count(),
             6,
             "tally: 1 header + 3 options + 1 not-voted + 1 total"
+        );
+
+        // Vote Audit: header + 4 votes = 5 rows
+        let audit_range = wb.worksheet_range(&sheets[3]).expect("vote audit sheet");
+        assert_eq!(
+            audit_range.rows().count(),
+            5,
+            "vote audit: 1 header + 4 votes"
         );
 
         // Clean up.
@@ -498,7 +552,7 @@ mod tests {
         let mut wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
 
-        assert_eq!(sheets.len(), 4, "should have 4 sheets");
+        assert_eq!(sheets.len(), 5, "should have 5 sheets");
 
         // Bilingual sheet names should contain " | ".
         for name in &sheets {
@@ -558,7 +612,7 @@ mod tests {
 
         let mut wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
-        assert_eq!(sheets.len(), 4);
+        assert_eq!(sheets.len(), 5);
 
         // Tally should have header + not-voted + total = 3 rows.
         let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
@@ -566,6 +620,14 @@ mod tests {
             tally_range.rows().count(),
             3,
             "header + not-voted + total for empty tally"
+        );
+
+        // Vote Audit should have header only (no votes).
+        let audit_range = wb.worksheet_range(&sheets[3]).expect("vote audit sheet");
+        assert_eq!(
+            audit_range.rows().count(),
+            1,
+            "vote audit: header only for empty votes"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -624,10 +686,11 @@ mod tests {
         let wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
 
-        assert_eq!(sheets.len(), 4);
+        assert_eq!(sheets.len(), 5);
         // Traditional Chinese sheet names.
         assert_eq!(sheets[0], "\u{9a57}\u{8b49}\u{6458}\u{8981}");
         assert_eq!(sheets[2], "\u{8a08}\u{7968}\u{7d50}\u{679c}");
+        assert_eq!(sheets[3], "\u{6295}\u{7968}\u{5be9}\u{8a08}");
 
         let _ = std::fs::remove_file(&path);
     }

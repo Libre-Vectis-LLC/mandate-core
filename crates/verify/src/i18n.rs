@@ -125,6 +125,7 @@ pub enum TranslationKey {
     VerificationSummary,
     RegistryMapping,
     TallyResults,
+    VoteAudit,
     Charts,
     NotVoted,
 
@@ -145,6 +146,10 @@ pub enum TranslationKey {
     VoterInfo,
     MasterPubKey,
     DerivedPubKey,
+
+    // Headers — vote audit
+    KeyImageBs58,
+    VoteChoice,
 
     // Headers — tally
     OptionId,
@@ -179,6 +184,10 @@ pub fn translate(key: TranslationKey, language: Language) -> &'static str {
         (TallyResults, Zhs) => "\u{8ba1}\u{7968}\u{7ed3}\u{679c}",
         (TallyResults, En) => "Tally Results",
         (TallyResults, Zht) => "\u{8a08}\u{7968}\u{7d50}\u{679c}",
+
+        (VoteAudit, Zhs) => "\u{6295}\u{7968}\u{5ba1}\u{8ba1}",
+        (VoteAudit, En) => "Vote Audit",
+        (VoteAudit, Zht) => "\u{6295}\u{7968}\u{5be9}\u{8a08}",
 
         (Charts, Zhs) => "\u{56fe}\u{8868}",
         (Charts, En) => "Charts",
@@ -247,6 +256,15 @@ pub fn translate(key: TranslationKey, language: Language) -> &'static str {
         (DerivedPubKey, En) => "Derived Public Key",
         (DerivedPubKey, Zht) => "\u{884d}\u{751f}\u{516c}\u{9470}",
 
+        // --- Vote audit headers ---
+        (KeyImageBs58, Zhs) => "\u{5bc6}\u{94a5}\u{6620}\u{50cf} (bs58)",
+        (KeyImageBs58, En) => "Key Image (bs58)",
+        (KeyImageBs58, Zht) => "\u{91d1}\u{9470}\u{6620}\u{50cf} (bs58)",
+
+        (VoteChoice, Zhs) => "\u{6295}\u{7968}\u{9009}\u{9879}",
+        (VoteChoice, En) => "Vote Choice",
+        (VoteChoice, Zht) => "\u{6295}\u{7968}\u{9078}\u{9805}",
+
         // --- Tally headers ---
         (OptionId, Zhs) => "\u{9009}\u{9879}ID",
         (OptionId, En) => "Option ID",
@@ -284,6 +302,7 @@ pub const ALL_KEYS: &[TranslationKey] = &[
     TranslationKey::VerificationSummary,
     TranslationKey::RegistryMapping,
     TranslationKey::TallyResults,
+    TranslationKey::VoteAudit,
     TranslationKey::Charts,
     TranslationKey::NotVoted,
     TranslationKey::PollTitle,
@@ -300,6 +319,8 @@ pub const ALL_KEYS: &[TranslationKey] = &[
     TranslationKey::VoterInfo,
     TranslationKey::MasterPubKey,
     TranslationKey::DerivedPubKey,
+    TranslationKey::KeyImageBs58,
+    TranslationKey::VoteChoice,
     TranslationKey::OptionId,
     TranslationKey::OptionText,
     TranslationKey::Votes,
@@ -511,7 +532,7 @@ mod tests {
     fn test_all_keys_count() {
         // Ensure ALL_KEYS matches the number of TranslationKey variants.
         // Update this if you add new keys.
-        assert_eq!(ALL_KEYS.len(), 26);
+        assert_eq!(ALL_KEYS.len(), 29);
     }
 
     // -----------------------------------------------------------------------
