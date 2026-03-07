@@ -1,6 +1,7 @@
 // Mandate verification engine
 
 pub mod bundle;
+pub mod calibration;
 pub mod cross_validate;
 pub mod derivation;
 pub mod export;
