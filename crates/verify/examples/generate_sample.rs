@@ -15,7 +15,7 @@ use std::io::Write as _;
 use std::path::Path;
 
 use mandate_core::key_manager::KeyManager;
-use mandate_verify::bundle::PollBundle;
+use mandate_verify::bundle::{OptionDef, PollBundle};
 use rust_xlsxwriter::Workbook;
 
 /// Standard 24-word test mnemonic (BIP-39 "abandon" series).
@@ -28,11 +28,23 @@ const POLL_ULID: &str = "01JTEST0POLL0DEMO00000VOTE";
 
 const VOTER_NAMES: [&str; 6] = ["Alice", "Bob", "Carol", "Dave", "Eve", "Frank"];
 
-/// Number of votes to cast (< 6 to show partial turnout).
-const VOTES_CAST: usize = 4;
+/// Number of votes to cast (5 of 6 voters; 1 non-voter).
+const VOTES_CAST: usize = 5;
 
-/// Poll options.
-const OPTIONS: [&str; 3] = ["Approve", "Reject", "Abstain"];
+/// Poll title (Simplified Chinese source; Traditional Chinese derived at runtime).
+/// Content: "\u{4e60}\u{8fd1}\u{5e73}\u{662f}\u{5426}\u{770b}\u{8d77}\u{6765}\u{50cf}\u{5c0f}\u{718a}\u{7ef4}\u{5c3c}\u{ff1f}"
+const POLL_TITLE: &str = "\u{4e60}\u{8fd1}\u{5e73}\u{662f}\u{5426}\u{770b}\u{8d77}\u{6765}\u{50cf}\u{5c0f}\u{718a}\u{7ef4}\u{5c3c}\u{ff1f}";
+
+/// Poll option definitions: (option_id, display_text_zhs).
+/// Options: "\u{50cf}" (like), "\u{4e0d}\u{50cf}" (unlike), "\u{5f03}\u{6743}" (abstain)
+const OPTION_DEFS: [(&str, &str); 3] = [
+    ("opt-0", "\u{50cf}"),
+    ("opt-1", "\u{4e0d}\u{50cf}"),
+    ("opt-2", "\u{5f03}\u{6743}"),
+];
+
+/// Vote distribution: 3 like + 1 unlike + 1 abstain = 5 votes, 1 non-voter.
+const VOTE_PATTERN: [usize; 5] = [0, 0, 0, 1, 2];
 
 fn main() {
     let out_dir = Path::new("target/sample-verification");
@@ -77,14 +89,23 @@ fn main() {
     // ---- Build PollBundle ----
     let ring_member_pubs: Vec<String> = voters.iter().map(|(_, pk)| pk.clone()).collect();
 
-    // Simulate vote events: each vote picks an option round-robin.
-    let vote_events_raw: Vec<Vec<u8>> = (0..VOTES_CAST)
-        .map(|i| {
-            let option = OPTIONS[i % OPTIONS.len()];
+    // Simulate vote events: follow VOTE_PATTERN for a 3:2:1 split among 4 voters.
+    let vote_events_raw: Vec<Vec<u8>> = VOTE_PATTERN[..VOTES_CAST]
+        .iter()
+        .map(|&idx| {
+            let option_id = OPTION_DEFS[idx].0;
             // Placeholder: in production this would be an encrypted+signed
-            // protobuf VoteCast event. Here we just store the option text
-            // as raw bytes so the bundle is non-empty.
-            option.as_bytes().to_vec()
+            // protobuf VoteCast event. Here we store the option_id as raw
+            // bytes so the bundle is non-empty.
+            option_id.as_bytes().to_vec()
+        })
+        .collect();
+
+    let option_definitions: Vec<OptionDef> = OPTION_DEFS
+        .iter()
+        .map(|(id, text)| OptionDef {
+            option_id: id.to_string(),
+            option_text_zhs: text.to_string(),
         })
         .collect();
 
@@ -95,6 +116,8 @@ fn main() {
         org_id: ORG_ID.into(),
         poll_ulid: POLL_ULID.into(),
         poll_key_hex: "cafebabe01234567".into(),
+        poll_title: POLL_TITLE.into(),
+        option_definitions,
     };
 
     let bundle_path = out_dir.join("poll-bundle.bin");
@@ -115,7 +138,14 @@ fn main() {
         "  Turnout:     {:.1}%",
         VOTES_CAST as f64 / voters.len() as f64 * 100.0
     );
-    println!("  Options:     {OPTIONS:?}");
+    println!("  Poll title:  {POLL_TITLE}");
+    println!(
+        "  Options:     {:?}",
+        OPTION_DEFS
+            .iter()
+            .map(|(id, t)| format!("{id}={t}"))
+            .collect::<Vec<_>>()
+    );
     println!();
     println!("Voter registry:");
     for (i, (name, pk)) in voters.iter().enumerate() {

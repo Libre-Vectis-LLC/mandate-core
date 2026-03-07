@@ -124,8 +124,9 @@ pub enum TranslationKey {
     // Sheet names
     VerificationSummary,
     RegistryMapping,
-    VoteDetails,
     TallyResults,
+    Charts,
+    NotVoted,
 
     // Headers — summary
     PollTitle,
@@ -140,14 +141,10 @@ pub enum TranslationKey {
     KeyImagesUnique,
     RegistryMatches,
 
-    // Headers — vote details
+    // Headers — registry
     VoterInfo,
     MasterPubKey,
     DerivedPubKey,
-    InRing,
-    KeyImage,
-    SigValid,
-    KiUnique,
 
     // Headers — tally
     OptionId,
@@ -179,13 +176,18 @@ pub fn translate(key: TranslationKey, language: Language) -> &'static str {
         (RegistryMapping, En) => "Registry Mapping",
         (RegistryMapping, Zht) => "\u{767b}\u{8a18}\u{5c0d}\u{6620}",
 
-        (VoteDetails, Zhs) => "\u{6295}\u{7968}\u{8be6}\u{60c5}",
-        (VoteDetails, En) => "Vote Details",
-        (VoteDetails, Zht) => "\u{6295}\u{7968}\u{8a73}\u{60c5}",
-
         (TallyResults, Zhs) => "\u{8ba1}\u{7968}\u{7ed3}\u{679c}",
         (TallyResults, En) => "Tally Results",
         (TallyResults, Zht) => "\u{8a08}\u{7968}\u{7d50}\u{679c}",
+
+        (Charts, Zhs) => "\u{56fe}\u{8868}",
+        (Charts, En) => "Charts",
+        (Charts, Zht) => "\u{5716}\u{8868}",
+
+        // NotVoted = "\u{672a}\u{6295}\u{7968}"
+        (NotVoted, Zhs) => "\u{672a}\u{6295}\u{7968}",
+        (NotVoted, En) => "Not Voted",
+        (NotVoted, Zht) => "\u{672a}\u{6295}\u{7968}",
 
         // --- Summary headers ---
         (PollTitle, Zhs) => "\u{6295}\u{7968}\u{6807}\u{9898}",
@@ -245,22 +247,6 @@ pub fn translate(key: TranslationKey, language: Language) -> &'static str {
         (DerivedPubKey, En) => "Derived Public Key",
         (DerivedPubKey, Zht) => "\u{884d}\u{751f}\u{516c}\u{9470}",
 
-        (InRing, Zhs) => "\u{5728}\u{73af}\u{4e2d}",
-        (InRing, En) => "In Ring",
-        (InRing, Zht) => "\u{5728}\u{74b0}\u{4e2d}",
-
-        (KeyImage, Zhs) => "\u{5bc6}\u{94a5}\u{6620}\u{50cf}",
-        (KeyImage, En) => "Key Image",
-        (KeyImage, Zht) => "\u{91d1}\u{9470}\u{6620}\u{50cf}",
-
-        (SigValid, Zhs) => "\u{7b7e}\u{540d}\u{6709}\u{6548}",
-        (SigValid, En) => "Signature Valid",
-        (SigValid, Zht) => "\u{7c3d}\u{540d}\u{6709}\u{6548}",
-
-        (KiUnique, Zhs) => "\u{6620}\u{50cf}\u{552f}\u{4e00}",
-        (KiUnique, En) => "Key Image Unique",
-        (KiUnique, Zht) => "\u{6620}\u{50cf}\u{552f}\u{4e00}",
-
         // --- Tally headers ---
         (OptionId, Zhs) => "\u{9009}\u{9879}ID",
         (OptionId, En) => "Option ID",
@@ -297,8 +283,9 @@ pub fn translate(key: TranslationKey, language: Language) -> &'static str {
 pub const ALL_KEYS: &[TranslationKey] = &[
     TranslationKey::VerificationSummary,
     TranslationKey::RegistryMapping,
-    TranslationKey::VoteDetails,
     TranslationKey::TallyResults,
+    TranslationKey::Charts,
+    TranslationKey::NotVoted,
     TranslationKey::PollTitle,
     TranslationKey::PollId,
     TranslationKey::OrgId,
@@ -313,10 +300,6 @@ pub const ALL_KEYS: &[TranslationKey] = &[
     TranslationKey::VoterInfo,
     TranslationKey::MasterPubKey,
     TranslationKey::DerivedPubKey,
-    TranslationKey::InRing,
-    TranslationKey::KeyImage,
-    TranslationKey::SigValid,
-    TranslationKey::KiUnique,
     TranslationKey::OptionId,
     TranslationKey::OptionText,
     TranslationKey::Votes,
@@ -385,7 +368,7 @@ mod tests {
         for &key in ALL_KEYS {
             for &lang in &[Language::Zhs, Language::Zht] {
                 let translation = translate(key, lang);
-                let has_non_ascii = translation.chars().any(|c| !c.is_ascii());
+                let has_non_ascii = !translation.is_ascii();
                 assert!(
                     has_non_ascii,
                     "Chinese ({lang}) translation for {key:?} should contain non-ASCII characters, got: {translation}"
@@ -528,7 +511,7 @@ mod tests {
     fn test_all_keys_count() {
         // Ensure ALL_KEYS matches the number of TranslationKey variants.
         // Update this if you add new keys.
-        assert_eq!(ALL_KEYS.len(), 29);
+        assert_eq!(ALL_KEYS.len(), 26);
     }
 
     // -----------------------------------------------------------------------

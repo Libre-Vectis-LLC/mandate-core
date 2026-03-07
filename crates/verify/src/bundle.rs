@@ -25,6 +25,19 @@ pub enum BundleError {
 // PollBundle
 // ---------------------------------------------------------------------------
 
+/// A single poll option definition with its identifier and display text.
+#[derive(Clone, PartialEq, Message)]
+pub struct OptionDef {
+    /// Machine-readable option identifier (e.g., "opt-0").
+    #[prost(string, tag = "1")]
+    pub option_id: String,
+
+    /// Human-readable option text in Simplified Chinese (source language).
+    /// Traditional Chinese is derived at runtime via OpenCC.
+    #[prost(string, tag = "2")]
+    pub option_text_zhs: String,
+}
+
 /// Self-contained bundle for offline poll verification.
 ///
 /// Contains the raw protocol events, ring member public keys, HKDF derivation
@@ -54,6 +67,16 @@ pub struct PollBundle {
     /// Hex-encoded `k_poll` for decrypting poll content.
     #[prost(string, tag = "6")]
     pub poll_key_hex: String,
+
+    /// Human-readable poll title (decrypted from poll event or provided directly).
+    /// Empty string for bundles created before this field was added.
+    #[prost(string, tag = "7")]
+    pub poll_title: String,
+
+    /// Poll option definitions with human-readable text.
+    /// Empty for bundles created before this field was added.
+    #[prost(message, repeated, tag = "8")]
+    pub option_definitions: Vec<OptionDef>,
 }
 
 impl PollBundle {
@@ -88,6 +111,17 @@ mod tests {
             org_id: "org_01JTEST".into(),
             poll_ulid: "01JTEST_POLL".into(),
             poll_key_hex: "deadbeefcafebabe".into(),
+            poll_title: "Test Poll Title".into(),
+            option_definitions: vec![
+                OptionDef {
+                    option_id: "opt-0".into(),
+                    option_text_zhs: "Option A".into(),
+                },
+                OptionDef {
+                    option_id: "opt-1".into(),
+                    option_text_zhs: "Option B".into(),
+                },
+            ],
         }
     }
 
@@ -123,6 +157,8 @@ mod tests {
             org_id: String::new(),
             poll_ulid: String::new(),
             poll_key_hex: String::new(),
+            poll_title: String::new(),
+            option_definitions: Vec::new(),
         };
         let bytes = empty.to_bytes();
         let decoded =
@@ -180,6 +216,8 @@ mod tests {
             org_id: "org_01JTEST".into(),
             poll_ulid: "01JTEST_POLL".into(),
             poll_key_hex: "cafe".into(),
+            poll_title: String::new(),
+            option_definitions: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();
@@ -199,6 +237,8 @@ mod tests {
             org_id: "org_STRESS_TEST".into(),
             poll_ulid: "01JSTRESS_POLL".into(),
             poll_key_hex: "0".repeat(64),
+            poll_title: "Stress Test Poll".into(),
+            option_definitions: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();
@@ -206,6 +246,63 @@ mod tests {
         assert_eq!(decoded, bundle);
         assert_eq!(decoded.vote_events_raw.len(), 100);
         assert_eq!(decoded.ring_member_pubs.len(), 50);
+    }
+
+    #[test]
+    fn test_backward_compat_old_bundle_without_new_fields() {
+        // Simulate a bundle encoded WITHOUT tags 7 and 8 (old format).
+        // Prost decodes missing fields as defaults (empty string, empty vec).
+        let old_format = PollBundle {
+            poll_event_raw: vec![0x01],
+            vote_events_raw: vec![vec![0x0A]],
+            ring_member_pubs: vec!["key123".into()],
+            org_id: "org_OLD".into(),
+            poll_ulid: "01JOLD".into(),
+            poll_key_hex: "cafe".into(),
+            poll_title: String::new(),
+            option_definitions: Vec::new(),
+        };
+        let bytes = old_format.to_bytes();
+
+        // Manually strip tags 7 and 8 by encoding only fields 1-6.
+        // Since poll_title and option_definitions are empty, they won't
+        // appear in the encoded bytes. Decoding should still work.
+        let decoded = PollBundle::from_bytes(&bytes).expect("old-format bundle should decode");
+        assert!(decoded.poll_title.is_empty());
+        assert!(decoded.option_definitions.is_empty());
+    }
+
+    #[test]
+    fn test_option_def_roundtrip() {
+        let bundle = PollBundle {
+            poll_event_raw: vec![0x01],
+            vote_events_raw: Vec::new(),
+            ring_member_pubs: Vec::new(),
+            org_id: String::new(),
+            poll_ulid: String::new(),
+            poll_key_hex: String::new(),
+            poll_title: "Test Title".into(),
+            option_definitions: vec![
+                OptionDef {
+                    option_id: "a".into(),
+                    option_text_zhs: "\u{8d5e}\u{6210}".into(),
+                },
+                OptionDef {
+                    option_id: "b".into(),
+                    option_text_zhs: "\u{53cd}\u{5bf9}".into(),
+                },
+            ],
+        };
+        let bytes = bundle.to_bytes();
+        let decoded = PollBundle::from_bytes(&bytes).expect("option_def bundle should round-trip");
+        assert_eq!(decoded.poll_title, "Test Title");
+        assert_eq!(decoded.option_definitions.len(), 2);
+        assert_eq!(decoded.option_definitions[0].option_id, "a");
+        assert_eq!(
+            decoded.option_definitions[0].option_text_zhs,
+            "\u{8d5e}\u{6210}"
+        );
+        assert_eq!(decoded.option_definitions[1].option_id, "b");
     }
 
     #[test]
@@ -218,6 +315,8 @@ mod tests {
             org_id: "\u{7ec4}\u{7ec7}_01JTEST".into(),
             poll_ulid: "\u{6295}\u{7968}_01J".into(),
             poll_key_hex: "deadbeef".into(),
+            poll_title: "\u{6d4b}\u{8bd5}\u{6295}\u{7968}".into(),
+            option_definitions: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();

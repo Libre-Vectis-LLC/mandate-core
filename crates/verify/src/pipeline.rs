@@ -251,19 +251,42 @@ pub fn verify_poll(
 
     // --- Step 8: Tally votes ---
     //
-    // TODO: Extract real option_id from vote events once parsing is
-    // implemented. For now, use a placeholder that cycles through
-    // synthetic option IDs.
+    // Build an option lookup table from PollBundle.option_definitions.
+    // When option_definitions is non-empty, use it for human-readable text.
+    // When empty (old bundles), fall back to placeholder text.
+    let option_lookup: std::collections::HashMap<&str, &str> = bundle
+        .option_definitions
+        .iter()
+        .map(|def| (def.option_id.as_str(), def.option_text_zhs.as_str()))
+        .collect();
+
     let choices: Vec<VoteChoice> = bundle
         .vote_events_raw
         .iter()
         .enumerate()
-        .map(|(i, _raw)| {
-            // TODO: Decode actual vote selection from raw vote event bytes.
-            let option_id = format!("option-{}", i % 2);
+        .map(|(i, raw)| {
+            // Try to decode the vote event bytes as a UTF-8 option_id.
+            // In production this would parse the actual VoteCast protobuf;
+            // for now the sample generator stores the option_id directly.
+            let option_id = std::str::from_utf8(raw)
+                .ok()
+                .filter(|s| option_lookup.contains_key(s))
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| {
+                    if !bundle.option_definitions.is_empty() {
+                        let idx = i % bundle.option_definitions.len();
+                        bundle.option_definitions[idx].option_id.clone()
+                    } else {
+                        format!("option-{}", i % 2)
+                    }
+                });
+            let option_text = option_lookup
+                .get(option_id.as_str())
+                .map(|s| (*s).to_owned())
+                .unwrap_or_else(|| format!("Option {option_id}"));
             VoteChoice {
                 option_id,
-                option_text: format!("Placeholder option {}", i % 2),
+                option_text,
             }
         })
         .collect();
@@ -280,9 +303,11 @@ pub fn verify_poll(
     };
 
     let summary = PollSummary {
-        // TODO: Extract poll title from poll_event_raw once parsing is
-        // implemented.
-        poll_title: String::from("(poll title placeholder)"),
+        poll_title: if bundle.poll_title.is_empty() {
+            String::from("(untitled poll)")
+        } else {
+            bundle.poll_title.clone()
+        },
         poll_id: bundle.poll_ulid.clone(),
         org_id: bundle.org_id.clone(),
         ring_size,
@@ -344,6 +369,8 @@ mod tests {
             org_id: TEST_ORG_ID.into(),
             poll_ulid: TEST_POLL_ULID.into(),
             poll_key_hex: "deadbeef".into(),
+            poll_title: String::new(),
+            option_definitions: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();

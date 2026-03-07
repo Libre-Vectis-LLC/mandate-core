@@ -91,6 +91,8 @@ fn write_bundle(ring_member_pubs: Vec<String>, vote_count: usize) -> NamedTempFi
         org_id: TEST_ORG_ID.into(),
         poll_ulid: TEST_POLL_ULID.into(),
         poll_key_hex: "deadbeef".into(),
+        poll_title: String::new(),
+        option_definitions: Vec::new(),
     };
     let bytes = bundle.to_bytes();
     let mut tmp = NamedTempFile::new().expect("temp file");
@@ -127,8 +129,8 @@ fn export_report(
 const EXPECTED_EN_SHEETS: [&str; 4] = [
     "Verification Summary",
     "Registry Mapping",
-    "Vote Details",
     "Tally Results",
+    "Charts",
 ];
 
 // =========================================================================
@@ -204,24 +206,14 @@ fn test_e2e_happy_path_5_voters_4_votes() {
         assert_eq!(sheets[i], *expected, "sheet {i} name mismatch");
     }
 
-    // Vote Details sheet: header + 4 votes = 5 rows
-    let vote_range = wb
-        .worksheet_range("Vote Details")
-        .expect("vote details sheet");
-    assert_eq!(
-        vote_range.rows().count(),
-        5,
-        "vote details: 1 header + 4 votes"
-    );
-
-    // Tally Results sheet: header + 2 options + 1 total = 4 rows
+    // Tally Results sheet: header + 2 options + 1 not-voted + 1 total = 5 rows
     let tally_range = wb
         .worksheet_range("Tally Results")
         .expect("tally results sheet");
     assert_eq!(
         tally_range.rows().count(),
-        4,
-        "tally: 1 header + 2 options + 1 total"
+        5,
+        "tally: 1 header + 2 options + 1 not-voted + 1 total"
     );
 
     // Summary sheet: verify poll_id appears in the data
@@ -285,17 +277,11 @@ fn test_e2e_single_voter_single_vote() {
         assert_eq!(sheets[i], *expected);
     }
 
-    // Vote Details: header + 1 vote = 2 rows
-    let vote_range = wb
-        .worksheet_range("Vote Details")
-        .expect("vote details sheet");
-    assert_eq!(vote_range.rows().count(), 2);
-
-    // Tally: header + 1 option + 1 total = 3 rows
+    // Tally: header + 1 option + 1 not-voted + 1 total = 4 rows
     let tally_range = wb
         .worksheet_range("Tally Results")
         .expect("tally results sheet");
-    assert_eq!(tally_range.rows().count(), 3);
+    assert_eq!(tally_range.rows().count(), 4);
 
     let _ = std::fs::remove_file(&xlsx_path);
 }
@@ -347,24 +333,14 @@ fn test_e2e_ten_voters_zero_votes() {
         assert_eq!(sheets[i], *expected);
     }
 
-    // Vote Details: only header row (no votes)
-    let vote_range = wb
-        .worksheet_range("Vote Details")
-        .expect("vote details sheet");
-    assert_eq!(
-        vote_range.rows().count(),
-        1,
-        "vote details should have only the header row"
-    );
-
-    // Tally: header + total = 2 rows (no options)
+    // Tally: header + not-voted + total = 3 rows (no options)
     let tally_range = wb
         .worksheet_range("Tally Results")
         .expect("tally results sheet");
     assert_eq!(
         tally_range.rows().count(),
-        2,
-        "tally should have header + total row only"
+        3,
+        "tally should have header + not-voted + total row only"
     );
 
     let _ = std::fs::remove_file(&xlsx_path);

@@ -448,7 +448,7 @@ pub(crate) mod tests {
                 assert!(
                     r.error
                         .as_ref()
-                        .map_or(false, |e| e.contains("simulated error")),
+                        .is_some_and(|e| e.contains("simulated error")),
                     "error should contain 'simulated error'"
                 );
             } else {

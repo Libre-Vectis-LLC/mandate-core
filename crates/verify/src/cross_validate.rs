@@ -39,6 +39,10 @@ pub struct CrossValidationResult {
     /// Number of master public keys present in both registry and ring.
     pub matched: usize,
 
+    /// Registry entries whose master public key is present in both registry
+    /// and ring.
+    pub matched_entries: Vec<RegistryEntry>,
+
     /// Master public keys that appear in the ring but NOT in the registry
     /// (bs58-encoded).
     pub extra_in_ring: Vec<String>,
@@ -125,21 +129,27 @@ pub fn cross_validate(
     // --- Set comparison ---
     let ring_keys: BTreeSet<&str> = ring_member_pubs.iter().map(String::as_str).collect();
 
-    let matched = registry_keys.intersection(&ring_keys).count();
+    let mut matched_entries: Vec<RegistryEntry> = Vec::new();
+    let mut missing_from_ring: Vec<RegistryEntry> = Vec::new();
+
+    for entry in registry {
+        if ring_keys.contains(entry.master_pub_bs58.as_str()) {
+            matched_entries.push(entry.clone());
+        } else {
+            missing_from_ring.push(entry.clone());
+        }
+    }
+
+    let matched = matched_entries.len();
 
     let extra_in_ring: Vec<String> = ring_keys
         .difference(&registry_keys)
         .map(|k| (*k).to_owned())
         .collect();
 
-    let missing_from_ring: Vec<RegistryEntry> = registry
-        .iter()
-        .filter(|entry| !ring_keys.contains(entry.master_pub_bs58.as_str()))
-        .cloned()
-        .collect();
-
     Ok(CrossValidationResult {
         matched,
+        matched_entries,
         extra_in_ring,
         missing_from_ring,
     })

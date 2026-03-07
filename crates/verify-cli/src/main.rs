@@ -177,6 +177,34 @@ fn run_poll(args: PollArgs) -> Result<()> {
     let report = verify_poll(input, opts).context("verification pipeline failed")?;
     finish_spinner(&sp, "Verification complete.");
 
+    // Hard-error on any integrity failure — refuse to produce a report
+    // for inconsistent or invalid data (anti-tampering measure).
+    if !report.summary.registry_matches_ring {
+        let rc = &report.registry_check;
+        bail!(
+            "registry/ring mismatch: {} matched, {} missing from ring, {} extra in ring. \
+             The bundle may be corrupted or tampered with.",
+            rc.matched,
+            rc.missing_from_ring.len(),
+            rc.extra_in_ring.len()
+        );
+    }
+    if !report.summary.all_signatures_valid {
+        let invalid = report.vote_checks.iter().filter(|vc| !vc.valid).count();
+        bail!(
+            "signature verification failed: {invalid} of {} votes have invalid signatures. \
+             The bundle may be corrupted or tampered with.",
+            report.summary.votes_cast
+        );
+    }
+    if !report.summary.all_key_images_unique {
+        bail!(
+            "duplicate key images detected: {:?}. \
+             Double-voting detected — the bundle is invalid.",
+            report.key_image_check.duplicates
+        );
+    }
+
     let sp = spinner("Exporting report...");
     export_xlsx(&report, &locale, &args.output).map_err(|e: ExportError| anyhow::anyhow!(e))?;
     finish_spinner(&sp, "Report exported.");

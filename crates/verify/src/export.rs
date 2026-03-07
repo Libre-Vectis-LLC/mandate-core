@@ -2,12 +2,11 @@
 //!
 //! Generates a 4-sheet Excel workbook from a [`VerificationReport`]:
 //!
-//! 1. **Verification Summary** — key-value pairs with a pie chart for vote shares.
-//! 2. **Registry Mapping** — voter registry vs ring member cross-validation table.
-//! 3. **Vote Details** — per-vote signature check results (shuffled order).
-//! 4. **Tally Results** — per-option vote counts with a bar chart.
+//! 1. **Verification Summary** — key-value overview of poll integrity checks.
+//! 2. **Registry Mapping** — voter registry member listing.
+//! 3. **Tally Results** — per-option vote counts including non-voters.
+//! 4. **Charts** — pie chart and bar chart referencing tally data.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use rust_xlsxwriter::{Chart, ChartType, Format, Workbook, XlsxError};
@@ -56,8 +55,14 @@ pub fn export_xlsx(
 
     write_summary_sheet(&mut workbook, report, locale, &header_fmt, &pct_fmt)?;
     write_registry_sheet(&mut workbook, report, locale, &header_fmt)?;
-    write_vote_details_sheet(&mut workbook, report, locale, &header_fmt)?;
-    write_tally_sheet(&mut workbook, report, locale, &header_fmt, &pct_fmt)?;
+    let tally_sheet_name = write_tally_sheet(&mut workbook, report, locale, &header_fmt, &pct_fmt)?;
+    write_charts_sheet(
+        &mut workbook,
+        report,
+        locale,
+        &header_fmt,
+        &tally_sheet_name,
+    )?;
 
     let buf = workbook.save_to_buffer()?;
     std::fs::write(output, buf)?;
@@ -168,50 +173,6 @@ fn write_summary_sheet(
         row += 1;
     }
 
-    // --- Vote share pie chart (embedded from tally data) ---
-    // Write a small hidden data table for the chart, starting after the
-    // key-value section with a blank row separator.
-    row += 1;
-    let chart_data_start = row;
-
-    ws.write_string_with_format(row, 0, t(TranslationKey::OptionText, locale), header_fmt)?;
-    ws.write_string_with_format(row, 1, t(TranslationKey::Votes, locale), header_fmt)?;
-    row += 1;
-
-    for opt in &report.tally.options {
-        ws.write_string(row, 0, &opt.option_text)?;
-        ws.write_number(row, 1, opt.votes as f64)?;
-        row += 1;
-    }
-
-    let chart_data_end = row - 1;
-
-    // Only insert chart if there is tally data.
-    if !report.tally.options.is_empty() {
-        let mut chart = Chart::new(ChartType::Pie);
-        chart
-            .add_series()
-            .set_categories((
-                sheet_name.as_str(),
-                chart_data_start + 1,
-                0_u16,
-                chart_data_end,
-                0_u16,
-            ))
-            .set_values((
-                sheet_name.as_str(),
-                chart_data_start + 1,
-                1_u16,
-                chart_data_end,
-                1_u16,
-            ));
-        chart
-            .title()
-            .set_name(&t(TranslationKey::TallyResults, locale));
-
-        ws.insert_chart(chart_data_start, 3, &chart)?;
-    }
-
     Ok(())
 }
 
@@ -229,144 +190,36 @@ fn write_registry_sheet(
     let ws = workbook.add_worksheet();
     ws.set_name(&sheet_name)?;
 
-    // Headers: #, Voter Info, Master PubKey (bs58), In Ring?
+    // Headers: #, Voter Info, Master PubKey (bs58)
     let headers = [
         "#",
         &t(TranslationKey::VoterInfo, locale),
         &t(TranslationKey::MasterPubKey, locale),
-        &t(TranslationKey::InRing, locale),
     ];
 
     for (col, header) in headers.iter().enumerate() {
         ws.write_string_with_format(0, col as u16, *header, header_fmt)?;
     }
 
-    // Set column widths.
     ws.set_column_width(0, 5)?;
     ws.set_column_width(1, 25)?;
     ws.set_column_width(2, 55)?;
-    ws.set_column_width(3, 12)?;
 
+    // Registry and ring are guaranteed to match (CLI enforces this),
+    // so we only list matched_entries.
     let rc = &report.registry_check;
-
-    // Build a set of master pub keys that are missing from ring for quick
-    // lookup.
-    let missing_keys: HashSet<&str> = rc
-        .missing_from_ring
-        .iter()
-        .map(|e| e.master_pub_bs58.as_str())
-        .collect();
-
-    // Collect all entries: matched + missing from ring entries come from the
-    // original registry (which we reconstruct from the cross-validation result).
-    // We also include extra-in-ring entries (no voter info).
-    let mut row: u32 = 1;
-    let mut index: usize = 1;
-
-    // Entries from the registry side (matched + missing_from_ring).
-    // The cross-validation result stores missing_from_ring entries.
-    // For matched entries, we don't have the original RegistryEntry in the
-    // report (they are counted, not stored individually). We include only
-    // what we have: missing_from_ring entries and extra_in_ring entries.
-    //
-    // Note: In the current data model, the VerificationReport does not carry
-    // the full registry. We output the entries we DO have.
-
-    // Missing from ring entries (voter in registry but not in ring).
-    for entry in &rc.missing_from_ring {
-        let in_ring = missing_keys.contains(entry.master_pub_bs58.as_str());
-        ws.write_number(row, 0, index as f64)?;
-        ws.write_string(row, 1, &entry.voter_info)?;
-        ws.write_string(row, 2, &entry.master_pub_bs58)?;
-        ws.write_string(row, 3, yes_no(!in_ring, locale))?;
-        row += 1;
-        index += 1;
-    }
-
-    // Extra in ring entries (in ring but not in registry — no voter info).
-    for key in &rc.extra_in_ring {
-        ws.write_number(row, 0, index as f64)?;
-        ws.write_string(row, 1, "—")?;
-        ws.write_string(row, 2, key)?;
-        ws.write_string(row, 3, yes_no(true, locale))?;
-        row += 1;
-        index += 1;
-    }
-
-    // Summary row: matched count.
-    ws.write_string_with_format(row, 0, t(TranslationKey::Total, locale), header_fmt)?;
-    ws.write_string(
-        row,
-        1,
-        format!(
-            "{} matched, {} missing, {} extra",
-            rc.matched,
-            rc.missing_from_ring.len(),
-            rc.extra_in_ring.len()
-        ),
-    )?;
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Sheet 3: Vote Verification Details (SHUFFLED)
-// ---------------------------------------------------------------------------
-
-fn write_vote_details_sheet(
-    workbook: &mut Workbook,
-    report: &VerificationReport,
-    locale: &Locale,
-    header_fmt: &Format,
-) -> Result<(), ExportError> {
-    let sheet_name = truncate_sheet_name(&t(TranslationKey::VoteDetails, locale));
-    let ws = workbook.add_worksheet();
-    ws.set_name(&sheet_name)?;
-
-    // Build a set of duplicate key images for quick per-vote lookup.
-    let duplicate_kis: HashSet<&str> = report
-        .key_image_check
-        .duplicates
-        .iter()
-        .map(String::as_str)
-        .collect();
-
-    // Headers: #, Vote ID, Signature Valid?, Error
-    let headers = [
-        "#",
-        &t(TranslationKey::KeyImage, locale),
-        &t(TranslationKey::SigValid, locale),
-        &t(TranslationKey::KiUnique, locale),
-    ];
-
-    for (col, header) in headers.iter().enumerate() {
-        ws.write_string_with_format(0, col as u16, *header, header_fmt)?;
-    }
-
-    ws.set_column_width(0, 5)?;
-    ws.set_column_width(1, 30)?;
-    ws.set_column_width(2, 18)?;
-    ws.set_column_width(3, 18)?;
-
-    // The vote_checks are already shuffled by the pipeline for
-    // anti-temporal-correlation.
-    for (i, vc) in report.vote_checks.iter().enumerate() {
+    for (i, entry) in rc.matched_entries.iter().enumerate() {
         let row = (i + 1) as u32;
         ws.write_number(row, 0, (i + 1) as f64)?;
-        // Use the vote id as a stand-in for key image (the id field
-        // contains the vote identifier which maps to the key image concept).
-        ws.write_string(row, 1, &vc.id)?;
-        ws.write_string(row, 2, yes_no(vc.valid, locale))?;
-        // Key image uniqueness: if the id is NOT in the duplicate set, it's unique.
-        let ki_unique = !duplicate_kis.contains(vc.id.as_str());
-        ws.write_string(row, 3, yes_no(ki_unique, locale))?;
+        ws.write_string(row, 1, &entry.voter_info)?;
+        ws.write_string(row, 2, &entry.master_pub_bs58)?;
     }
 
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Sheet 4: Tally Results
+// Sheet 3: Tally Results
 // ---------------------------------------------------------------------------
 
 fn write_tally_sheet(
@@ -375,7 +228,7 @@ fn write_tally_sheet(
     locale: &Locale,
     header_fmt: &Format,
     pct_fmt: &Format,
-) -> Result<(), ExportError> {
+) -> Result<String, ExportError> {
     let sheet_name = truncate_sheet_name(&t(TranslationKey::TallyResults, locale));
     let ws = workbook.add_worksheet();
     ws.set_name(&sheet_name)?;
@@ -396,37 +249,87 @@ fn write_tally_sheet(
     ws.set_column_width(2, 10)?;
     ws.set_column_width(3, 12)?;
 
+    let ring_size = report.summary.ring_size;
+
     for (i, opt) in report.tally.options.iter().enumerate() {
         let row = (i + 1) as u32;
         ws.write_string(row, 0, &opt.option_id)?;
         ws.write_string(row, 1, &opt.option_text)?;
         ws.write_number(row, 2, opt.votes as f64)?;
-        ws.write_number_with_format(row, 3, opt.share, pct_fmt)?;
+        // Share relative to ring size (not just votes cast).
+        let share = if ring_size > 0 {
+            opt.votes as f64 / ring_size as f64
+        } else {
+            0.0
+        };
+        ws.write_number_with_format(row, 3, share, pct_fmt)?;
     }
+
+    // "Not Voted" row — ring members who did not cast any vote.
+    let not_voted = ring_size.saturating_sub(report.tally.total_votes);
+    let nv_row = (report.tally.options.len() + 1) as u32;
+    ws.write_string(nv_row, 0, "\u{2014}")?;
+    ws.write_string(nv_row, 1, t(TranslationKey::NotVoted, locale))?;
+    ws.write_number(nv_row, 2, not_voted as f64)?;
+    let nv_share = if ring_size > 0 {
+        not_voted as f64 / ring_size as f64
+    } else {
+        0.0
+    };
+    ws.write_number_with_format(nv_row, 3, nv_share, pct_fmt)?;
 
     // Total row
-    let total_row = (report.tally.options.len() + 1) as u32;
+    let total_row = nv_row + 1;
     ws.write_string_with_format(total_row, 0, t(TranslationKey::Total, locale), header_fmt)?;
     ws.write_string(total_row, 1, "")?;
-    ws.write_number(total_row, 2, report.tally.total_votes as f64)?;
+    ws.write_number(total_row, 2, ring_size as f64)?;
     ws.write_number_with_format(total_row, 3, 1.0, pct_fmt)?;
 
-    // --- Bar chart ---
-    if !report.tally.options.is_empty() {
-        let data_start: u32 = 1;
-        let data_end = report.tally.options.len() as u32;
+    Ok(sheet_name)
+}
 
-        let mut chart = Chart::new(ChartType::Bar);
-        chart
-            .add_series()
-            .set_categories((sheet_name.as_str(), data_start, 1_u16, data_end, 1_u16))
-            .set_values((sheet_name.as_str(), data_start, 2_u16, data_end, 2_u16));
-        chart
-            .title()
-            .set_name(&t(TranslationKey::TallyResults, locale));
+// ---------------------------------------------------------------------------
+// Sheet 5: Charts (Pie + Bar, referencing Tally Results data)
+// ---------------------------------------------------------------------------
 
-        ws.insert_chart(data_end + 2, 0, &chart)?;
+fn write_charts_sheet(
+    workbook: &mut Workbook,
+    report: &VerificationReport,
+    locale: &Locale,
+    _header_fmt: &Format,
+    tally_sheet_name: &str,
+) -> Result<(), ExportError> {
+    let sheet_name = truncate_sheet_name(&t(TranslationKey::Charts, locale));
+    let ws = workbook.add_worksheet();
+    ws.set_name(&sheet_name)?;
+
+    if report.tally.options.is_empty() {
+        return Ok(());
     }
+
+    let data_start: u32 = 1;
+    // Include options + "Not Voted" row.
+    let data_end = (report.tally.options.len() + 1) as u32;
+
+    // Pie chart — vote share
+    let mut pie = Chart::new(ChartType::Pie);
+    pie.add_series()
+        .set_categories((tally_sheet_name, data_start, 1_u16, data_end, 1_u16))
+        .set_values((tally_sheet_name, data_start, 2_u16, data_end, 2_u16));
+    pie.title()
+        .set_name(&t(TranslationKey::TallyResults, locale));
+
+    ws.insert_chart(0, 0, &pie)?;
+
+    // Bar chart — vote counts
+    let mut bar = Chart::new(ChartType::Bar);
+    bar.add_series()
+        .set_categories((tally_sheet_name, data_start, 1_u16, data_end, 1_u16))
+        .set_values((tally_sheet_name, data_start, 2_u16, data_end, 2_u16));
+    bar.title()
+        .set_name(&t(TranslationKey::TallyResults, locale));
+
+    ws.insert_chart(16, 0, &bar)?;
 
     Ok(())
 }
@@ -459,16 +362,35 @@ mod tests {
             turnout: 0.8,
             all_signatures_valid: true,
             all_key_images_unique: true,
-            registry_matches_ring: false,
+            registry_matches_ring: true,
         };
 
         let registry_check = CrossValidationResult {
-            matched: 4,
-            extra_in_ring: vec!["ExtraKeyBs58InRing".into()],
-            missing_from_ring: vec![RegistryEntry {
-                voter_info: "MissingVoter".into(),
-                master_pub_bs58: "MissingKeyBs58".into(),
-            }],
+            matched: 5,
+            matched_entries: vec![
+                RegistryEntry {
+                    voter_info: "Alice".into(),
+                    master_pub_bs58: "AliceKeyBs58".into(),
+                },
+                RegistryEntry {
+                    voter_info: "Bob".into(),
+                    master_pub_bs58: "BobKeyBs58".into(),
+                },
+                RegistryEntry {
+                    voter_info: "Carol".into(),
+                    master_pub_bs58: "CarolKeyBs58".into(),
+                },
+                RegistryEntry {
+                    voter_info: "Dave".into(),
+                    master_pub_bs58: "DaveKeyBs58".into(),
+                },
+                RegistryEntry {
+                    voter_info: "Eve".into(),
+                    master_pub_bs58: "EveKeyBs58".into(),
+                },
+            ],
+            extra_in_ring: vec![],
+            missing_from_ring: vec![],
         };
 
         let vote_checks = vec![
@@ -549,24 +471,15 @@ mod tests {
         assert_eq!(sheets.len(), 4, "should have 4 sheets");
         assert_eq!(sheets[0], "Verification Summary");
         assert_eq!(sheets[1], "Registry Mapping");
-        assert_eq!(sheets[2], "Vote Details");
-        assert_eq!(sheets[3], "Tally Results");
+        assert_eq!(sheets[2], "Tally Results");
+        assert_eq!(sheets[3], "Charts");
 
-        // Sheet 3 (Vote Details): header + 4 votes = 5 rows
-        let vote_range = wb.worksheet_range(&sheets[2]).expect("vote details sheet");
-        // Row count includes header.
-        assert_eq!(
-            vote_range.rows().count(),
-            5,
-            "vote details: 1 header + 4 votes"
-        );
-
-        // Sheet 4 (Tally Results): header + 3 options + 1 total = 5 rows
-        let tally_range = wb.worksheet_range(&sheets[3]).expect("tally results sheet");
+        // Tally Results: header + 3 options + 1 not-voted + 1 total = 6 rows
+        let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
         assert_eq!(
             tally_range.rows().count(),
-            5,
-            "tally: 1 header + 3 options + 1 total"
+            6,
+            "tally: 1 header + 3 options + 1 not-voted + 1 total"
         );
 
         // Clean up.
@@ -587,11 +500,11 @@ mod tests {
 
         assert_eq!(sheets.len(), 4, "should have 4 sheets");
 
-        // Bilingual sheet names should contain " / ".
+        // Bilingual sheet names should contain " | ".
         for name in &sheets {
             assert!(
                 name.contains(" | "),
-                "bilingual sheet name should contain ' / ': got {name}"
+                "bilingual sheet name should contain ' | ': got {name}"
             );
         }
 
@@ -602,7 +515,7 @@ mod tests {
         );
 
         // Check tally sheet has bilingual headers.
-        let tally_range = wb.worksheet_range(&sheets[3]).expect("tally results sheet");
+        let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
         let first_row: Vec<String> = tally_range
             .rows()
             .next()
@@ -647,20 +560,12 @@ mod tests {
         let sheets = wb.sheet_names().to_vec();
         assert_eq!(sheets.len(), 4);
 
-        // Vote details should have only header.
-        let vote_range = wb.worksheet_range(&sheets[2]).expect("vote details sheet");
-        assert_eq!(
-            vote_range.rows().count(),
-            1,
-            "only header row for empty votes"
-        );
-
-        // Tally should have header + total = 2 rows.
-        let tally_range = wb.worksheet_range(&sheets[3]).expect("tally results sheet");
+        // Tally should have header + not-voted + total = 3 rows.
+        let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
         assert_eq!(
             tally_range.rows().count(),
-            2,
-            "header + total for empty tally"
+            3,
+            "header + not-voted + total for empty tally"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -721,8 +626,8 @@ mod tests {
 
         assert_eq!(sheets.len(), 4);
         // Traditional Chinese sheet names.
-        assert_eq!(sheets[0], "\u{9a57}\u{8b49}\u{6458}\u{8981}"); // \u{9a57}\u{8b49}\u{6458}\u{8981}
-        assert_eq!(sheets[3], "\u{8a08}\u{7968}\u{7d50}\u{679c}"); // \u{8a08}\u{7968}\u{7d50}\u{679c}
+        assert_eq!(sheets[0], "\u{9a57}\u{8b49}\u{6458}\u{8981}");
+        assert_eq!(sheets[2], "\u{8a08}\u{7968}\u{7d50}\u{679c}");
 
         let _ = std::fs::remove_file(&path);
     }
