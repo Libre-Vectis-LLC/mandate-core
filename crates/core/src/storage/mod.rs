@@ -41,5 +41,6 @@ pub use organization::{
 pub use billing::{BillingStore, GiftCard, GiftCardStore, TenantBalanceInfo};
 
 pub use index::{
-    BanIndex, BannedOperation, PollRingHashIndex, VoteKeyImageIndex, MAX_BANS_PER_RING_HASH,
+    BanIndex, BannedOperation, BundlePublishedIndex, PollRingHashIndex, VoteKeyImageIndex,
+    VoteRevocationIndex, MAX_BANS_PER_RING_HASH,
 };

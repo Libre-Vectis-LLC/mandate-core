@@ -6,17 +6,23 @@ use serde::{Deserialize, Serialize};
 
 // Submodules
 mod ban;
+mod election_phase;
 mod message;
 mod poll;
+mod poll_bundle_published;
 mod ring;
 mod vote;
+mod vote_revocation;
 
 // Re-export all public types
 pub use ban::{BanCreate, BanRevoke, BanScope, ProofOfInnocence};
+pub use election_phase::ElectionPhase;
 pub use message::AnonymousMessage;
 pub use poll::{Poll, PollOption, PollQuestion, PollQuestionKind};
+pub use poll_bundle_published::PollBundlePublished;
 pub use ring::{CredentialRef, IdentitySource, MemberIdentity, RingOperation, RingUpdate};
 pub use vote::{Vote, VoteSelection};
+pub use vote_revocation::VoteRevocation;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
@@ -62,11 +68,18 @@ impl Event {
 pub enum EventType {
     PollCreate(Poll),
     VoteCast(Vote),
+    VoteRevocation(VoteRevocation),
     MessageCreate(AnonymousMessage),
     RingUpdate(RingUpdate),
     BanCreate(BanCreate),
     BanRevoke(BanRevoke),
     ProofOfInnocence(ProofOfInnocence),
+    PollBundlePublished(PollBundlePublished),
+    /// Fallback for forward compatibility: unknown event types from newer
+    /// protocol versions are captured here instead of causing deserialization
+    /// failures. Readers should skip these events.
+    #[serde(other)]
+    Unknown,
 }
 
 impl EventType {
@@ -79,11 +92,15 @@ impl EventType {
         match self {
             EventType::PollCreate(p) => Some(p.ring_hash),
             EventType::VoteCast(v) => Some(v.ring_hash),
+            EventType::VoteRevocation(vr) => Some(vr.ring_hash),
             EventType::MessageCreate(m) => Some(m.ring_hash),
             EventType::RingUpdate(r) => Some(r.ring_hash),
             EventType::BanCreate(b) => Some(b.ring_hash),
             EventType::BanRevoke(_) => None,
             EventType::ProofOfInnocence(p) => Some(p.historical_ring_hash),
+            // Management event signed by owner/delegate — no per-poll ring.
+            EventType::PollBundlePublished(_) => None,
+            EventType::Unknown => None,
         }
     }
 }
@@ -156,6 +173,8 @@ mod tests {
             created_at: 1,
             instructions: None,
             deadline: None,
+            sealed_duration_secs: None,
+            verification_window_secs: None,
             questions: vec![
                 PollQuestion {
                     question_id: "q2".into(),
@@ -308,6 +327,8 @@ mod tests {
             created_at: 1,
             instructions: None,
             deadline: None,
+            sealed_duration_secs: None,
+            verification_window_secs: None,
         });
         assert_eq!(poll.ring_hash(), Some(ring_hash));
 

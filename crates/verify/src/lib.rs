@@ -15,5 +15,6 @@ pub mod tally;
 
 // Re-export key pipeline types for public API convenience.
 pub use pipeline::{
-    verify_poll, PollSummary, VerificationReport, VerifyError, VerifyInput, VerifyOptions,
+    verify_poll, PollSummary, RevocationCheck, VerificationReport, VerifyError, VerifyInput,
+    VerifyOptions,
 };

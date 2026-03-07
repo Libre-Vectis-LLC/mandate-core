@@ -18,6 +18,7 @@
 /// - `poll`: Poll ring hash index
 pub mod ban;
 pub mod billing;
+pub mod bundle_published;
 pub mod event;
 pub mod key_blob;
 pub mod member;
@@ -26,10 +27,12 @@ pub mod poll;
 pub mod ring;
 pub mod tenant;
 pub mod vote;
+pub mod vote_revocation;
 
 // Re-export all public types for backward compatibility
 pub use ban::{InMemoryBanIndex, NoopBanIndex};
 pub use billing::{InMemoryBilling, InMemoryGiftCards};
+pub use bundle_published::InMemoryBundlePublished;
 pub use event::InMemoryEvents;
 pub use key_blob::InMemoryKeyBlobs;
 pub use member::InMemoryPendingMembers;
@@ -38,6 +41,7 @@ pub use poll::{InMemoryPollRingHashes, NoopPollRingHashes};
 pub use ring::InMemoryRings;
 pub use tenant::InMemoryTenantTokens;
 pub use vote::{InMemoryVoteKeyImages, NoopVoteKeyImages};
+pub use vote_revocation::InMemoryVoteRevocations;
 
 #[cfg(test)]
 mod tests {

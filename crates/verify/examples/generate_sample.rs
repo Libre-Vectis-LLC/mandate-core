@@ -118,6 +118,7 @@ fn main() {
         poll_key_hex: "cafebabe01234567".into(),
         poll_title: POLL_TITLE.into(),
         option_definitions,
+        revocation_events_raw: Vec::new(),
     };
 
     let bundle_path = out_dir.join("poll-bundle.bin");

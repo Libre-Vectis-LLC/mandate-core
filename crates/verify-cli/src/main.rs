@@ -29,6 +29,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Prepare a vote revocation request for a poll.
+    ///
+    /// This constructs and displays a revocation intent. The actual submission
+    /// to the server (via gRPC through Edge) is not yet implemented.
+    Revoke {
+        /// Poll ID (ULID) of the poll whose vote to revoke.
+        #[arg(long)]
+        poll_id: String,
+
+        /// bs58-encoded key image identifying the vote to revoke.
+        #[arg(long)]
+        key_image: String,
+
+        /// Optional reason for the revocation (plaintext, will be encrypted
+        /// by the client before submission).
+        #[arg(long)]
+        reason: Option<String>,
+    },
+
     /// Verify a poll and export a verification report.
     Poll {
         // ----- Offline mode inputs -----
@@ -100,6 +119,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Revoke {
+            poll_id,
+            key_image,
+            reason,
+        } => run_revoke(&poll_id, &key_image, reason.as_deref()),
         Command::Poll {
             registry,
             bundle,
@@ -120,6 +144,45 @@ fn main() -> Result<()> {
             parallelism,
         }),
     }
+}
+
+/// Stub implementation for vote revocation.
+///
+/// Validates arguments and prints an informational message.
+/// Actual gRPC submission will be added when online mode is built.
+fn run_revoke(poll_id: &str, key_image: &str, reason: Option<&str>) -> Result<()> {
+    // Basic validation: poll_id should look like a ULID (26 chars, alphanumeric).
+    if poll_id.len() != 26 || !poll_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        bail!("invalid poll ID: expected a 26-character ULID, got {poll_id:?}");
+    }
+
+    // Basic validation: key_image should be non-empty and look like bs58
+    // (alphanumeric, no 0/O/I/l which bs58 excludes).
+    if key_image.is_empty() {
+        bail!("invalid key image: must be non-empty bs58 string");
+    }
+    if key_image
+        .chars()
+        .any(|c| !c.is_ascii_alphanumeric() || matches!(c, '0' | 'O' | 'I' | 'l'))
+    {
+        bail!(
+            "invalid key image: contains characters outside the bs58 alphabet \
+             (must be alphanumeric excluding 0, O, I, l)"
+        );
+    }
+
+    println!();
+    println!(
+        "  Vote revocation request prepared for poll {}, key image {}",
+        poll_id, key_image
+    );
+    if let Some(r) = reason {
+        println!("  Reason: {r}");
+    }
+    println!();
+    println!("  Submit via Edge/Server endpoint (online mode not yet implemented)");
+
+    Ok(())
 }
 
 struct PollArgs {

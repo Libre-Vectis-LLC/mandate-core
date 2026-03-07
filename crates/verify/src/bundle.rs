@@ -77,6 +77,11 @@ pub struct PollBundle {
     /// Empty for bundles created before this field was added.
     #[prost(message, repeated, tag = "8")]
     pub option_definitions: Vec<OptionDef>,
+
+    /// Raw bytes of each `VoteRevocation` event.
+    /// Empty for bundles created before vote revocation was added.
+    #[prost(bytes = "vec", repeated, tag = "9")]
+    pub revocation_events_raw: Vec<Vec<u8>>,
 }
 
 impl PollBundle {
@@ -122,6 +127,7 @@ mod tests {
                     option_text_zhs: "Option B".into(),
                 },
             ],
+            revocation_events_raw: Vec::new(),
         }
     }
 
@@ -159,6 +165,7 @@ mod tests {
             poll_key_hex: String::new(),
             poll_title: String::new(),
             option_definitions: Vec::new(),
+            revocation_events_raw: Vec::new(),
         };
         let bytes = empty.to_bytes();
         let decoded =
@@ -218,6 +225,7 @@ mod tests {
             poll_key_hex: "cafe".into(),
             poll_title: String::new(),
             option_definitions: Vec::new(),
+            revocation_events_raw: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();
@@ -239,6 +247,7 @@ mod tests {
             poll_key_hex: "0".repeat(64),
             poll_title: "Stress Test Poll".into(),
             option_definitions: Vec::new(),
+            revocation_events_raw: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();
@@ -250,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_backward_compat_old_bundle_without_new_fields() {
-        // Simulate a bundle encoded WITHOUT tags 7 and 8 (old format).
+        // Simulate a bundle encoded WITHOUT tags 7, 8, and 9 (old format).
         // Prost decodes missing fields as defaults (empty string, empty vec).
         let old_format = PollBundle {
             poll_event_raw: vec![0x01],
@@ -261,15 +270,18 @@ mod tests {
             poll_key_hex: "cafe".into(),
             poll_title: String::new(),
             option_definitions: Vec::new(),
+            revocation_events_raw: Vec::new(),
         };
         let bytes = old_format.to_bytes();
 
-        // Manually strip tags 7 and 8 by encoding only fields 1-6.
-        // Since poll_title and option_definitions are empty, they won't
-        // appear in the encoded bytes. Decoding should still work.
+        // Manually strip tags 7, 8, and 9 by encoding only fields 1-6.
+        // Since poll_title, option_definitions, and revocation_events_raw
+        // are empty, they won't appear in the encoded bytes. Decoding
+        // should still work.
         let decoded = PollBundle::from_bytes(&bytes).expect("old-format bundle should decode");
         assert!(decoded.poll_title.is_empty());
         assert!(decoded.option_definitions.is_empty());
+        assert!(decoded.revocation_events_raw.is_empty());
     }
 
     #[test]
@@ -292,6 +304,7 @@ mod tests {
                     option_text_zhs: "\u{53cd}\u{5bf9}".into(),
                 },
             ],
+            revocation_events_raw: Vec::new(),
         };
         let bytes = bundle.to_bytes();
         let decoded = PollBundle::from_bytes(&bytes).expect("option_def bundle should round-trip");
@@ -317,6 +330,7 @@ mod tests {
             poll_key_hex: "deadbeef".into(),
             poll_title: "\u{6d4b}\u{8bd5}\u{6295}\u{7968}".into(),
             option_definitions: Vec::new(),
+            revocation_events_raw: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();

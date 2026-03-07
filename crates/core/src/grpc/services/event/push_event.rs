@@ -87,6 +87,24 @@ impl EventServiceImpl {
                     .into());
                 }
             }
+            crate::event::EventType::VoteRevocation(vr) => {
+                if vr.poll_id.len() > max_id_len {
+                    return Err(RpcError::InvalidArgument {
+                        field: "poll_id",
+                        reason: format!("too long: {} > {}", vr.poll_id.len(), max_id_len),
+                    }
+                    .into());
+                }
+            }
+            crate::event::EventType::PollBundlePublished(pb) => {
+                if pb.poll_id.len() > max_id_len {
+                    return Err(RpcError::InvalidArgument {
+                        field: "poll_id",
+                        reason: format!("too long: {} > {}", pb.poll_id.len(), max_id_len),
+                    }
+                    .into());
+                }
+            }
             crate::event::EventType::MessageCreate(msg) => {
                 // Count UTF-8 characters (not bytes) for proper international text support
                 let content_chars = String::from_utf8_lossy(&msg.content.0).chars().count();
@@ -146,6 +164,105 @@ impl EventServiceImpl {
             }
         }
 
+        // Validate poll existence and election phase for VoteRevocation events.
+        //
+        // VoteRevocation is only accepted during the VerificationOpen phase.
+        // The server retrieves the poll's ring hash (for later ring derivation)
+        // and the bundle_published_at timestamp (for phase determination).
+        //
+        // SECURITY: Unlike VoteCast, VoteRevocation does not carry poll_ring_hash
+        // in its body. The server looks it up from the PollRingHashIndex and uses
+        // it to derive the per-poll signing ring for signature verification.
+        //
+        // We store the looked-up poll_ring_hash for use during ring derivation
+        // in step 3b (compact signature ring loading).
+        let mut vote_revocation_poll_ring_hash: Option<crate::ids::RingHash> = None;
+        if let crate::event::EventType::VoteRevocation(vr) = &event.event_type {
+            let poll_ring_hash = match self
+                .store
+                .get_poll_ring_hash(tenant, event.org_id, &vr.poll_id)
+                .await
+            {
+                Ok(h) => h,
+                Err(crate::storage::StorageError::NotFound(_)) => {
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "poll_existence",
+                        reason: format!("poll does not exist: {}", vr.poll_id),
+                    }
+                    .into());
+                }
+                Err(other) => return Err(to_status(other)),
+            };
+
+            // Check election phase: VoteRevocation is only accepted during VerificationOpen.
+            //
+            // To determine the phase, we need:
+            // 1. The Poll event data (for deadline/verification_window_secs)
+            // 2. The bundle_published_at timestamp
+            //
+            // For now, we check bundle_published_at: if None, the poll is not yet in
+            // VerificationOpen (still Sealed or Voting). If Some, we accept the
+            // revocation during the VerificationOpen window.
+            //
+            // Full phase validation using Poll::election_phase() requires reconstructing
+            // the Poll struct from storage, which will be added when PollMetadataIndex
+            // is implemented. For now, the bundle_published_at check provides the
+            // essential guard: revocations are only accepted after bundle publication.
+            let bundle_published_at = self
+                .store
+                .get_bundle_published_at(tenant, event.org_id, &vr.poll_id)
+                .await
+                .map_err(to_status)?;
+
+            if bundle_published_at.is_none() {
+                return Err(RpcError::FailedPrecondition {
+                    operation: "vote_revocation_phase",
+                    reason: "poll bundle has not been published yet; \
+                             vote revocation is only accepted during VerificationOpen phase"
+                        .into(),
+                }
+                .into());
+            }
+
+            vote_revocation_poll_ring_hash = Some(poll_ring_hash);
+        }
+
+        // Validate poll existence for PollBundlePublished events.
+        //
+        // The poll must exist before a bundle can be published for it.
+        // Also reject duplicate bundle publications (idempotency).
+        if let crate::event::EventType::PollBundlePublished(pb) = &event.event_type {
+            match self
+                .store
+                .get_poll_ring_hash(tenant, event.org_id, &pb.poll_id)
+                .await
+            {
+                Ok(_) => { /* poll exists, proceed */ }
+                Err(crate::storage::StorageError::NotFound(_)) => {
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "poll_existence",
+                        reason: format!("poll does not exist: {}", pb.poll_id),
+                    }
+                    .into());
+                }
+                Err(other) => return Err(to_status(other)),
+            }
+
+            // Reject duplicate bundle publication.
+            let already_published = self
+                .store
+                .get_bundle_published_at(tenant, event.org_id, &pb.poll_id)
+                .await
+                .map_err(to_status)?;
+            if already_published.is_some() {
+                return Err(RpcError::FailedPrecondition {
+                    operation: "bundle_publication",
+                    reason: format!("bundle already published for poll: {}", pb.poll_id),
+                }
+                .into());
+            }
+        }
+
         // 1. Auto-fill Chain Hash
         //
         // The server automatically assigns the correct previous_event_hash based on chain state.
@@ -190,6 +307,41 @@ impl EventServiceImpl {
             }
         }
 
+        // 2a. VoteRevocation idempotency: reject duplicate revocations for same (key_image, poll_id).
+        //
+        // SECURITY: Prevents replay of revocation events. A member can only revoke
+        // their vote once per poll. The key_image binds the revocation to the same
+        // identity that cast the original vote.
+        if let crate::event::EventType::VoteRevocation(vr) = &event.event_type {
+            // First check: was a vote actually cast with this key image?
+            let vote_exists = self
+                .store
+                .is_vote_key_image_used(tenant, event.org_id, &vr.poll_id, &key_image)
+                .await
+                .map_err(to_status)?;
+            if !vote_exists {
+                return Err(RpcError::FailedPrecondition {
+                    operation: "vote_revocation",
+                    reason: "no vote found for this key image in this poll".into(),
+                }
+                .into());
+            }
+
+            // Second check: has this vote already been revoked?
+            let already_revoked = self
+                .store
+                .is_vote_revoked(tenant, event.org_id, &vr.poll_id, &key_image)
+                .await
+                .map_err(to_status)?;
+            if already_revoked {
+                return Err(RpcError::FailedPrecondition {
+                    operation: "vote_revocation",
+                    reason: "vote has already been revoked".into(),
+                }
+                .into());
+            }
+        }
+
         if let Some(operation) = banned_operation_for_event(&event.event_type) {
             let banned = self
                 .store
@@ -205,11 +357,12 @@ impl EventServiceImpl {
             }
         }
 
-        // 2b. Verify owner/delegate for admin events (ban + ring management)
+        // 2b. Verify owner/delegate for admin events (ban + ring management + poll bundle)
         let delegate_external_ring = match &event.event_type {
             crate::event::EventType::BanCreate(_)
             | crate::event::EventType::BanRevoke(_)
-            | crate::event::EventType::RingUpdate(_) => {
+            | crate::event::EventType::RingUpdate(_)
+            | crate::event::EventType::PollBundlePublished(_) => {
                 // Get owner's public key from storage
                 let owner_pubkey = self
                     .store
@@ -350,6 +503,34 @@ impl EventServiceImpl {
                             .into());
                         }
                         Some(vote_signing_ring)
+                    } else if let crate::event::EventType::VoteRevocation(vr) = &event.event_type {
+                        // VoteRevocation uses the same per-poll derived signing ring as VoteCast.
+                        // The poll_ring_hash was looked up from PollRingHashIndex during
+                        // the pre-check phase and stored in vote_revocation_poll_ring_hash.
+                        let poll_ring_hash =
+                            vote_revocation_poll_ring_hash.ok_or_else(|| RpcError::Internal {
+                                operation: "vote_revocation_ring",
+                                details: "poll_ring_hash not set (pre-check skipped?)".into(),
+                            })?;
+                        let revocation_signing_ring = self
+                            .get_or_derive_vote_signing_ring(
+                                tenant,
+                                event.org_id,
+                                poll_ring_hash,
+                                &vr.poll_id,
+                            )
+                            .await?;
+                        let expected_ring_hash =
+                            ring_hash_sha3_256(revocation_signing_ring.as_ref());
+                        if vr.ring_hash != expected_ring_hash {
+                            return Err(RpcError::FailedPrecondition {
+                                operation: "revocation_signing_ring_binding",
+                                reason: "vr.ring_hash does not match derived per-poll signing ring"
+                                    .into(),
+                            }
+                            .into());
+                        }
+                        Some(revocation_signing_ring)
                     } else {
                         // Get ring hash from event body if available, otherwise use signature's ring hash.
                         // BanRevoke events don't store ring_hash in body, so we use the signature's.
@@ -370,7 +551,7 @@ impl EventServiceImpl {
             }
         };
 
-        // Enforce per-poll vote signing ring derivation for archival votes.
+        // Enforce per-poll vote signing ring derivation for archival votes and revocations.
         if matches!(sig.mode(), crate::crypto::signature::StorageMode::Archival) {
             if let crate::event::EventType::VoteCast(vote) = &event.event_type {
                 let vote_signing_ring = self
@@ -387,6 +568,29 @@ impl EventServiceImpl {
                         operation: "vote_signing_ring_binding",
                         reason: "vote.ring_hash does not match derived per-poll signing ring"
                             .into(),
+                    }
+                    .into());
+                }
+            }
+            if let crate::event::EventType::VoteRevocation(vr) = &event.event_type {
+                let poll_ring_hash =
+                    vote_revocation_poll_ring_hash.ok_or_else(|| RpcError::Internal {
+                        operation: "vote_revocation_ring",
+                        details: "poll_ring_hash not set (pre-check skipped?)".into(),
+                    })?;
+                let revocation_signing_ring = self
+                    .get_or_derive_vote_signing_ring(
+                        tenant,
+                        event.org_id,
+                        poll_ring_hash,
+                        &vr.poll_id,
+                    )
+                    .await?;
+                let expected_ring_hash = ring_hash_sha3_256(revocation_signing_ring.as_ref());
+                if vr.ring_hash != expected_ring_hash {
+                    return Err(RpcError::FailedPrecondition {
+                        operation: "revocation_signing_ring_binding",
+                        reason: "vr.ring_hash does not match derived per-poll signing ring".into(),
                     }
                     .into());
                 }
@@ -480,6 +684,7 @@ impl EventServiceImpl {
                 crate::event::EventType::BanCreate(_)
                     | crate::event::EventType::BanRevoke(_)
                     | crate::event::EventType::RingUpdate(_)
+                    | crate::event::EventType::PollBundlePublished(_)
             );
             if !is_admin_event {
                 if let Some(declared_hash) = event.event_type.ring_hash() {
@@ -561,6 +766,24 @@ impl EventServiceImpl {
                 .map_err(to_status)?;
         }
 
+        // 4b. Store PollBundlePublished timestamp BEFORE committing the event.
+        //
+        // This records when the bundle was published, enabling the
+        // Sealed → VerificationOpen phase transition. Subsequent VoteRevocation
+        // events will check this timestamp to verify the poll is in the correct phase.
+        //
+        // DESIGN DECISION: Same ordering rationale as step 4 — index write before
+        // event commit. An orphan timestamp entry is harmless (it just means the
+        // phase check will see VerificationOpen for a poll whose event wasn't committed).
+        if let crate::event::EventType::PollBundlePublished(pb) = &event.event_type {
+            // Use the event's ULID timestamp as the bundle publication time.
+            let published_at = event.event_ulid.as_ulid().timestamp_ms() / 1000;
+            self.store
+                .store_bundle_published_at(tenant, event.org_id, &pb.poll_id, published_at)
+                .await
+                .map_err(to_status)?;
+        }
+
         // 5. Commit the event
         //
         // Re-serialize the event to include the server-assigned previous_event_hash.
@@ -577,6 +800,22 @@ impl EventServiceImpl {
             .append_event(tenant, event.org_id, final_event_bytes)
             .await
             .map_err(to_status)?;
+
+        // 5b. Record vote revocation AFTER event commit.
+        //
+        // The revocation record references the committed event's ID, so it must
+        // happen after append_event. If this write fails, the event is already
+        // committed but the revocation index is missing — a subsequent revocation
+        // attempt for the same key image would succeed (not idempotent). This is
+        // acceptable for P1: the worst case is a duplicate revocation event in the
+        // log, which auditors can detect. Full atomicity will be addressed in P5.1
+        // with database transactions.
+        if let crate::event::EventType::VoteRevocation(vr) = &event.event_type {
+            self.store
+                .store_vote_revocation(tenant, event.org_id, &vr.poll_id, &key_image, &id.0)
+                .await
+                .map_err(to_status)?;
+        }
 
         let event_hash = crate::proto::event_id_to_hash32(&id.0);
         let event_ulid = crate::proto::ulid_to_proto(&event.event_ulid.as_ulid());

@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use crate::storage::{
-    AccessTokenBlobStore, BanIndex, BillingStore, EdgeAccessTokenStore, EventReader, EventWriter,
-    GiftCardStore, KeyBlobStore, OrganizationMetadataStore, PendingMemberStore, PollRingHashIndex,
-    RingView, RingWriter, TenantTokenStore, VoteKeyImageIndex,
+    AccessTokenBlobStore, BanIndex, BillingStore, BundlePublishedIndex, EdgeAccessTokenStore,
+    EventReader, EventWriter, GiftCardStore, KeyBlobStore, OrganizationMetadataStore,
+    PendingMemberStore, PollRingHashIndex, RingView, RingWriter, TenantTokenStore,
+    VoteKeyImageIndex, VoteRevocationIndex,
 };
 
 mod billing;
@@ -34,6 +35,8 @@ pub struct StorageFacade {
     pub(super) pending_members: Arc<dyn PendingMemberStore + Send + Sync>,
     pub(super) access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
     pub(super) edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
+    pub(super) vote_revocations: Option<Arc<dyn VoteRevocationIndex + Send + Sync>>,
+    pub(super) bundle_published: Option<Arc<dyn BundlePublishedIndex + Send + Sync>>,
 }
 
 /// Error returned when building a `StorageFacade` with missing components.
@@ -91,6 +94,8 @@ pub struct StorageFacadeBuilder {
     pending_members: Option<Arc<dyn PendingMemberStore + Send + Sync>>,
     access_token_blobs: Option<Arc<dyn AccessTokenBlobStore + Send + Sync>>,
     edge_access_tokens: Option<Arc<dyn EdgeAccessTokenStore + Send + Sync>>,
+    vote_revocations: Option<Arc<dyn VoteRevocationIndex + Send + Sync>>,
+    bundle_published: Option<Arc<dyn BundlePublishedIndex + Send + Sync>>,
 }
 
 impl StorageFacadeBuilder {
@@ -193,6 +198,18 @@ impl StorageFacadeBuilder {
         self
     }
 
+    /// Set the vote revocation index (optional, required for vote revocation protocol).
+    pub fn vote_revocations(mut self, index: Arc<dyn VoteRevocationIndex + Send + Sync>) -> Self {
+        self.vote_revocations = Some(index);
+        self
+    }
+
+    /// Set the bundle published index (optional, required for election lifecycle).
+    pub fn bundle_published(mut self, index: Arc<dyn BundlePublishedIndex + Send + Sync>) -> Self {
+        self.bundle_published = Some(index);
+        self
+    }
+
     /// Build the `StorageFacade`, returning an error if any required field is missing.
     pub fn build(self) -> Result<StorageFacade, StorageFacadeBuilderError> {
         Ok(StorageFacade {
@@ -237,6 +254,8 @@ impl StorageFacadeBuilder {
             })?,
             access_token_blobs: self.access_token_blobs,
             edge_access_tokens: self.edge_access_tokens,
+            vote_revocations: self.vote_revocations,
+            bundle_published: self.bundle_published,
         })
     }
 }

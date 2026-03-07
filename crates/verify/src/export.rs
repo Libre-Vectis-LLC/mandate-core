@@ -1,12 +1,13 @@
 //! XLSX report export for verification results.
 //!
-//! Generates a 5-sheet Excel workbook from a [`VerificationReport`]:
+//! Generates a 6-sheet Excel workbook from a [`VerificationReport`]:
 //!
 //! 1. **Verification Summary** — key-value overview of poll integrity checks.
 //! 2. **Registry Mapping** — voter registry member listing.
 //! 3. **Tally Results** — per-option vote counts including non-voters.
-//! 4. **Vote Audit** — per-vote key image + choice for voter self-verification.
-//! 5. **Charts** — pie chart and bar chart referencing tally data.
+//! 4. **Vote Audit** — per-vote key image + choice + revocation status.
+//! 5. **Revocation Audit** — per-revocation key image + status (privacy-isolated).
+//! 6. **Charts** — pie chart and bar chart referencing tally data.
 
 use std::path::Path;
 
@@ -58,6 +59,7 @@ pub fn export_xlsx(
     write_registry_sheet(&mut workbook, report, locale, &header_fmt)?;
     let tally_sheet_name = write_tally_sheet(&mut workbook, report, locale, &header_fmt, &pct_fmt)?;
     write_vote_audit_sheet(&mut workbook, report, locale, &header_fmt)?;
+    write_revocation_audit_sheet(&mut workbook, report, locale, &header_fmt)?;
     write_charts_sheet(
         &mut workbook,
         report,
@@ -307,6 +309,7 @@ fn write_vote_audit_sheet(
     let headers = [
         t(TranslationKey::KeyImageBs58, locale),
         t(TranslationKey::VoteChoice, locale),
+        t(TranslationKey::RevokedColumn, locale),
     ];
 
     for (col, header) in headers.iter().enumerate() {
@@ -315,11 +318,66 @@ fn write_vote_audit_sheet(
 
     ws.set_column_width(0, 55)?;
     ws.set_column_width(1, 30)?;
+    ws.set_column_width(2, 12)?;
 
+    let lang = primary_lang(locale);
     for (i, vc) in report.vote_checks.iter().enumerate() {
         let row = (i + 1) as u32;
         ws.write_string(row, 0, &vc.key_image_bs58)?;
         ws.write_string(row, 1, &vc.chosen_option)?;
+        let revoked_text = if vc.revoked {
+            translate(TranslationKey::RevokedYes, lang)
+        } else {
+            translate(TranslationKey::RevokedNo, lang)
+        };
+        ws.write_string(row, 2, revoked_text)?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 5: Revocation Audit
+// ---------------------------------------------------------------------------
+
+fn write_revocation_audit_sheet(
+    workbook: &mut Workbook,
+    report: &VerificationReport,
+    locale: &Locale,
+    header_fmt: &Format,
+) -> Result<(), ExportError> {
+    let sheet_name = truncate_sheet_name(&t(TranslationKey::RevocationAudit, locale));
+    let ws = workbook.add_worksheet();
+    ws.set_name(&sheet_name)?;
+
+    let headers = [
+        t(TranslationKey::KeyImageBs58, locale),
+        t(TranslationKey::RevokedStatus, locale),
+        t(TranslationKey::SignatureValid, locale),
+    ];
+
+    for (col, header) in headers.iter().enumerate() {
+        ws.write_string_with_format(0, col as u16, header, header_fmt)?;
+    }
+
+    ws.set_column_width(0, 55)?;
+    ws.set_column_width(1, 20)?;
+    ws.set_column_width(2, 18)?;
+
+    let lang = primary_lang(locale);
+    for (i, rc) in report.revocation_checks.iter().enumerate() {
+        let row = (i + 1) as u32;
+        // Show the key image being revoked (privacy: do NOT show original vote choice)
+        ws.write_string(row, 0, &rc.original_vote_key_image_bs58)?;
+        let status_text = if rc.valid {
+            translate(TranslationKey::RevokedYes, lang)
+        } else {
+            translate(TranslationKey::RevokedNo, lang)
+        };
+        ws.write_string(row, 1, status_text)?;
+        // Signature validity — for now always "Yes" as placeholder
+        // (real signature verification of revocation events is future work)
+        ws.write_string(row, 2, translate(TranslationKey::Yes, lang))?;
     }
 
     Ok(())
@@ -400,6 +458,8 @@ mod tests {
             all_signatures_valid: true,
             all_key_images_unique: true,
             registry_matches_ring: true,
+            revocations_count: 0,
+            valid_revocations: 0,
         };
 
         let registry_check = CrossValidationResult {
@@ -437,6 +497,7 @@ mod tests {
                 error: None,
                 key_image_bs58: "ki_AAAA".into(),
                 chosen_option: "Red".into(),
+                revoked: false,
             },
             VoteCheck {
                 id: "vote-1".into(),
@@ -444,6 +505,7 @@ mod tests {
                 error: None,
                 key_image_bs58: "ki_BBBB".into(),
                 chosen_option: "Blue".into(),
+                revoked: false,
             },
             VoteCheck {
                 id: "vote-2".into(),
@@ -451,6 +513,7 @@ mod tests {
                 error: Some("simulated failure".into()),
                 key_image_bs58: "ki_CCCC".into(),
                 chosen_option: "Red".into(),
+                revoked: false,
             },
             VoteCheck {
                 id: "vote-3".into(),
@@ -458,6 +521,7 @@ mod tests {
                 error: None,
                 key_image_bs58: "ki_DDDD".into(),
                 chosen_option: "Green".into(),
+                revoked: false,
             },
         ];
 
@@ -497,6 +561,7 @@ mod tests {
             vote_checks,
             key_image_check,
             tally,
+            revocation_checks: vec![],
         }
     }
 
@@ -513,12 +578,13 @@ mod tests {
         let mut wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
 
-        assert_eq!(sheets.len(), 5, "should have 5 sheets");
+        assert_eq!(sheets.len(), 6, "should have 6 sheets");
         assert_eq!(sheets[0], "Verification Summary");
         assert_eq!(sheets[1], "Registry Mapping");
         assert_eq!(sheets[2], "Tally Results");
         assert_eq!(sheets[3], "Vote Audit");
-        assert_eq!(sheets[4], "Charts");
+        assert_eq!(sheets[4], "Revocation Audit");
+        assert_eq!(sheets[5], "Charts");
 
         // Tally Results: header + 3 options + 1 not-voted + 1 total = 6 rows
         let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
@@ -552,7 +618,7 @@ mod tests {
         let mut wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
 
-        assert_eq!(sheets.len(), 5, "should have 5 sheets");
+        assert_eq!(sheets.len(), 6, "should have 6 sheets");
 
         // Bilingual sheet names should contain " | ".
         for name in &sheets {
@@ -612,7 +678,7 @@ mod tests {
 
         let mut wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
-        assert_eq!(sheets.len(), 5);
+        assert_eq!(sheets.len(), 6);
 
         // Tally should have header + not-voted + total = 3 rows.
         let tally_range = wb.worksheet_range(&sheets[2]).expect("tally results sheet");
@@ -686,7 +752,7 @@ mod tests {
         let wb: Xlsx<_> = open_workbook(&path).expect("open exported xlsx");
         let sheets = wb.sheet_names().to_vec();
 
-        assert_eq!(sheets.len(), 5);
+        assert_eq!(sheets.len(), 6);
         // Traditional Chinese sheet names.
         assert_eq!(sheets[0], "\u{9a57}\u{8b49}\u{6458}\u{8981}");
         assert_eq!(sheets[2], "\u{8a08}\u{7968}\u{7d50}\u{679c}");

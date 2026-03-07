@@ -102,6 +102,95 @@ impl StorageFacade {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Vote revocation methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Check if a vote has been revoked for a key image in a poll.
+    ///
+    /// Returns `Ok(false)` if the vote revocation index is not configured.
+    pub async fn is_vote_revoked(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+        key_image: &KeyImage,
+    ) -> Result<bool, StorageError> {
+        match &self.vote_revocations {
+            Some(index) => {
+                index
+                    .is_vote_revoked(tenant, org_id, poll_id, key_image)
+                    .await
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Record a vote revocation for a key image in a poll.
+    ///
+    /// Returns an error if the vote revocation index is not configured.
+    pub async fn store_vote_revocation(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+        key_image: &KeyImage,
+        revocation_event_id: &crate::ids::EventId,
+    ) -> Result<(), StorageError> {
+        match &self.vote_revocations {
+            Some(index) => {
+                index
+                    .store_vote_revocation(tenant, org_id, poll_id, key_image, revocation_event_id)
+                    .await
+            }
+            None => Err(StorageError::Backend(
+                "vote revocation index not configured".into(),
+            )),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Bundle published methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Get the timestamp when a poll bundle was published.
+    ///
+    /// Returns `Ok(None)` if the bundle published index is not configured
+    /// or if no bundle has been published for this poll.
+    pub async fn get_bundle_published_at(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+    ) -> Result<Option<u64>, StorageError> {
+        match &self.bundle_published {
+            Some(index) => index.get_bundle_published_at(tenant, org_id, poll_id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// Store the timestamp when a poll bundle was published.
+    ///
+    /// Returns an error if the bundle published index is not configured.
+    pub async fn store_bundle_published_at(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+        published_at: u64,
+    ) -> Result<(), StorageError> {
+        match &self.bundle_published {
+            Some(index) => {
+                index
+                    .store_bundle_published_at(tenant, org_id, poll_id, published_at)
+                    .await
+            }
+            None => Err(StorageError::Backend(
+                "bundle published index not configured".into(),
+            )),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Poll ring hash methods
     // ─────────────────────────────────────────────────────────────────────────
 

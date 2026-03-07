@@ -88,6 +88,9 @@ pub struct VoteCheck {
     pub key_image_bs58: String,
     /// The option the voter selected.
     pub chosen_option: String,
+    /// Whether this vote has been revoked by a VoteRevocation event.
+    /// Revoked votes are excluded from the tally.
+    pub revoked: bool,
 }
 
 /// Options controlling the batch verification strategy.
@@ -188,6 +191,7 @@ fn verify_parallel(
                     error: None,
                     key_image_bs58: String::new(),
                     chosen_option: String::new(),
+                    revoked: false,
                 }),
                 Err(e) => {
                     // Record the error but don't abort the whole batch.
@@ -197,6 +201,7 @@ fn verify_parallel(
                         error: Some(e.to_string()),
                         key_image_bs58: String::new(),
                         chosen_option: String::new(),
+                        revoked: false,
                     })
                 }
             }
@@ -496,6 +501,7 @@ pub(crate) mod tests {
             error: None,
             key_image_bs58: String::new(),
             chosen_option: String::new(),
+            revoked: false,
         };
         let b = VoteCheck {
             id: "v1".into(),
@@ -503,6 +509,7 @@ pub(crate) mod tests {
             error: None,
             key_image_bs58: String::new(),
             chosen_option: String::new(),
+            revoked: false,
         };
         let c = VoteCheck {
             id: "v1".into(),
@@ -510,6 +517,7 @@ pub(crate) mod tests {
             error: None,
             key_image_bs58: String::new(),
             chosen_option: String::new(),
+            revoked: false,
         };
         assert_eq!(a, b);
         assert_ne!(a, c);

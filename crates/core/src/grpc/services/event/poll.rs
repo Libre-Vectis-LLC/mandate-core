@@ -1,7 +1,7 @@
 //! Poll-related gRPC handlers: get_poll_results and get_poll_bundle.
 
 use super::service::EventServiceImpl;
-use crate::event::Event;
+use crate::event::{ElectionPhase, Event, EventType};
 use crate::ids::OrganizationId;
 use crate::key_manager::decrypt_event_content;
 use crate::proto::ring_hash_to_hash32;
@@ -11,13 +11,36 @@ use mandate_proto::mandate::v1::{
     PollOption as ProtoPollOption, PollVoteData,
 };
 use nazgul::traits::LocalByteConvertible;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tonic::{Request, Response, Status};
 
 use super::super::{extract_tenant_id, to_status};
 
+/// Map an `ElectionPhase` to its wire-format string for the proto response.
+fn election_phase_to_string(phase: ElectionPhase) -> String {
+    match phase {
+        ElectionPhase::Voting => "voting".to_string(),
+        ElectionPhase::Sealed => "sealed".to_string(),
+        ElectionPhase::VerificationOpen => "verification_open".to_string(),
+        ElectionPhase::Finalized => "finalized".to_string(),
+    }
+}
+
 impl EventServiceImpl {
+    /// Find the `processed_at` timestamp of the `PollBundlePublished` event
+    /// for the given `poll_id`, if one exists.
+    fn find_bundle_published_at(events: &[Event], poll_id: &str) -> Option<u64> {
+        events.iter().find_map(|event| {
+            if let EventType::PollBundlePublished(ref bundle) = event.event_type {
+                if bundle.poll_id == poll_id {
+                    return Some(event.processed_at);
+                }
+            }
+            None
+        })
+    }
+
     pub(super) async fn get_poll_results(
         &self,
         request: Request<GetPollResultsRequest>,
@@ -82,7 +105,16 @@ impl EventServiceImpl {
 
         let question_title = String::from_utf8_lossy(&question_bytes).to_string();
 
-        // 5. Decrypt option labels and build option_id -> (index, label) map
+        // 5. Determine election phase
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_secs();
+
+        let bundle_published_at = Self::find_bundle_published_at(&events, &poll.poll_id);
+        let phase = poll.election_phase(current_time, bundle_published_at);
+
+        // 6. Decrypt option labels and build option_id -> (index, label) map
         let mut option_map: HashMap<String, (usize, String)> = HashMap::new();
 
         if let Some(first_question) = poll.questions.first() {
@@ -105,23 +137,53 @@ impl EventServiceImpl {
             }
         }
 
-        // 6. Count votes for this poll
-        let mut vote_counts: HashMap<String, u32> = HashMap::new();
-
-        for event in events.iter() {
-            if let crate::event::EventType::VoteCast(vote) = &event.event_type {
-                if vote.poll_id == poll.poll_id {
-                    // Aggregate votes from all selections
-                    for selection in &vote.selections {
-                        for option_id in &selection.option_ids {
-                            *vote_counts.entry(option_id.clone()).or_insert(0) += 1;
+        // 7. Count votes only if Finalized (hide intermediate results).
+        //    Legacy polls (no deadline) always show results — they have no lifecycle.
+        let show_results = phase == ElectionPhase::Finalized || poll.deadline.is_none();
+        let (vote_counts, total_votes) = if show_results {
+            // Collect key images from VoteRevocation events so revoked votes
+            // are excluded from the tally.
+            let mut revoked_key_images: HashSet<[u8; 32]> = HashSet::new();
+            for event in events.iter() {
+                if let crate::event::EventType::VoteRevocation(revocation) = &event.event_type {
+                    if revocation.poll_id == poll.poll_id {
+                        if let Some(sig) = &event.signature {
+                            revoked_key_images.insert(sig.key_image().to_bytes());
                         }
                     }
                 }
             }
-        }
 
-        // 7. Build response
+            let mut counts: HashMap<String, u32> = HashMap::new();
+
+            for event in events.iter() {
+                if let crate::event::EventType::VoteCast(vote) = &event.event_type {
+                    if vote.poll_id == poll.poll_id {
+                        // Skip votes that have been revoked
+                        if let Some(sig) = &event.signature {
+                            if revoked_key_images.contains(&sig.key_image().to_bytes()) {
+                                continue;
+                            }
+                        }
+                        for selection in &vote.selections {
+                            for option_id in &selection.option_ids {
+                                *counts.entry(option_id.clone()).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let total: u32 = counts.values().sum();
+            (counts, total)
+        } else {
+            // Before Finalized: return zero counts to prevent intermediate
+            // results from influencing voter behavior or enabling
+            // strategic voting.
+            (HashMap::new(), 0)
+        };
+
+        // 8. Build response
         let mut proto_options: Vec<ProtoPollOption> = option_map
             .iter()
             .map(|(option_id, (idx, label))| ProtoPollOption {
@@ -134,17 +196,7 @@ impl EventServiceImpl {
         // Sort by index to maintain option order
         proto_options.sort_by_key(|opt| opt.index);
 
-        let total_votes: u32 = vote_counts.values().sum();
-
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_secs();
-
-        let is_open = poll
-            .deadline
-            .map(|deadline| current_time < deadline)
-            .unwrap_or(true);
+        let is_open = phase == ElectionPhase::Voting;
 
         Ok(Response::new(GetPollResultsResponse {
             question: question_title,
@@ -153,6 +205,7 @@ impl EventServiceImpl {
             total_votes,
             ring_hash: Some(ring_hash_to_hash32(&poll.ring_hash)),
             is_open,
+            election_phase: election_phase_to_string(phase),
         }))
     }
 
@@ -228,8 +281,9 @@ impl EventServiceImpl {
             _ => unreachable!(),
         };
 
-        // 5. Collect all vote events for this poll
+        // 5. Collect all vote and revocation events for this poll
         let mut vote_data_vec: Vec<PollVoteData> = Vec::new();
+        let mut revocation_data_vec: Vec<PollVoteData> = Vec::new();
 
         for (_event_id, event_bytes, seq) in &event_records {
             let event: Event = serde_json::from_slice(event_bytes)
@@ -237,7 +291,6 @@ impl EventServiceImpl {
 
             if let crate::event::EventType::VoteCast(vote) = &event.event_type {
                 if vote.poll_id == poll.poll_id {
-                    // Extract key image from signature
                     let sig = event
                         .signature
                         .as_ref()
@@ -246,7 +299,6 @@ impl EventServiceImpl {
                     let key_image_bytes = sig.key_image().to_bytes();
                     let key_image_hex = hex::encode(key_image_bytes);
 
-                    // Serialize event to JSON for human readability
                     let event_json = serde_json::to_string(&event)
                         .map_err(|e| Status::internal(format!("failed to serialize event: {e}")))?;
 
@@ -258,11 +310,33 @@ impl EventServiceImpl {
                         event_json,
                     });
                 }
+            } else if let crate::event::EventType::VoteRevocation(revocation) = &event.event_type {
+                if revocation.poll_id == poll.poll_id {
+                    let sig = event
+                        .signature
+                        .as_ref()
+                        .ok_or_else(|| Status::internal("revocation event missing signature"))?;
+
+                    let key_image_bytes = sig.key_image().to_bytes();
+                    let key_image_hex = hex::encode(key_image_bytes);
+
+                    let event_json = serde_json::to_string(&event)
+                        .map_err(|e| Status::internal(format!("failed to serialize event: {e}")))?;
+
+                    revocation_data_vec.push(PollVoteData {
+                        event_ulid: event.event_ulid.0.to_string(),
+                        sequence_no: seq.0,
+                        key_image_hex,
+                        event_bytes: event_bytes.to_vec(),
+                        event_json,
+                    });
+                }
             }
         }
 
-        // Sort votes by sequence number for deterministic ordering
+        // Sort by sequence number for deterministic ordering
         vote_data_vec.sort_by_key(|v| v.sequence_no);
+        revocation_data_vec.sort_by_key(|v| v.sequence_no);
 
         // 6. Build response
         let poll_hash = crate::hashing::sha3_256_bytes(&poll_event_bytes);
@@ -292,6 +366,7 @@ impl EventServiceImpl {
             poll_event_bytes,
             poll_event_json,
             votes: vote_data_vec,
+            revocations: revocation_data_vec,
         }))
     }
 }

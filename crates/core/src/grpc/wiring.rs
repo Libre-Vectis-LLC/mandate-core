@@ -1,7 +1,7 @@
 use crate::grpc::inmemory::{
-    InMemoryBanIndex, InMemoryBilling, InMemoryEvents, InMemoryGiftCards, InMemoryKeyBlobs,
-    InMemoryOrgs, InMemoryPendingMembers, InMemoryPollRingHashes, InMemoryRings,
-    InMemoryTenantTokens, InMemoryVoteKeyImages,
+    InMemoryBanIndex, InMemoryBilling, InMemoryBundlePublished, InMemoryEvents, InMemoryGiftCards,
+    InMemoryKeyBlobs, InMemoryOrgs, InMemoryPendingMembers, InMemoryPollRingHashes, InMemoryRings,
+    InMemoryTenantTokens, InMemoryVoteKeyImages, InMemoryVoteRevocations,
 };
 use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};
 use crate::grpc::services::{
@@ -63,6 +63,8 @@ impl CoreServices {
         }
         let ban_index = Arc::new(InMemoryBanIndex::new());
         let vote_key_images = Arc::new(InMemoryVoteKeyImages::new());
+        let vote_revocations = Arc::new(InMemoryVoteRevocations::new());
+        let bundle_published = Arc::new(InMemoryBundlePublished::new());
         let poll_ring_hashes = Arc::new(InMemoryPollRingHashes::new());
         let pending_members = Arc::new(InMemoryPendingMembers::new());
         let events = Arc::new(InMemoryEvents::new(
@@ -84,6 +86,8 @@ impl CoreServices {
             .ring_storage(rings.clone(), rings)
             .ban_index(ban_index)
             .vote_key_images(vote_key_images)
+            .vote_revocations(vote_revocations)
+            .bundle_published(bundle_published)
             .poll_ring_hashes(poll_ring_hashes)
             .billing(billing)
             .gift_cards(gift_cards)

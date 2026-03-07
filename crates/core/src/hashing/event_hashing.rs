@@ -58,11 +58,14 @@ impl<'a> From<&'a Event> for CanonicalEvent<'a> {
 enum CanonicalEventType<'a> {
     PollCreate(CanonicalPoll<'a>),
     VoteCast(CanonicalVote<'a>),
+    VoteRevocation(&'a crate::event::VoteRevocation),
     MessageCreate(&'a AnonymousMessage),
     RingUpdate(&'a RingUpdate),
     BanCreate(&'a BanCreate),
     BanRevoke(&'a BanRevoke),
     ProofOfInnocence(&'a crate::event::ProofOfInnocence),
+    PollBundlePublished(&'a crate::event::PollBundlePublished),
+    Unknown,
 }
 
 impl<'a> From<&'a EventType> for CanonicalEventType<'a> {
@@ -70,11 +73,14 @@ impl<'a> From<&'a EventType> for CanonicalEventType<'a> {
         match value {
             EventType::PollCreate(p) => CanonicalEventType::PollCreate(CanonicalPoll::from(p)),
             EventType::VoteCast(v) => CanonicalEventType::VoteCast(CanonicalVote::from(v)),
+            EventType::VoteRevocation(vr) => CanonicalEventType::VoteRevocation(vr),
             EventType::MessageCreate(m) => CanonicalEventType::MessageCreate(m),
             EventType::RingUpdate(r) => CanonicalEventType::RingUpdate(r),
             EventType::BanCreate(b) => CanonicalEventType::BanCreate(b),
             EventType::BanRevoke(b) => CanonicalEventType::BanRevoke(b),
             EventType::ProofOfInnocence(p) => CanonicalEventType::ProofOfInnocence(p),
+            EventType::PollBundlePublished(pb) => CanonicalEventType::PollBundlePublished(pb),
+            EventType::Unknown => CanonicalEventType::Unknown,
         }
     }
 }
@@ -88,6 +94,10 @@ struct CanonicalPoll<'a> {
     created_at: u64,
     instructions: Option<&'a Ciphertext>,
     deadline: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sealed_duration_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification_window_secs: Option<u64>,
 }
 
 impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
@@ -108,6 +118,8 @@ impl<'a> From<&'a Poll> for CanonicalPoll<'a> {
             created_at: poll.created_at,
             instructions: poll.instructions.as_ref(),
             deadline: poll.deadline,
+            sealed_duration_secs: poll.sealed_duration_secs,
+            verification_window_secs: poll.verification_window_secs,
         }
     }
 }

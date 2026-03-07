@@ -236,6 +236,10 @@ message GetPollResultsRequest {
 }
 
 // Response containing aggregated poll results.
+//
+// Vote counts are only populated when election_phase is "finalized".
+// In earlier phases, options will have vote_count = 0 and total_votes = 0
+// to prevent intermediate results from influencing voter behavior.
 message GetPollResultsResponse {
   // Poll question or title.
   string question = 1;
@@ -244,9 +248,11 @@ message GetPollResultsResponse {
   int64 created_at = 2;
 
   // Poll options with aggregated vote counts.
+  // Note: vote_count is zeroed in non-Finalized phases to hide intermediate results.
   repeated PollOption options = 3;
 
   // Total number of votes cast (sum of all option vote counts).
+  // Note: zeroed in non-Finalized phases.
   uint32 total_votes = 4;
 
   // Ring hash at poll creation time (ensures votes are from valid snapshot).
@@ -254,6 +260,15 @@ message GetPollResultsResponse {
 
   // Whether poll is still accepting votes (based on deadline or manual closure).
   bool is_open = 6;
+
+  // Current election lifecycle phase. One of:
+  //   "voting"              - voting is open
+  //   "sealed"              - voting closed, awaiting verification report
+  //   "verification_open"   - bundle published, revocation window open
+  //   "finalized"           - verification window closed, results are final
+  //
+  // Vote counts are only meaningful when election_phase is "finalized".
+  string election_phase = 7;
 }
 
 // Single poll option with aggregated vote count.
@@ -315,6 +330,9 @@ message GetPollBundleResponse {
 
   // All vote events for this poll, ordered by sequence number.
   repeated PollVoteData votes = 11;
+
+  // All vote revocation events for this poll, ordered by sequence number.
+  repeated PollVoteData revocations = 12;
 }
 
 // Single vote event data within a poll bundle.

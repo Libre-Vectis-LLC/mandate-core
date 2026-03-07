@@ -102,6 +102,23 @@ pub struct PollSummary {
     pub all_key_images_unique: bool,
     /// Whether the voter registry perfectly matches the ring.
     pub registry_matches_ring: bool,
+    /// Total number of revocation events in the bundle.
+    pub revocations_count: usize,
+    /// Number of revocations that successfully matched a vote's key image.
+    pub valid_revocations: usize,
+}
+
+/// Result of checking one revocation event.
+#[derive(Debug, Clone)]
+pub struct RevocationCheck {
+    /// Identifier for this revocation event (e.g. index-based).
+    pub revocation_id: String,
+    /// The key image (bs58) of the original vote being revoked.
+    pub original_vote_key_image_bs58: String,
+    /// Whether the revocation successfully matched an existing vote.
+    pub valid: bool,
+    /// Error description if the revocation did not match any vote.
+    pub error: Option<String>,
 }
 
 /// Complete verification report assembled by [`verify_poll`].
@@ -117,6 +134,8 @@ pub struct VerificationReport {
     pub key_image_check: KeyImageCheck,
     /// Vote tally result.
     pub tally: TallyResult,
+    /// Per-revocation check results.
+    pub revocation_checks: Vec<RevocationCheck>,
 }
 
 // ---------------------------------------------------------------------------
@@ -152,8 +171,11 @@ impl SignatureVerifier for PlaceholderVerifier {
 /// 5. Cross-validate registry vs bundle ring members
 /// 6. Verify all BLSAG ring signatures (parallel, adaptive)
 /// 7. Check all KeyImages unique
-/// 8. Shuffle vote checks (anti-temporal-correlation)
-/// 9. Tally votes
+/// 8. Enrich vote checks with key images and chosen options
+///    - 8.5. Parse revocation events and match to vote key images
+///    - 8.6. Mark matched votes as revoked
+///    - 8.7. Re-tally excluding revoked votes
+/// 9. Shuffle vote checks (anti-temporal-correlation)
 /// 10. Assemble VerificationReport
 ///
 /// # Errors
@@ -288,8 +310,6 @@ pub fn verify_poll(
         })
         .collect();
 
-    let tally_result = tally::tally_votes(&choices);
-
     // --- Step 8: Enrich vote checks with key image + chosen option ---
     //
     // vote_checks, key_images, and choices are all indexed by vote index
@@ -302,6 +322,78 @@ pub fn verify_poll(
             vc.chosen_option.clone_from(&choice.option_text);
         }
     }
+
+    // --- Step 8.5: Parse revocation events ---
+    //
+    // Each revocation_events_raw entry contains a UTF-8 key_image_bs58
+    // string that identifies which vote to revoke.
+    let mut revocation_checks: Vec<RevocationCheck> = Vec::new();
+    for (i, raw) in bundle.revocation_events_raw.iter().enumerate() {
+        let revocation_id = format!("revocation-{i}");
+        match std::str::from_utf8(raw) {
+            Ok(target_ki_bs58) => {
+                let target_ki = target_ki_bs58.trim().to_owned();
+                // --- Step 8.6: Match revocation to vote check by key image ---
+                let matched = vote_checks
+                    .iter_mut()
+                    .any(|vc| vc.key_image_bs58 == target_ki);
+                if matched {
+                    // Mark the matching vote as revoked.
+                    for vc in vote_checks.iter_mut() {
+                        if vc.key_image_bs58 == target_ki {
+                            vc.revoked = true;
+                        }
+                    }
+                    revocation_checks.push(RevocationCheck {
+                        revocation_id,
+                        original_vote_key_image_bs58: target_ki,
+                        valid: true,
+                        error: None,
+                    });
+                } else {
+                    revocation_checks.push(RevocationCheck {
+                        revocation_id,
+                        original_vote_key_image_bs58: target_ki,
+                        valid: false,
+                        error: Some("no matching vote key image found".into()),
+                    });
+                }
+            }
+            Err(e) => {
+                revocation_checks.push(RevocationCheck {
+                    revocation_id,
+                    original_vote_key_image_bs58: String::new(),
+                    valid: false,
+                    error: Some(format!("invalid UTF-8 in revocation event: {e}")),
+                });
+            }
+        }
+    }
+
+    let revocations_count = revocation_checks.len();
+    let valid_revocations = revocation_checks.iter().filter(|rc| rc.valid).count();
+
+    // --- Step 8.7: Adjust tally to exclude revoked votes ---
+    //
+    // Re-tally using only non-revoked votes.
+    let active_choices: Vec<VoteChoice> = vote_checks
+        .iter()
+        .filter(|vc| !vc.revoked)
+        .map(|vc| {
+            // Find the original choice by matching vote check back to choices.
+            // Since vote_checks may have been enriched with chosen_option text,
+            // we construct VoteChoice from the enriched data.
+            VoteChoice {
+                option_id: choices
+                    .iter()
+                    .find(|c| c.option_text == vc.chosen_option)
+                    .map(|c| c.option_id.clone())
+                    .unwrap_or_default(),
+                option_text: vc.chosen_option.clone(),
+            }
+        })
+        .collect();
+    let tally_result = tally::tally_votes(&active_choices);
 
     // --- Step 9: Shuffle vote checks (anti-temporal-correlation) ---
     shuffle::secure_shuffle(&mut vote_checks);
@@ -329,6 +421,8 @@ pub fn verify_poll(
         all_signatures_valid,
         all_key_images_unique: key_image_check.all_unique(),
         registry_matches_ring: registry_check.is_perfect_match(),
+        revocations_count,
+        valid_revocations,
     };
 
     Ok(VerificationReport {
@@ -337,6 +431,7 @@ pub fn verify_poll(
         vote_checks,
         key_image_check,
         tally: tally_result,
+        revocation_checks,
     })
 }
 
@@ -384,6 +479,7 @@ mod tests {
             poll_key_hex: "deadbeef".into(),
             poll_title: String::new(),
             option_definitions: Vec::new(),
+            revocation_events_raw: Vec::new(),
         };
 
         let bytes = bundle.to_bytes();

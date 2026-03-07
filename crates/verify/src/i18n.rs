@@ -150,6 +150,14 @@ pub enum TranslationKey {
     // Headers — vote audit
     KeyImageBs58,
     VoteChoice,
+    RevokedColumn,
+
+    // Headers — revocation audit
+    RevocationAudit,
+    RevokedStatus,
+    SignatureValid,
+    RevokedYes,
+    RevokedNo,
 
     // Headers — tally
     OptionId,
@@ -265,6 +273,32 @@ pub fn translate(key: TranslationKey, language: Language) -> &'static str {
         (VoteChoice, En) => "Vote Choice",
         (VoteChoice, Zht) => "\u{6295}\u{7968}\u{9078}\u{9805}",
 
+        // Revoked column in Vote Audit
+        (RevokedColumn, Zhs) => "\u{5df2}\u{64a4}\u{9500}",
+        (RevokedColumn, En) => "Revoked",
+        (RevokedColumn, Zht) => "\u{5df2}\u{64a4}\u{92b7}",
+
+        // --- Revocation audit headers ---
+        (RevocationAudit, Zhs) => "\u{64a4}\u{9500}\u{5ba1}\u{8ba1}",
+        (RevocationAudit, En) => "Revocation Audit",
+        (RevocationAudit, Zht) => "\u{64a4}\u{92b7}\u{5be9}\u{8a08}",
+
+        (RevokedStatus, Zhs) => "\u{64a4}\u{9500}\u{72b6}\u{6001}",
+        (RevokedStatus, En) => "Revocation Status",
+        (RevokedStatus, Zht) => "\u{64a4}\u{92b7}\u{72c0}\u{614b}",
+
+        (SignatureValid, Zhs) => "\u{7b7e}\u{540d}\u{6709}\u{6548}",
+        (SignatureValid, En) => "Signature Valid",
+        (SignatureValid, Zht) => "\u{7c3d}\u{540d}\u{6709}\u{6548}",
+
+        (RevokedYes, Zhs) => "\u{5df2}\u{64a4}\u{9500}",
+        (RevokedYes, En) => "Yes",
+        (RevokedYes, Zht) => "\u{5df2}\u{64a4}\u{92b7}",
+
+        (RevokedNo, Zhs) => "\u{672a}\u{64a4}\u{9500}",
+        (RevokedNo, En) => "No",
+        (RevokedNo, Zht) => "\u{672a}\u{64a4}\u{92b7}",
+
         // --- Tally headers ---
         (OptionId, Zhs) => "\u{9009}\u{9879}ID",
         (OptionId, En) => "Option ID",
@@ -321,6 +355,12 @@ pub const ALL_KEYS: &[TranslationKey] = &[
     TranslationKey::DerivedPubKey,
     TranslationKey::KeyImageBs58,
     TranslationKey::VoteChoice,
+    TranslationKey::RevokedColumn,
+    TranslationKey::RevocationAudit,
+    TranslationKey::RevokedStatus,
+    TranslationKey::SignatureValid,
+    TranslationKey::RevokedYes,
+    TranslationKey::RevokedNo,
     TranslationKey::OptionId,
     TranslationKey::OptionText,
     TranslationKey::Votes,
@@ -532,7 +572,7 @@ mod tests {
     fn test_all_keys_count() {
         // Ensure ALL_KEYS matches the number of TranslationKey variants.
         // Update this if you add new keys.
-        assert_eq!(ALL_KEYS.len(), 29);
+        assert_eq!(ALL_KEYS.len(), 35);
     }
 
     // -----------------------------------------------------------------------

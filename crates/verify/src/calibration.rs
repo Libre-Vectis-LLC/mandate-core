@@ -111,6 +111,7 @@ pub(crate) fn verify_with_calibration(
                             error: None,
                             key_image_bs58: String::new(),
                             chosen_option: String::new(),
+                            revoked: false,
                         },
                         Err(e) => VoteCheck {
                             id: item.id.clone(),
@@ -118,6 +119,7 @@ pub(crate) fn verify_with_calibration(
                             error: Some(e.to_string()),
                             key_image_bs58: String::new(),
                             chosen_option: String::new(),
+                            revoked: false,
                         },
                     },
                 )
@@ -161,6 +163,7 @@ pub(crate) fn verify_with_calibration(
                             error: None,
                             key_image_bs58: String::new(),
                             chosen_option: String::new(),
+                            revoked: false,
                         },
                         Err(e) => VoteCheck {
                             id: item.id.clone(),
@@ -168,6 +171,7 @@ pub(crate) fn verify_with_calibration(
                             error: Some(e.to_string()),
                             key_image_bs58: String::new(),
                             chosen_option: String::new(),
+                            revoked: false,
                         },
                     }
                 })

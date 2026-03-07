@@ -12,7 +12,17 @@ pub struct Poll {
     pub questions: Vec<PollQuestion>,
     pub created_at: u64,
     pub instructions: Option<Ciphertext>,
+    /// Voting end time (epoch seconds). When `None`, the poll has no deadline
+    /// and remains in the `Voting` phase indefinitely (legacy behavior).
     pub deadline: Option<u64>,
+    /// Duration in seconds of the sealed period between voting end (`deadline`)
+    /// and the start of the verification window. Defaults to `None` (no sealed period).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sealed_duration_secs: Option<u64>,
+    /// Duration in seconds of the verification window during which vote
+    /// revocations are accepted. Defaults to `None` (no verification window).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_window_secs: Option<u64>,
 }
 
 impl Poll {

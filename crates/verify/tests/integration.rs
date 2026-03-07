@@ -84,6 +84,15 @@ fn write_registry_xlsx(voters: &[(String, String)]) -> NamedTempFile {
 
 /// Build a synthetic PollBundle and write it to a temp file.
 fn write_bundle(ring_member_pubs: Vec<String>, vote_count: usize) -> NamedTempFile {
+    write_bundle_with_revocations(ring_member_pubs, vote_count, Vec::new())
+}
+
+/// Build a synthetic PollBundle with revocation events and write it to a temp file.
+fn write_bundle_with_revocations(
+    ring_member_pubs: Vec<String>,
+    vote_count: usize,
+    revocation_events_raw: Vec<Vec<u8>>,
+) -> NamedTempFile {
     let bundle = PollBundle {
         poll_event_raw: vec![0x01, 0x02, 0x03],
         vote_events_raw: (0..vote_count).map(|i| vec![i as u8]).collect(),
@@ -93,6 +102,7 @@ fn write_bundle(ring_member_pubs: Vec<String>, vote_count: usize) -> NamedTempFi
         poll_key_hex: "deadbeef".into(),
         poll_title: String::new(),
         option_definitions: Vec::new(),
+        revocation_events_raw,
     };
     let bytes = bundle.to_bytes();
     let mut tmp = NamedTempFile::new().expect("temp file");
@@ -126,11 +136,12 @@ fn export_report(
 }
 
 /// Expected English sheet names for the exported XLSX.
-const EXPECTED_EN_SHEETS: [&str; 5] = [
+const EXPECTED_EN_SHEETS: [&str; 6] = [
     "Verification Summary",
     "Registry Mapping",
     "Tally Results",
     "Vote Audit",
+    "Revocation Audit",
     "Charts",
 ];
 
@@ -202,7 +213,7 @@ fn test_e2e_happy_path_5_voters_4_votes() {
     let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
 
-    assert_eq!(sheets.len(), 5, "exported workbook should have 5 sheets");
+    assert_eq!(sheets.len(), 6, "exported workbook should have 6 sheets");
     for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
         assert_eq!(sheets[i], *expected, "sheet {i} name mismatch");
     }
@@ -281,7 +292,7 @@ fn test_e2e_single_voter_single_vote() {
 
     let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
-    assert_eq!(sheets.len(), 5);
+    assert_eq!(sheets.len(), 6);
     for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
         assert_eq!(sheets[i], *expected);
     }
@@ -341,7 +352,7 @@ fn test_e2e_ten_voters_zero_votes() {
 
     let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
-    assert_eq!(sheets.len(), 5);
+    assert_eq!(sheets.len(), 6);
     for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
         assert_eq!(sheets[i], *expected);
     }
@@ -393,7 +404,7 @@ fn test_e2e_bilingual_export() {
     let wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
     let sheets = wb.sheet_names().to_vec();
 
-    assert_eq!(sheets.len(), 5, "bilingual export should have 5 sheets");
+    assert_eq!(sheets.len(), 6, "bilingual export should have 6 sheets");
 
     // All sheet names should contain " | " separator for bilingual
     // (uses "|" instead of "/" because Excel sheet names prohibit "/")
@@ -403,6 +414,129 @@ fn test_e2e_bilingual_export() {
             "bilingual sheet name should contain ' | ': got {name}"
         );
     }
+
+    let _ = std::fs::remove_file(&xlsx_path);
+}
+
+// =========================================================================
+// Test 5: Vote revocation — 5 voters, 4 votes, 1 revocation → tally shows 3
+// =========================================================================
+
+#[test]
+fn test_e2e_vote_revocation_5_voters_4_votes_1_revocation() {
+    // --- Setup: 5 distinct voters ---
+    let voters = generate_voters(5);
+    let pub_keys: Vec<String> = voters.iter().map(|(_, pk)| pk.clone()).collect();
+    let registry_rows: Vec<(String, String)> = voters
+        .iter()
+        .enumerate()
+        .map(|(i, (_, pk))| (format!("Voter-{i}"), pk.clone()))
+        .collect();
+
+    let registry_file = write_registry_xlsx(&registry_rows);
+
+    // The pipeline assigns key images as "placeholder-ki-{i}" for vote index i.
+    // We revoke the vote at index 1 by targeting its key image.
+    let revocation_target = "placeholder-ki-1";
+    let revocations = vec![revocation_target.as_bytes().to_vec()];
+    let bundle_file = write_bundle_with_revocations(pub_keys.clone(), 4, revocations);
+
+    // --- Step 1: Run verification pipeline ---
+    let report = run_pipeline(&registry_file, &bundle_file).expect("pipeline should succeed");
+
+    // --- Step 2: Verify summary ---
+    assert_eq!(report.summary.ring_size, 5);
+    assert_eq!(report.summary.votes_cast, 4);
+    assert_eq!(report.summary.revocations_count, 1);
+    assert_eq!(report.summary.valid_revocations, 1);
+    assert!(report.summary.all_signatures_valid);
+    assert!(report.summary.all_key_images_unique);
+    assert!(report.summary.registry_matches_ring);
+
+    // --- Step 3: Verify vote checks — one should be revoked ---
+    assert_eq!(report.vote_checks.len(), 4);
+    let revoked_count = report.vote_checks.iter().filter(|vc| vc.revoked).count();
+    assert_eq!(revoked_count, 1, "exactly one vote should be revoked");
+
+    // The revoked vote should have key_image_bs58 == "placeholder-ki-1"
+    let revoked_vote = report
+        .vote_checks
+        .iter()
+        .find(|vc| vc.revoked)
+        .expect("should have a revoked vote");
+    assert_eq!(revoked_vote.key_image_bs58, "placeholder-ki-1");
+
+    // --- Step 4: Verify revocation checks ---
+    assert_eq!(report.revocation_checks.len(), 1);
+    assert!(report.revocation_checks[0].valid);
+    assert_eq!(
+        report.revocation_checks[0].original_vote_key_image_bs58,
+        "placeholder-ki-1"
+    );
+    assert!(report.revocation_checks[0].error.is_none());
+
+    // --- Step 5: Verify tally excludes revoked vote ---
+    // 4 votes - 1 revoked = 3 active votes in the tally
+    assert_eq!(
+        report.tally.total_votes, 3,
+        "tally should count only non-revoked votes"
+    );
+
+    // --- Step 6: Export and verify XLSX structure ---
+    let locale = Locale::Single(Language::En);
+    let xlsx_path = export_report(&report, &locale).expect("export should succeed");
+
+    let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
+    let sheets = wb.sheet_names().to_vec();
+
+    assert_eq!(sheets.len(), 6, "exported workbook should have 6 sheets");
+    for (i, expected) in EXPECTED_EN_SHEETS.iter().enumerate() {
+        assert_eq!(sheets[i], *expected, "sheet {i} name mismatch");
+    }
+
+    // Vote Audit sheet: header + 4 votes = 5 rows, with "Revoked" column
+    let audit_range = wb.worksheet_range("Vote Audit").expect("vote audit sheet");
+    assert_eq!(
+        audit_range.rows().count(),
+        5,
+        "vote audit: 1 header + 4 votes"
+    );
+    // Verify the header has 3 columns (Key Image, Vote Choice, Revoked)
+    let audit_header: Vec<String> = audit_range
+        .rows()
+        .next()
+        .expect("at least one row")
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
+    assert_eq!(audit_header.len(), 3, "vote audit should have 3 columns");
+    assert_eq!(audit_header[2], "Revoked");
+
+    // Revocation Audit sheet: header + 1 revocation = 2 rows
+    let revoc_range = wb
+        .worksheet_range("Revocation Audit")
+        .expect("revocation audit sheet");
+    assert_eq!(
+        revoc_range.rows().count(),
+        2,
+        "revocation audit: 1 header + 1 revocation"
+    );
+    // Verify the header columns
+    let revoc_header: Vec<String> = revoc_range
+        .rows()
+        .next()
+        .expect("at least one row")
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
+    assert_eq!(
+        revoc_header.len(),
+        3,
+        "revocation audit should have 3 columns"
+    );
+    assert_eq!(revoc_header[0], "Key Image (bs58)");
+    assert_eq!(revoc_header[1], "Revocation Status");
+    assert_eq!(revoc_header[2], "Signature Valid");
 
     let _ = std::fs::remove_file(&xlsx_path);
 }

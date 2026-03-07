@@ -327,6 +327,8 @@ mod tests {
                 created_at: 42,
                 instructions: Some(Ciphertext(b"how-to".to_vec())),
                 deadline: None,
+                sealed_duration_secs: None,
+                verification_window_secs: None,
                 questions: vec![
                     crate::event::PollQuestion {
                         question_id: "q1".into(),

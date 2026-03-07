@@ -114,6 +114,89 @@ pub trait VoteKeyImageIndex {
     ) -> Result<bool, StorageError>;
 }
 
+/// Index to track vote revocation status within a poll.
+///
+/// Prevents duplicate revocations for the same `(key_image, poll_id)` pair
+/// and records which votes have been revoked.
+#[async_trait]
+pub trait VoteRevocationIndex {
+    /// Check whether a vote has already been revoked for a given key image in a poll.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `org_id` - The org identifier
+    /// * `poll_id` - The poll identifier
+    /// * `key_image` - The key image whose revocation status is being checked
+    ///
+    /// # Returns
+    /// `true` if a revocation has already been recorded, `false` otherwise.
+    async fn is_vote_revoked(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+        key_image: &KeyImage,
+    ) -> Result<bool, StorageError>;
+
+    /// Record a vote revocation for a key image in a poll.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `org_id` - The org identifier
+    /// * `poll_id` - The poll identifier
+    /// * `key_image` - The key image of the vote being revoked
+    /// * `revocation_event_id` - The event ID of the revocation event
+    ///
+    /// # Errors
+    /// * `StorageError::AlreadyExists` - If this vote has already been revoked
+    /// * `StorageError::Backend` - When the underlying storage layer fails
+    async fn store_vote_revocation(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+        key_image: &KeyImage,
+        revocation_event_id: &crate::ids::EventId,
+    ) -> Result<(), StorageError>;
+}
+
+/// Index to track `PollBundlePublished` timestamps for election phase transitions.
+///
+/// When a `PollBundlePublished` event is processed, the timestamp is stored here.
+/// This drives the `Sealed` -> `VerificationOpen` transition in the election lifecycle.
+#[async_trait]
+pub trait BundlePublishedIndex {
+    /// Retrieve the timestamp when a poll bundle was published.
+    ///
+    /// # Returns
+    /// `Some(epoch_secs)` if the bundle has been published, `None` otherwise.
+    async fn get_bundle_published_at(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+    ) -> Result<Option<u64>, StorageError>;
+
+    /// Store the timestamp when a poll bundle was published.
+    ///
+    /// This should be called when processing a `PollBundlePublished` event.
+    /// Idempotent: storing a timestamp for a poll that already has one returns
+    /// `StorageError::AlreadyExists`.
+    ///
+    /// # Arguments
+    /// * `tenant` - The tenant identifier
+    /// * `org_id` - The org identifier
+    /// * `poll_id` - The poll identifier
+    /// * `published_at` - Epoch seconds when the bundle was published
+    async fn store_bundle_published_at(
+        &self,
+        tenant: TenantId,
+        org_id: OrganizationId,
+        poll_id: &str,
+        published_at: u64,
+    ) -> Result<(), StorageError>;
+}
+
 /// Index mapping poll IDs to the ring hash at poll creation time.
 ///
 /// This index is used during vote verification to retrieve the exact ring
