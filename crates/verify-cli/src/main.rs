@@ -29,6 +29,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run a quick hardware benchmark to determine optimal verification
+    /// concurrency and save the result as a HardwareProfile.
+    ///
+    /// The profile is saved to `$XDG_DATA_HOME/mandate/benchmark-results.json`
+    /// (or `~/.local/share/mandate/benchmark-results.json`). Subsequent
+    /// `mandate-verify poll` runs will use this profile to skip runtime
+    /// calibration.
+    Tune,
+
     /// Prepare a vote revocation request for a poll.
     ///
     /// This constructs and displays a revocation intent. The actual submission
@@ -119,6 +128,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Tune => run_tune(),
         Command::Revoke {
             poll_id,
             key_image,
@@ -144,6 +154,40 @@ fn main() -> Result<()> {
             parallelism,
         }),
     }
+}
+
+/// Run the hardware tuning benchmark.
+///
+/// Generates synthetic verification workloads, tests concurrency levels,
+/// and saves the optimal configuration as a `HardwareProfile`.
+fn run_tune() -> Result<()> {
+    println!();
+    println!("  Hardware Tuning Benchmark");
+    println!("  ========================");
+    println!();
+
+    let sp = spinner("Running benchmark...");
+
+    let profile = mandate_verify::quick_tune(Some(&|msg| {
+        sp.set_message(msg.to_owned());
+    }))
+    .context("tuning benchmark failed")?;
+
+    finish_spinner(&sp, "Benchmark complete.");
+
+    println!();
+    println!("  Hardware:           {}", profile.hardware_fingerprint);
+    println!("  Optimal concurrency: {}", profile.optimal_concurrency);
+    if let Some(path) = mandate_verify::HardwareProfile::default_path() {
+        println!("  Profile saved to:   {}", path.display());
+    }
+    println!();
+    println!(
+        "  Future `mandate-verify poll` runs will use this profile \
+         to skip runtime calibration."
+    );
+
+    Ok(())
 }
 
 /// Stub implementation for vote revocation.

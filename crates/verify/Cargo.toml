@@ -26,6 +26,10 @@ rand.workspace = true
 prost.workspace = true
 tonic = { workspace = true, features = ["transport"] }
 
+# Serialization (hardware profile)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
 # Error handling
 thiserror.workspace = true
 

@@ -15,6 +15,8 @@ use rayon::prelude::*;
 use thiserror::Error;
 
 use crate::calibration::verify_with_calibration;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::profile::HardwareProfile;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -113,7 +115,10 @@ pub struct VerifyOptions {
 ///    thread pool with `n` threads directly.
 /// 2. **Small batch** — if `items.len() <= 2 * nproc`, use Rayon's global
 ///    thread pool (default parallelism).
-/// 3. **Calibration** — take ~10 % of items, split them across candidate
+/// 3. **Profile-guided** — if a [`HardwareProfile`] is available (via
+///    `MANDATE_PROFILE_PATH` env var or default data dir), use its
+///    `optimal_concurrency` value directly, skipping calibration entirely.
+/// 4. **Calibration** — take ~10 % of items, split them across candidate
 ///    parallelism levels `[1, 2, 4, 8, ..., nproc]`, measure throughput,
 ///    pick the best level, then verify the remaining items at that level.
 ///    All calibration results are included in the final output (zero waste).
@@ -137,13 +142,21 @@ pub fn verify_all_signatures(
         // --- Path 1: explicit override ---
         Some(threads) => verify_with_threads(verifier, items, threads.max(1)),
 
-        // --- Path 2 & 3: auto ---
+        // --- Path 2, 3, 4: auto ---
         None => {
             if items.len() <= 2 * nproc {
                 // Small batch — Rayon global pool is fine.
                 verify_with_global_pool(verifier, items)
             } else {
-                // Large batch — run calibration.
+                // Large batch — try profile-guided, fall back to calibration.
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(profile) = HardwareProfile::load_default() {
+                    return verify_with_threads(
+                        verifier,
+                        items,
+                        profile.optimal_concurrency as usize,
+                    );
+                }
                 verify_with_calibration(verifier, items, nproc)
             }
         }
