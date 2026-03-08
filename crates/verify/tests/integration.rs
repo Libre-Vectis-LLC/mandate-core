@@ -540,3 +540,189 @@ fn test_e2e_vote_revocation_5_voters_4_votes_1_revocation() {
 
     let _ = std::fs::remove_file(&xlsx_path);
 }
+
+// =========================================================================
+// Test 6: Mixed revocations — valid + invalid (non-matching key image)
+// =========================================================================
+
+#[test]
+fn test_e2e_mixed_revocations_valid_and_invalid() {
+    // --- Setup: 5 voters, 3 votes ---
+    let voters = generate_voters(5);
+    let pub_keys: Vec<String> = voters.iter().map(|(_, pk)| pk.clone()).collect();
+    let registry_rows: Vec<(String, String)> = voters
+        .iter()
+        .enumerate()
+        .map(|(i, (_, pk))| (format!("Voter-{i}"), pk.clone()))
+        .collect();
+
+    let registry_file = write_registry_xlsx(&registry_rows);
+
+    // Two revocations:
+    //   - "placeholder-ki-0" → valid (matches vote index 0)
+    //   - "nonexistent-ki-99" → invalid (no matching vote)
+    let revocations = vec![
+        "placeholder-ki-0".as_bytes().to_vec(),
+        "nonexistent-ki-99".as_bytes().to_vec(),
+    ];
+    let bundle_file = write_bundle_with_revocations(pub_keys.clone(), 3, revocations);
+
+    // --- Run verification pipeline ---
+    let report = run_pipeline(&registry_file, &bundle_file).expect("pipeline should succeed");
+
+    // --- Verify summary counts ---
+    assert_eq!(report.summary.votes_cast, 3);
+    assert_eq!(report.summary.revocations_count, 2);
+    assert_eq!(
+        report.summary.valid_revocations, 1,
+        "only one revocation should match a vote"
+    );
+
+    // --- Verify revocation checks ---
+    assert_eq!(report.revocation_checks.len(), 2);
+
+    let valid_revoc = &report.revocation_checks[0];
+    assert!(valid_revoc.valid);
+    assert_eq!(valid_revoc.original_vote_key_image_bs58, "placeholder-ki-0");
+    assert!(valid_revoc.error.is_none());
+
+    let invalid_revoc = &report.revocation_checks[1];
+    assert!(!invalid_revoc.valid);
+    assert_eq!(
+        invalid_revoc.original_vote_key_image_bs58,
+        "nonexistent-ki-99"
+    );
+    assert!(
+        invalid_revoc.error.is_some(),
+        "invalid revocation should have an error message"
+    );
+    assert!(
+        invalid_revoc
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("no matching vote key image"),
+        "error should explain the mismatch"
+    );
+
+    // --- Verify tally: 3 votes - 1 valid revocation = 2 ---
+    assert_eq!(
+        report.tally.total_votes, 2,
+        "tally should exclude one revoked vote; invalid revocation has no effect"
+    );
+
+    // --- Verify vote checks: exactly one revoked ---
+    let revoked_count = report.vote_checks.iter().filter(|vc| vc.revoked).count();
+    assert_eq!(revoked_count, 1);
+    let revoked_vote = report.vote_checks.iter().find(|vc| vc.revoked).unwrap();
+    assert_eq!(revoked_vote.key_image_bs58, "placeholder-ki-0");
+
+    // --- Export and verify Revocation Audit sheet ---
+    let locale = Locale::Single(Language::En);
+    let xlsx_path = export_report(&report, &locale).expect("export should succeed");
+
+    let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
+
+    // Revocation Audit: header + 2 revocations = 3 rows
+    let revoc_range = wb
+        .worksheet_range("Revocation Audit")
+        .expect("revocation audit sheet");
+    assert_eq!(
+        revoc_range.rows().count(),
+        3,
+        "revocation audit: 1 header + 2 revocations (valid + invalid)"
+    );
+
+    let _ = std::fs::remove_file(&xlsx_path);
+}
+
+// =========================================================================
+// Test 7: All votes revoked — tally should be zero
+// =========================================================================
+
+#[test]
+fn test_e2e_all_votes_revoked_tally_is_zero() {
+    // --- Setup: 3 voters, 2 votes, 2 revocations (all votes revoked) ---
+    let voters = generate_voters(3);
+    let pub_keys: Vec<String> = voters.iter().map(|(_, pk)| pk.clone()).collect();
+    let registry_rows: Vec<(String, String)> = voters
+        .iter()
+        .enumerate()
+        .map(|(i, (_, pk))| (format!("Voter-{i}"), pk.clone()))
+        .collect();
+
+    let registry_file = write_registry_xlsx(&registry_rows);
+
+    // Revoke both votes
+    let revocations = vec![
+        "placeholder-ki-0".as_bytes().to_vec(),
+        "placeholder-ki-1".as_bytes().to_vec(),
+    ];
+    let bundle_file = write_bundle_with_revocations(pub_keys.clone(), 2, revocations);
+
+    // --- Run verification pipeline ---
+    let report = run_pipeline(&registry_file, &bundle_file).expect("pipeline should succeed");
+
+    // --- Verify summary ---
+    assert_eq!(report.summary.votes_cast, 2);
+    assert_eq!(report.summary.revocations_count, 2);
+    assert_eq!(report.summary.valid_revocations, 2);
+
+    // --- Verify all revocations are valid ---
+    assert_eq!(report.revocation_checks.len(), 2);
+    assert!(report.revocation_checks.iter().all(|rc| rc.valid));
+    assert!(report.revocation_checks.iter().all(|rc| rc.error.is_none()));
+
+    // --- Verify all votes are marked revoked ---
+    let revoked_count = report.vote_checks.iter().filter(|vc| vc.revoked).count();
+    assert_eq!(revoked_count, 2, "all votes should be marked as revoked");
+
+    // --- Verify tally is zero: all votes revoked ---
+    assert_eq!(
+        report.tally.total_votes, 0,
+        "tally should be zero when all votes are revoked"
+    );
+    assert!(
+        report.tally.options.is_empty(),
+        "no option tallies when all votes are revoked"
+    );
+
+    // --- Export and verify XLSX ---
+    let locale = Locale::Single(Language::En);
+    let xlsx_path = export_report(&report, &locale).expect("export should succeed");
+
+    let mut wb: Xlsx<_> = open_workbook(&xlsx_path).expect("open exported xlsx");
+    let sheets = wb.sheet_names().to_vec();
+    assert_eq!(sheets.len(), 6, "exported workbook should have 6 sheets");
+
+    // Vote Audit: header + 2 votes (both revoked) = 3 rows
+    let audit_range = wb.worksheet_range("Vote Audit").expect("vote audit sheet");
+    assert_eq!(
+        audit_range.rows().count(),
+        3,
+        "vote audit: 1 header + 2 votes"
+    );
+
+    // Revocation Audit: header + 2 revocations = 3 rows
+    let revoc_range = wb
+        .worksheet_range("Revocation Audit")
+        .expect("revocation audit sheet");
+    assert_eq!(
+        revoc_range.rows().count(),
+        3,
+        "revocation audit: 1 header + 2 revocations"
+    );
+
+    // Tally Results: when all votes revoked, should show minimal rows
+    // (header + not-voted row + total row = 3)
+    let tally_range = wb
+        .worksheet_range("Tally Results")
+        .expect("tally results sheet");
+    assert_eq!(
+        tally_range.rows().count(),
+        3,
+        "tally: header + not-voted + total when all votes revoked"
+    );
+
+    let _ = std::fs::remove_file(&xlsx_path);
+}
