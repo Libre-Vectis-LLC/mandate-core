@@ -9,7 +9,7 @@ name = "mandate-verify"
 path = "src/main.rs"
 
 [dependencies]
-mandate-verify.workspace = true
+mandate-verify = { workspace = true, features = ["opencc"] }
 
 # CLI
 clap = { workspace = true, features = ["derive"] }

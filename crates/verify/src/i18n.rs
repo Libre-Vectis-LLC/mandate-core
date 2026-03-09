@@ -22,6 +22,7 @@ pub enum I18nError {
     InvalidLocale(String),
 
     /// OpenCC conversion failed.
+    #[cfg(feature = "opencc")]
     #[error("opencc conversion failed: {0}")]
     OpenccError(String),
 }
@@ -383,6 +384,9 @@ pub const ALL_LANGUAGES: &[Language] = &[Language::Zhs, Language::En, Language::
 /// Used for dynamic user-authored content (poll questions, option text) where
 /// OpenCC conversion is acceptable. Static UI strings use manually curated
 /// translations instead.
+///
+/// Requires the `opencc` feature.
+#[cfg(feature = "opencc")]
 pub fn convert_zhs_to_zht(text: &str) -> Result<String, I18nError> {
     let opencc = opencc_rust::OpenCC::new(opencc_rust::DefaultConfig::S2TWP)
         .map_err(|e| I18nError::OpenccError(e.to_string()))?;
@@ -538,6 +542,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "opencc")]
     #[test]
     fn test_opencc_convert_zhs_to_zht() {
         let result =
@@ -545,12 +550,14 @@ mod tests {
         assert_eq!(result, "\u{6dbc}\u{98a8}\u{6709}\u{8a0a}");
     }
 
+    #[cfg(feature = "opencc")]
     #[test]
     fn test_opencc_convert_empty_string() {
         let result = convert_zhs_to_zht("").expect("opencc should succeed on empty string");
         assert_eq!(result, "");
     }
 
+    #[cfg(feature = "opencc")]
     #[test]
     fn test_opencc_convert_ascii_passthrough() {
         let result =
@@ -558,6 +565,7 @@ mod tests {
         assert_eq!(result, "Hello World");
     }
 
+    #[cfg(feature = "opencc")]
     #[test]
     fn test_opencc_convert_mixed_content() {
         let result = convert_zhs_to_zht("\u{9009}\u{9879}A: \u{7f51}\u{7edc}\u{6295}\u{7968}")
@@ -617,6 +625,7 @@ mod tests {
     // OpenCC: Unicode characters preserved
     // -----------------------------------------------------------------------
 
+    #[cfg(feature = "opencc")]
     #[test]
     fn test_opencc_preserves_emoji_and_special() {
         let input = "\u{6295}\u{7968} 🗳️ \u{6d4b}\u{8bd5}";

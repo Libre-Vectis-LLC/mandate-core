@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+opencc = ["dep:opencc-rust"]
+
 [dependencies]
 mandate-core.workspace = true
 
@@ -17,7 +21,7 @@ calamine.workspace = true
 
 # i18n
 rust-i18n.workspace = true
-opencc-rust.workspace = true
+opencc-rust = { workspace = true, optional = true }
 
 # RNG
 rand.workspace = true
