@@ -54,7 +54,7 @@ impl SignatureVerifier for LocalSignatureVerifier {
             .iter()
             .map(|item| {
                 item.signature
-                    .verify(item.external_ring.as_deref(), &item.message)
+                    .verify(item.external_ring.as_deref(), None, &item.message)
                     .map_err(VerificationError::from)
             })
             .collect()

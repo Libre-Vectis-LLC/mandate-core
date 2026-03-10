@@ -161,7 +161,7 @@ mod tests {
         let json = serde_json::to_string(&event).expect("serialize");
         let decoded: Event = serde_json::from_str(&json).expect("deserialize");
         let sig = decoded.signature.expect("signature present");
-        assert!(sig.verify(Some(&ring), msg).expect("verify"));
+        assert!(sig.verify(Some(&ring), None, msg).expect("verify"));
     }
 
     #[test]
@@ -617,7 +617,7 @@ mod tests {
 
         // Verify that the signature is now invalid for the modified event
         let modified_signing_bytes = event.to_signing_bytes().expect("modified signing bytes");
-        let verification_result = sig.verify(Some(&ring), &modified_signing_bytes);
+        let verification_result = sig.verify(Some(&ring), None, &modified_signing_bytes);
 
         assert!(
             verification_result.is_ok() && !verification_result.unwrap(),
@@ -676,7 +676,7 @@ mod tests {
         let modified_bytes = modified_event
             .to_signing_bytes()
             .expect("modified external_id");
-        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        let result = base_sig.verify(Some(&ring), None, &modified_bytes);
         assert!(
             result.is_ok() && !result.unwrap(),
             "Signature should be invalid after changing external_id"
@@ -689,7 +689,7 @@ mod tests {
         let modified_bytes = modified_event
             .to_signing_bytes()
             .expect("modified display_name");
-        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        let result = base_sig.verify(Some(&ring), None, &modified_bytes);
         assert!(
             result.is_ok() && !result.unwrap(),
             "Signature should be invalid after changing display_name"
@@ -700,7 +700,7 @@ mod tests {
         modified.source = IdentitySource::Telegram;
         let modified_event = create_event(modified);
         let modified_bytes = modified_event.to_signing_bytes().expect("modified source");
-        let result = base_sig.verify(Some(&ring), &modified_bytes);
+        let result = base_sig.verify(Some(&ring), None, &modified_bytes);
         assert!(
             result.is_ok() && !result.unwrap(),
             "Signature should be invalid after changing source"

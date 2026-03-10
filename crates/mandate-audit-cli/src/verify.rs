@@ -354,7 +354,7 @@ fn verify_signature(
     };
 
     let ok = sig
-        .verify(Some(ring), &msg)
+        .verify(Some(ring), None, &msg)
         .map_err(|e| VerificationIssue {
             sequence_no,
             event_ulid: event.event_ulid.to_string(),

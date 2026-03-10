@@ -75,6 +75,7 @@ impl Signature {
     pub fn verify(
         &self,
         external_ring: Option<&Ring>,
+        precomputed: Option<&nazgul::ring::PrecomputedRingData>,
         message: &[u8],
     ) -> Result<bool, SigVerificationError> {
         match self.mode() {
@@ -82,10 +83,14 @@ impl Signature {
                 let ring = external_ring.ok_or(SigVerificationError::MissingRingForCompact)?;
                 // The nazgul library's verify method internally validates
                 // that the provided ring matches the stored ring hash
-                Ok(self.proof.verify::<Sha3_512>(Some(ring), None, message))
+                Ok(self
+                    .proof
+                    .verify::<Sha3_512>(Some(ring), precomputed, message))
             }
             StorageMode::Archival => {
-                Ok(self.proof.verify::<Sha3_512>(external_ring, None, message))
+                Ok(self
+                    .proof
+                    .verify::<Sha3_512>(external_ring, precomputed, message))
             }
         }
     }
@@ -215,7 +220,7 @@ mod tests {
         .expect("sign");
         let ki = sig.key_image();
         assert_eq!(ki.compress().to_bytes().len(), 32);
-        assert!(sig.verify(Some(&ring), msg).expect("verify"));
+        assert!(sig.verify(Some(&ring), None, msg).expect("verify"));
     }
 
     #[test]
@@ -232,11 +237,11 @@ mod tests {
         .expect("sign");
         // Compact signature without ring should return error
         assert!(matches!(
-            sig.verify(None, msg),
+            sig.verify(None, None, msg),
             Err(SigVerificationError::MissingRingForCompact)
         ));
         // With correct ring, verification should succeed
-        assert!(sig.verify(Some(&ring), msg).expect("verify"));
+        assert!(sig.verify(Some(&ring), None, msg).expect("verify"));
     }
 
     #[test]
@@ -254,7 +259,7 @@ mod tests {
         .expect("sign");
         // Wrong ring should fail verification (returns false, not error)
         // The nazgul library internally validates the ring hash
-        assert!(!sig.verify(Some(&wrong_ring), msg).expect("verify"));
+        assert!(!sig.verify(Some(&wrong_ring), None, msg).expect("verify"));
     }
 
     #[test]
@@ -290,7 +295,7 @@ mod tests {
 
         let json = serde_json::to_string(&sig).expect("serialize");
         let de: Signature = serde_json::from_str(&json).expect("deserialize");
-        assert!(de.verify(Some(&ring), msg).expect("verify"));
+        assert!(de.verify(Some(&ring), None, msg).expect("verify"));
         assert_eq!(sig.kind, de.kind);
         assert_eq!(sig.ring_hash(), de.ring_hash());
     }
@@ -318,7 +323,7 @@ mod tests {
 
         assert!(
             sig_archival
-                .verify(Some(&ring), msg)
+                .verify(Some(&ring), None, msg)
                 .expect("verify archival"),
             "single-element ring archival signature should verify"
         );
@@ -335,7 +340,7 @@ mod tests {
 
         assert!(
             sig_compact
-                .verify(Some(&ring), msg)
+                .verify(Some(&ring), None, msg)
                 .expect("verify compact"),
             "single-element ring compact signature should verify"
         );
@@ -375,7 +380,7 @@ mod tests {
 
             // Verification should still succeed
             let ring_ref = if storage == StorageMode::Compact { Some(&ring) } else { None };
-            prop_assert!(deserialized.verify(ring_ref, &msg).expect("verify"));
+            prop_assert!(deserialized.verify(ring_ref, None, &msg).expect("verify"));
 
             // Properties should be preserved
             prop_assert_eq!(sig.kind, deserialized.kind);
@@ -449,10 +454,10 @@ mod tests {
             .expect("sign");
 
             // Correct ring should verify
-            prop_assert!(sig.verify(Some(&ring), &msg).expect("verify"));
+            prop_assert!(sig.verify(Some(&ring), None, &msg).expect("verify"));
 
             // Wrong ring should fail (returns false, not error)
-            prop_assert!(!sig.verify(Some(&wrong_ring), &msg).expect("verify"));
+            prop_assert!(!sig.verify(Some(&wrong_ring), None, &msg).expect("verify"));
         }
 
         /// Property: Key image is stable across different messages.
@@ -558,10 +563,10 @@ mod tests {
             .expect("sign");
 
             // Should verify without external ring
-            prop_assert!(sig.verify(None, &msg).expect("verify"));
+            prop_assert!(sig.verify(None, None, &msg).expect("verify"));
 
             // Should also verify with ring provided
-            prop_assert!(sig.verify(Some(&ring), &msg).expect("verify"));
+            prop_assert!(sig.verify(Some(&ring), None, &msg).expect("verify"));
         }
     }
 }
