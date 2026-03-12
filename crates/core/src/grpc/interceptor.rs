@@ -143,6 +143,9 @@ fn hash_for_comparison(secret: &[u8]) -> [u8; 32] {
 /// This is the secure version that should be used in production.
 /// Bot secret is required; tenant ID is optional at the interceptor level.
 /// Individual service methods that require tenant context must validate its presence.
+// tonic's interceptor API requires Result<_, Status> — Status is 176 bytes,
+// exceeding clippy's threshold, but we cannot Box it without breaking the API.
+#[allow(clippy::result_large_err)]
 pub fn make_bot_secret_interceptor(
     expected: BotSecret,
 ) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone + Send + Sync + 'static {
