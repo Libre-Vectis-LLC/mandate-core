@@ -166,10 +166,10 @@ impl std::fmt::Display for TransferError {
                 )
             }
             TransferError::OrgNotOwned(org_id) => {
-                write!(f, "organization {} not owned by tenant", org_id)
+                write!(f, "organization {org_id} not owned by tenant")
             }
-            TransferError::InvalidAmount(msg) => write!(f, "invalid amount: {}", msg),
-            TransferError::Database(msg) => write!(f, "database error: {}", msg),
+            TransferError::InvalidAmount(msg) => write!(f, "invalid amount: {msg}"),
+            TransferError::Database(msg) => write!(f, "database error: {msg}"),
         }
     }
 }
@@ -298,21 +298,15 @@ mod tests {
             required: Nanos::from_dollars(100.0),
             available: Nanos::from_dollars(50.0),
         };
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("insufficient balance"));
         assert!(msg.contains("100"));
         assert!(msg.contains("50"));
 
         let err = TransferError::OrgNotOwned("org_123".to_string());
-        assert_eq!(
-            format!("{}", err),
-            "organization org_123 not owned by tenant"
-        );
+        assert_eq!(format!("{err}"), "organization org_123 not owned by tenant");
 
         let err = TransferError::InvalidAmount("amount must be positive".to_string());
-        assert_eq!(
-            format!("{}", err),
-            "invalid amount: amount must be positive"
-        );
+        assert_eq!(format!("{err}"), "invalid amount: amount must be positive");
     }
 }

@@ -6,7 +6,7 @@
 //! - Reconstruction picks the shortest forward/backward path between an anchor ring
 //!   (optional) and the target hash.
 
-use crate::hashing::ring_hash_sha3_256;
+use crate::hashing::ring_hash;
 use crate::ids::{MasterPublicKey, RingHash};
 use nazgul::ring::Ring;
 use nazgul::traits::LocalByteConvertible;
@@ -52,7 +52,7 @@ impl RingDeltaLog {
 
         let delta = RingDelta::Add(founder);
         apply_delta(&mut ring, &delta)?;
-        let h = ring_hash_sha3_256(&ring);
+        let h = ring_hash(&ring);
         entries.push((h, delta));
         index.insert(h, vec![0]);
 
@@ -69,7 +69,7 @@ impl RingDeltaLog {
             return Err(RingLogError::LogCapacityExceeded);
         }
         apply_delta(ring, &delta)?;
-        let hash = ring_hash_sha3_256(ring);
+        let hash = ring_hash(ring);
         let idx = self.entries.len();
         self.entries.push((hash, delta));
         self.index.entry(hash).or_default().push(idx);
@@ -195,7 +195,7 @@ impl RingDeltaLog {
 
         let (ring, anchor_positions, anchored) = match anchor {
             Some(r) => {
-                let h = ring_hash_sha3_256(r);
+                let h = ring_hash(r);
                 let pos = self.index.get(&h).ok_or(RingLogError::AnchorNotFound)?;
                 (r.clone(), pos.clone(), true)
             }
@@ -297,15 +297,15 @@ fn point_from(pk: &MasterPublicKey) -> Result<nazgul::scalar::RistrettoPoint, Ri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hashing::Blake3_512;
     use crate::key_manager::KeyManager;
     use crate::test_utils::TEST_MNEMONIC;
     use nazgul::traits::{Derivable, LocalByteConvertible};
-    use sha3::Sha3_512;
 
     fn mpk(label: &[u8]) -> MasterPublicKey {
         let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
         let master = km.derive_nazgul_master_keypair();
-        let child = master.0.derive_child::<Sha3_512>(label);
+        let child = master.0.derive_child::<Blake3_512>(label);
         MasterPublicKey(child.public().to_bytes())
     }
 
@@ -333,8 +333,8 @@ mod tests {
         let restored = log
             .reconstruct(&h2, Some(&ring))
             .expect("reconstruct should succeed in test fixture");
-        let ring_hash = ring_hash_sha3_256(&restored);
-        assert_eq!(ring_hash, h2);
+        let restored_ring_hash = ring_hash(&restored);
+        assert_eq!(restored_ring_hash, h2);
         assert_eq!(restored.members().len(), 3);
     }
 
@@ -355,13 +355,13 @@ mod tests {
             .expect("append must succeed in test fixture");
 
         let restored = log
-            .reconstruct(&ring_hash_sha3_256(&genesis), Some(&ring_at_h1))
+            .reconstruct(&ring_hash(&genesis), Some(&ring_at_h1))
             .expect("reconstruct should succeed in test fixture");
-        let ring_hash = ring_hash_sha3_256(&restored);
-        assert_eq!(ring_hash, ring_hash_sha3_256(&genesis));
+        let restored_ring_hash = ring_hash(&restored);
+        assert_eq!(restored_ring_hash, ring_hash(&genesis));
         assert_eq!(restored.members().len(), 1);
 
-        assert!(log.index.contains_key(&ring_hash_sha3_256(&ring_at_h1)));
+        assert!(log.index.contains_key(&ring_hash(&ring_at_h1)));
     }
 
     #[test]
@@ -370,10 +370,10 @@ mod tests {
         let log = RingDeltaLog::new(founder).expect("new log");
 
         let ring = Ring::new(vec![point_from(&founder).unwrap()]);
-        let target_hash = ring_hash_sha3_256(&ring);
+        let target_hash = ring_hash(&ring);
 
         let reconstructed = log.reconstruct(&target_hash, None).expect("reconstruct");
-        assert_eq!(ring_hash_sha3_256(&reconstructed), target_hash);
+        assert_eq!(ring_hash(&reconstructed), target_hash);
         assert_eq!(reconstructed.members().len(), 1);
     }
 
@@ -402,7 +402,7 @@ mod tests {
         for delta in path {
             apply_delta(&mut anchor_ring, &delta).expect("delta apply");
         }
-        let resulting_hash = ring_hash_sha3_256(&anchor_ring);
+        let resulting_hash = ring_hash(&anchor_ring);
         assert_eq!(resulting_hash, h1, "backward path must land on target");
     }
 
@@ -415,22 +415,22 @@ mod tests {
 
         // 1. Add
         log.append(&mut ring, RingDelta::Add(member)).unwrap();
-        let hash_with_member = ring_hash_sha3_256(&ring);
+        let hash_with_member = ring_hash(&ring);
 
         // 2. Remove
         log.append(&mut ring, RingDelta::Remove(member)).unwrap();
-        assert_ne!(ring_hash_sha3_256(&ring), hash_with_member);
+        assert_ne!(ring_hash(&ring), hash_with_member);
 
         // 3. Add again
         log.append(&mut ring, RingDelta::Add(member)).unwrap();
-        let final_hash = ring_hash_sha3_256(&ring);
+        let final_hash = ring_hash(&ring);
 
         // Verify state consistency
         assert_eq!(final_hash, hash_with_member);
 
         // Reconstruct from scratch
         let reconstructed = log.reconstruct(&final_hash, None).unwrap();
-        assert_eq!(ring_hash_sha3_256(&reconstructed), final_hash);
+        assert_eq!(ring_hash(&reconstructed), final_hash);
         assert_eq!(reconstructed.members().len(), 2);
     }
 
@@ -472,10 +472,10 @@ mod tests {
         let mut ring = Ring::new(vec![point_from(&a).unwrap()]);
 
         log.append(&mut ring, RingDelta::Add(b)).unwrap();
-        let hash_ab = ring_hash_sha3_256(&ring);
+        let hash_ab = ring_hash(&ring);
 
         log.append(&mut ring, RingDelta::Remove(b)).unwrap();
-        let _hash_a = ring_hash_sha3_256(&ring);
+        let _hash_a = ring_hash(&ring);
 
         log.append(&mut ring, RingDelta::Add(b)).unwrap();
 
@@ -483,7 +483,7 @@ mod tests {
         let anchor_ring = Ring::new(vec![point_from(&a).unwrap()]);
         let reconstructed = log.reconstruct(&hash_ab, Some(&anchor_ring)).unwrap();
 
-        assert_eq!(ring_hash_sha3_256(&reconstructed), hash_ab);
+        assert_eq!(ring_hash(&reconstructed), hash_ab);
         assert_eq!(reconstructed.members().len(), 2);
         assert!(reconstructed.members().contains(&point_from(&a).unwrap()));
         assert!(reconstructed.members().contains(&point_from(&b).unwrap()));
@@ -498,13 +498,13 @@ mod tests {
         let mut log1 = RingDeltaLog::new(a).unwrap();
         let mut ring1 = Ring::new(vec![point_from(&a).unwrap()]);
         log1.append(&mut ring1, RingDelta::Add(b)).unwrap();
-        let hash1 = ring_hash_sha3_256(&ring1);
+        let hash1 = ring_hash(&ring1);
 
         // Log 2: {B} -> +A
         let mut log2 = RingDeltaLog::new(b).unwrap();
         let mut ring2 = Ring::new(vec![point_from(&b).unwrap()]);
         log2.append(&mut ring2, RingDelta::Add(a)).unwrap();
-        let hash2 = ring_hash_sha3_256(&ring2);
+        let hash2 = ring_hash(&ring2);
 
         assert_eq!(hash1, hash2, "member ordering must be canonical");
     }

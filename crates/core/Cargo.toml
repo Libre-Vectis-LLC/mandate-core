@@ -34,6 +34,7 @@ zeroize.workspace = true
 subtle.workspace = true
 mandate-proto.workspace = true
 bs58.workspace = true
+blake3 = "1.8.3"
 
 [dev-dependencies]
 proptest.workspace = true

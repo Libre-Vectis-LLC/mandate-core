@@ -8,7 +8,7 @@ use super::super::to_status;
 use super::service::EventServiceImpl;
 use crate::billing::MeteringError;
 use crate::event::RingUpdate;
-use crate::hashing::ring_hash_sha3_256;
+use crate::hashing::ring_hash;
 use crate::key_manager::manager::derive_poll_signing_ring;
 use crate::ring_log::{apply_delta, RingDelta};
 use crate::rpc::RpcError;
@@ -242,7 +242,7 @@ impl EventServiceImpl {
             .current_ring(tenant, org_id)
             .await
             .map_err(to_status)?;
-        let current_hash = ring_hash_sha3_256(&current_ring);
+        let current_hash = ring_hash(&current_ring);
         if current_hash != update.ring_hash {
             return Err(RpcError::FailedPrecondition {
                 operation: "ring_update",

@@ -1,11 +1,11 @@
 //! Signature abstractions built on Nazgul `ContextualBLSAG`.
 //!
 //! - Uses Nazgul types directly (Ring, RingHash, ContextualBLSAG).
-//! - Derives session/current keys from master using ring hash (SHA3-256 for performance).
+//! - Derives session/current keys from master using the current protocol ring hash.
 //! - Exposes key images as `ids::KeyImage` (RistrettoPoint, uncompressed).
 //! - Keeps APIs pure and panic-free; validates signer membership before signing.
 
-use crate::hashing::ring_hash_sha3_256;
+use crate::hashing::{ring_hash, Blake3_512};
 use crate::ids::KeyImage;
 use nazgul::blsag::ContextualBLSAG;
 use nazgul::keypair::KeyPair;
@@ -14,7 +14,6 @@ use nazgul::traits::Derivable;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use sha3::Sha3_512;
 use thiserror::Error;
 
 /// Storage mode of the contextual signature.
@@ -68,7 +67,7 @@ impl Signature {
         }
     }
 
-    /// Verify with SHA3-512; external ring required for compact mode.
+    /// Verify with BLAKE3-XOF-512; external ring required for compact mode.
     ///
     /// For Compact signatures, the external ring must be provided.
     /// The nazgul library internally validates that the ring matches the stored hash.
@@ -85,12 +84,12 @@ impl Signature {
                 // that the provided ring matches the stored ring hash
                 Ok(self
                     .proof
-                    .verify::<Sha3_512>(Some(ring), precomputed, message))
+                    .verify::<Blake3_512>(Some(ring), precomputed, message))
             }
             StorageMode::Archival => {
                 Ok(self
                     .proof
-                    .verify::<Sha3_512>(external_ring, precomputed, message))
+                    .verify::<Blake3_512>(external_ring, precomputed, message))
             }
         }
     }
@@ -103,7 +102,7 @@ impl Signature {
     pub fn ring_hash(&self) -> RingHash {
         match &self.proof.context {
             RingContext::Compact(h) => h.to_owned(),
-            RingContext::Archival(ring) => ring_hash_sha3_256(ring),
+            RingContext::Archival(ring) => ring_hash(ring),
         }
     }
 }
@@ -129,18 +128,18 @@ impl MasterKeypair {
         self.0.public()
     }
 
-    /// Derive a session keypair using ring context (SHA3-512 per nazgul bound).
+    /// Derive a session keypair using ring context (BLAKE3-XOF-512 per protocol binding).
     pub fn derive_for_ring_context(&self, ctx: &RingContext) -> KeyPair {
         let rh = match ctx {
             RingContext::Compact(h) => h.to_owned(),
-            RingContext::Archival(ring) => ring_hash_sha3_256(ring),
+            RingContext::Archival(ring) => ring_hash(ring),
         };
         self.derive_for_context(&rh.0)
     }
 
-    /// Derive using arbitrary context (SHA3-512).
+    /// Derive using arbitrary context (BLAKE3-XOF-512).
     pub fn derive_for_context(&self, derivation: &[u8]) -> KeyPair {
-        self.0.derive_child::<Sha3_512>(derivation)
+        self.0.derive_child::<Blake3_512>(derivation)
     }
 }
 
@@ -178,11 +177,11 @@ pub fn sign_contextual(
 
     let proof = match storage {
         StorageMode::Compact => {
-            ContextualBLSAG::sign_compact::<Sha3_512, OsRng>(*secret, ring, None, message)
+            ContextualBLSAG::sign_compact::<Blake3_512, OsRng>(*secret, ring, None, message)
                 .map_err(|e| CryptoHelperError::Nazgul(e.into()))?
         }
         StorageMode::Archival => {
-            ContextualBLSAG::sign_archival::<Sha3_512, OsRng>(*secret, ring, None, message)
+            ContextualBLSAG::sign_archival::<Blake3_512, OsRng>(*secret, ring, None, message)
                 .map_err(|e| CryptoHelperError::Nazgul(e.into()))?
         }
     };
@@ -276,7 +275,7 @@ mod tests {
         let pub_from_master = master
             .as_keypair()
             .public()
-            .derive_child::<Sha3_512>(&ring_hash.0);
+            .derive_child::<Blake3_512>(&ring_hash.0);
         assert_eq!(k1.public(), &pub_from_master);
     }
 
@@ -413,7 +412,7 @@ mod tests {
         fn prop_ring_hash_order_invariant(
             ring_size in 2usize..10,
         ) {
-            use crate::hashing::ring_hash_sha3_256;
+            use crate::hashing::ring_hash;
 
             // Generate unique ring members
             let mut csprng = OsRng;
@@ -428,8 +427,8 @@ mod tests {
             let ring1 = Ring::new(members);
             let ring2 = Ring::new(shuffled);
 
-            let hash1 = ring_hash_sha3_256(&ring1);
-            let hash2 = ring_hash_sha3_256(&ring2);
+            let hash1 = ring_hash(&ring1);
+            let hash2 = ring_hash(&ring2);
 
             prop_assert_eq!(hash1, hash2);
         }

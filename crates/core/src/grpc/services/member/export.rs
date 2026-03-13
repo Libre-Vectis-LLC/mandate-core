@@ -89,7 +89,7 @@ pub(super) async fn export_members(
             if !valid_fields.contains(&field.as_str()) {
                 return Err(RpcError::InvalidArgument {
                     field: "include_fields",
-                    reason: format!("invalid field name: {}", field),
+                    reason: format!("invalid field name: {field}"),
                 }
                 .into());
             }
@@ -248,7 +248,7 @@ pub(crate) fn sanitize_for_csv(input: &str) -> String {
         || input.starts_with('-')
         || input.starts_with('@')
     {
-        format!("'{}", input)
+        format!("'{input}")
     } else {
         input.to_string()
     }
@@ -271,7 +271,7 @@ pub(crate) fn csv_escape(field: &str) -> String {
     if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
         // Escape double-quotes by doubling them
         let escaped = field.replace('"', "\"\"");
-        format!("\"{}\"", escaped)
+        format!("\"{escaped}\"")
     } else {
         field.to_string()
     }

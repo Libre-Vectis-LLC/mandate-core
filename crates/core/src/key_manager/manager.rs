@@ -1,13 +1,14 @@
+use crate::hashing::Blake3_512;
 use crate::ids::{EventUlid, OrganizationId, RingHash};
 use age::x25519::Identity as RageIdentity;
 use bip39::{Language, Mnemonic};
-use hkdf::Hkdf;
+use hkdf::{Hkdf, SimpleHkdf};
 use nazgul::keypair::KeyPair as NazgulKeyPair;
 use nazgul::ring::Ring;
 use nazgul::scalar::Scalar;
 use nazgul::traits::Derivable;
 use rand::{CryptoRng, RngCore};
-use sha3::{Sha3_256, Sha3_512};
+use sha3::Sha3_256;
 use std::io::{Read, Write};
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -48,14 +49,14 @@ const LABEL_POLL_KEY: &[u8] = b"mandate-poll-key-v1";
 #[derive(Clone, Copy)]
 pub enum KdfAlgorithm {
     Sha3_256,
-    Sha3_512,
+    Blake3_512,
 }
 
 impl KdfAlgorithm {
     pub fn expand<const N: usize>(self, ikm: &[u8], info: &[u8]) -> [u8; N] {
         match self {
             KdfAlgorithm::Sha3_256 => hkdf_sha3_256::<N>(ikm, info),
-            KdfAlgorithm::Sha3_512 => hkdf_sha3_512::<N>(ikm, info),
+            KdfAlgorithm::Blake3_512 => hkdf_blake3_512::<N>(ikm, info),
         }
     }
 }
@@ -78,16 +79,16 @@ fn hkdf_sha3_256<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
     okm
 }
 
-/// HKDF-SHA3-512 key derivation.
+/// HKDF-BLAKE3-XOF-512 key derivation.
 ///
 /// # Panics
 /// Panics if N > 16320 bytes (255 * 64-byte hash output). All current usages
 /// derive 32-byte keys, which is well within limits.
-fn hkdf_sha3_512<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
-    const MAX_OUTPUT: usize = 255 * 64; // SHA3-512 hash length
+fn hkdf_blake3_512<const N: usize>(ikm: &[u8], info: &[u8]) -> [u8; N] {
+    const MAX_OUTPUT: usize = 255 * 64; // BLAKE3-XOF-512 hash length
     const { assert!(N <= MAX_OUTPUT, "HKDF output exceeds maximum") };
 
-    let hkdf = Hkdf::<Sha3_512>::new(None, ikm);
+    let hkdf = SimpleHkdf::<Blake3_512>::new(None, ikm);
     let mut okm = [0u8; N];
     // SAFETY: Const assertion above guarantees N <= 16320 (255 * 64).
     // HKDF expand is infallible for valid output lengths.
@@ -161,7 +162,7 @@ pub trait MandateDerivable {
 impl MandateDerivable for NazgulKeyPair {
     fn derive_delegate(&self, org_id: &OrganizationId) -> DelegateNazgulKeyPair {
         let ctx = info(LABEL_DELEGATE, &[&org_id.to_bytes()]);
-        DelegateNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
+        DelegateNazgulKeyPair(self.derive_child::<Blake3_512>(&ctx))
     }
 
     fn derive_session(
@@ -170,7 +171,7 @@ impl MandateDerivable for NazgulKeyPair {
         ring_hash: &RingHash,
     ) -> SessionNazgulKeyPair {
         let ctx = info(LABEL_MEMBER_SESSION, &[&org_id.to_bytes(), &ring_hash.0]);
-        SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
+        SessionNazgulKeyPair(self.derive_child::<Blake3_512>(&ctx))
     }
 
     fn derive_poll_signing(
@@ -180,7 +181,7 @@ impl MandateDerivable for NazgulKeyPair {
         poll_id: &str,
     ) -> SessionNazgulKeyPair {
         let ctx = poll_signing_context(org_id, poll_ring_hash, poll_id);
-        SessionNazgulKeyPair(self.derive_child::<Sha3_512>(&ctx))
+        SessionNazgulKeyPair(self.derive_child::<Blake3_512>(&ctx))
     }
 }
 
@@ -195,7 +196,7 @@ impl KeyManager {
     pub fn from_mnemonic(phrase: &str, passphrase: Option<&str>) -> Result<Self, KeyManagerError> {
         // bip39 v2 uses parse or parse_in
         let mnemonic = Mnemonic::parse_in(Language::English, phrase)
-            .map_err(|e| KeyManagerError::InvalidMnemonic(format!("{:?}", e)))?;
+            .map_err(|e| KeyManagerError::InvalidMnemonic(format!("{e:?}")))?;
         let seed = mnemonic.to_seed(passphrase.unwrap_or(""));
         Ok(Self { master_seed: seed })
     }
@@ -206,7 +207,7 @@ impl KeyManager {
     ) -> Result<(Self, String), KeyManagerError> {
         // Generate 24 words (256 bits entropy)
         let mnemonic = Mnemonic::generate_in_with(rng, Language::English, 24)
-            .map_err(|e| KeyManagerError::MnemonicGeneration(format!("{:?}", e)))?;
+            .map_err(|e| KeyManagerError::MnemonicGeneration(format!("{e:?}")))?;
 
         let phrase = mnemonic.to_string();
         let seed = mnemonic.to_seed("");

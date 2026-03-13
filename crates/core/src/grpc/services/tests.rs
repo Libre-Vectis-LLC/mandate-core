@@ -48,7 +48,7 @@ use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
 use crate::event::{
     AnonymousMessage, Event, EventType, Poll, PollQuestion, PollQuestionKind, Vote, VoteSelection,
 };
-use crate::hashing::ring_hash_sha3_256;
+use crate::hashing::ring_hash;
 use crate::ids::{EventId, EventUlid, Ulid};
 use crate::key_manager::manager::{derive_poll_signing_ring, MandateDerivable};
 use nazgul::keypair::KeyPair;
@@ -278,8 +278,8 @@ async fn push_event_rejects_vote_when_poll_ring_hash_mismatches() {
     let extra = KeyPair::generate(&mut csprng);
     let ring_at_poll = Ring::new(vec![*owner.public()]);
     let ring_after = Ring::new(vec![*owner.public(), *extra.public()]);
-    let ring_hash_at_poll = ring_hash_sha3_256(&ring_at_poll);
-    let ring_hash_after = ring_hash_sha3_256(&ring_after);
+    let ring_hash_at_poll = ring_hash(&ring_at_poll);
+    let ring_hash_after = ring_hash(&ring_after);
 
     // Create poll with original ring
     let poll = Poll {
@@ -363,11 +363,11 @@ async fn push_event_accepts_vote_when_ring_matches_poll_snapshot() {
     let owner = KeyPair::generate(&mut csprng);
     set_test_owner_key(&services, tenant, org_id, &owner).await;
     let ring = Ring::new(vec![*owner.public()]);
-    let ring_hash = ring_hash_sha3_256(&ring);
+    let member_ring_hash = ring_hash(&ring);
 
     let poll = Poll {
         org_id,
-        ring_hash,
+        ring_hash: member_ring_hash,
         poll_id: "poll-ring-binding-accept".into(),
         questions: vec![PollQuestion {
             question_id: "q1".into(),
@@ -399,16 +399,17 @@ async fn push_event_accepts_vote_when_ring_matches_poll_snapshot() {
         .await
         .expect("poll accepted");
 
-    let vote_signing_ring = derive_poll_signing_ring(&org_id, &ring_hash, &poll.poll_id, &ring);
-    let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
-    let vote_signer = owner.derive_poll_signing(&org_id, &ring_hash, &poll.poll_id);
+    let vote_signing_ring =
+        derive_poll_signing_ring(&org_id, &member_ring_hash, &poll.poll_id, &ring);
+    let vote_signing_ring_hash = ring_hash(&vote_signing_ring);
+    let vote_signer = owner.derive_poll_signing(&org_id, &member_ring_hash, &poll.poll_id);
 
     let vote = Vote {
         org_id,
         ring_hash: vote_signing_ring_hash,
         poll_id: poll.poll_id.clone(),
         poll_hash,
-        poll_ring_hash: ring_hash, // matches poll creation ring
+        poll_ring_hash: member_ring_hash, // matches poll creation ring
         selections: vec![VoteSelection {
             question_id: "q1".into(),
             option_ids: vec![],
@@ -449,11 +450,11 @@ async fn push_event_rejects_vote_signed_with_master_ring_instead_of_poll_ring() 
     let owner = KeyPair::generate(&mut csprng);
     set_test_owner_key(&services, tenant, org_id, &owner).await;
     let ring = Ring::new(vec![*owner.public()]);
-    let ring_hash = ring_hash_sha3_256(&ring);
+    let member_ring_hash = ring_hash(&ring);
 
     let poll = Poll {
         org_id,
-        ring_hash,
+        ring_hash: member_ring_hash,
         poll_id: "poll-reject-master-signing".into(),
         questions: vec![PollQuestion {
             question_id: "q1".into(),
@@ -488,10 +489,10 @@ async fn push_event_rejects_vote_signed_with_master_ring_instead_of_poll_ring() 
     // Legacy/master-ring signing path: should now be rejected.
     let vote = Vote {
         org_id,
-        ring_hash,
+        ring_hash: member_ring_hash,
         poll_id: poll.poll_id.clone(),
         poll_hash,
-        poll_ring_hash: ring_hash,
+        poll_ring_hash: member_ring_hash,
         selections: vec![VoteSelection {
             question_id: "q1".into(),
             option_ids: vec![],
@@ -532,11 +533,11 @@ async fn push_event_accepts_compact_vote_when_ring_matches_poll_snapshot() {
     let owner = KeyPair::generate(&mut csprng);
     set_test_owner_key(&services, tenant, org_id, &owner).await;
     let ring = Ring::new(vec![*owner.public()]);
-    let ring_hash = ring_hash_sha3_256(&ring);
+    let member_ring_hash = ring_hash(&ring);
 
     let poll = Poll {
         org_id,
-        ring_hash,
+        ring_hash: member_ring_hash,
         poll_id: "poll-compact-accept".into(),
         questions: vec![PollQuestion {
             question_id: "q1".into(),
@@ -568,16 +569,17 @@ async fn push_event_accepts_compact_vote_when_ring_matches_poll_snapshot() {
         .await
         .expect("poll accepted");
 
-    let vote_signing_ring = derive_poll_signing_ring(&org_id, &ring_hash, &poll.poll_id, &ring);
-    let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
-    let vote_signer = owner.derive_poll_signing(&org_id, &ring_hash, &poll.poll_id);
+    let vote_signing_ring =
+        derive_poll_signing_ring(&org_id, &member_ring_hash, &poll.poll_id, &ring);
+    let vote_signing_ring_hash = ring_hash(&vote_signing_ring);
+    let vote_signer = owner.derive_poll_signing(&org_id, &member_ring_hash, &poll.poll_id);
 
     let vote = Vote {
         org_id,
         ring_hash: vote_signing_ring_hash,
         poll_id: poll.poll_id.clone(),
         poll_hash,
-        poll_ring_hash: ring_hash,
+        poll_ring_hash: member_ring_hash,
         selections: vec![VoteSelection {
             question_id: "q1".into(),
             option_ids: vec![],
@@ -618,7 +620,7 @@ async fn push_event_rejects_compact_vote_signed_with_master_ring() {
     let owner = KeyPair::generate(&mut csprng);
     set_test_owner_key(&services, tenant, org_id, &owner).await;
     let ring = Ring::new(vec![*owner.public()]);
-    let ring_hash = ring_hash_sha3_256(&ring);
+    let ring_hash = ring_hash(&ring);
 
     let poll = Poll {
         org_id,
@@ -700,7 +702,7 @@ async fn push_event_rejects_archival_signature_ring_hash_mismatch() {
 
     let (signer, signing_ring) = make_signing_ring(4);
     // Declare a ring_hash that doesn't match the actual signing ring
-    let mut declared_ring_hash = ring_hash_sha3_256(&signing_ring);
+    let mut declared_ring_hash = ring_hash(&signing_ring);
     declared_ring_hash.0[0] ^= 0x01;
 
     let mut event = Event {
@@ -737,7 +739,7 @@ async fn push_event_accepts_archival_signature_when_ring_hash_matches() {
     let org_id = create_test_org(&services, tenant).await;
 
     let (signer, signing_ring) = make_signing_ring(4);
-    let declared_ring_hash = ring_hash_sha3_256(&signing_ring);
+    let declared_ring_hash = ring_hash(&signing_ring);
 
     let mut event = Event {
         event_ulid: EventUlid(Ulid::new()),

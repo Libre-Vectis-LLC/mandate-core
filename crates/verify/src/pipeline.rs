@@ -23,7 +23,7 @@ use crate::signature::{
 use crate::tally::{self, TallyResult, VoteChoice};
 
 use curve25519_dalek::ristretto::RistrettoPoint;
-use mandate_core::hashing::ring_hash_sha3_256;
+use mandate_core::hashing::ring_hash;
 use nazgul::ring::Ring;
 
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ pub fn verify_poll(
         .collect::<Result<Vec<_>, _>>()?;
 
     let ring = Ring::new(master_points);
-    let ring_hash = ring_hash_sha3_256(&ring);
+    let ring_hash = ring_hash(&ring);
 
     // --- Step 3: Re-derive per-poll signing public keys ---
     let master_strs: Vec<&str> = bundle.ring_member_pubs.iter().map(String::as_str).collect();

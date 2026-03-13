@@ -175,7 +175,7 @@ impl RingWriter for InMemoryRings {
             let founder_point = nazgul::scalar::RistrettoPoint::from_bytes(&founder.0)
                 .map_err(|_| StorageError::Backend("invalid founder public key".to_string()))?;
             let current = Ring::new(vec![founder_point]);
-            let current_hash = crate::hashing::ring_hash_sha3_256(&current);
+            let current_hash = crate::hashing::ring_hash(&current);
 
             map.insert(
                 key,

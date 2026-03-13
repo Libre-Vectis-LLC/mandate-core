@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use mandate_core::crypto::signature::Signature;
 use mandate_core::event::{Event, EventType, Poll, Vote};
-use mandate_core::hashing::ring_hash_sha3_256;
+use mandate_core::hashing::ring_hash;
 use mandate_core::ids::{ContentHash, EventUlid, RingHash};
 use mandate_core::key_manager::manager::derive_poll_signing_ring;
 use serde::Serialize;
@@ -247,7 +247,7 @@ fn verify_signature(
             &vote.poll_id,
             &poll_member_ring,
         );
-        let expected_vote_ring_hash = ring_hash_sha3_256(&vote_derived_ring);
+        let expected_vote_ring_hash = ring_hash(&vote_derived_ring);
         if vote.ring_hash != expected_vote_ring_hash {
             return Err(VerificationIssue {
                 sequence_no,
@@ -305,7 +305,7 @@ fn verify_signature(
             &revocation.poll_id,
             &poll_member_ring,
         );
-        let expected_ring_hash = ring_hash_sha3_256(&vote_derived_ring);
+        let expected_ring_hash = ring_hash(&vote_derived_ring);
         if revocation.ring_hash != expected_ring_hash {
             return Err(VerificationIssue {
                 sequence_no,
@@ -485,7 +485,7 @@ fn event_type_name(event_type: &EventType) -> &'static str {
 mod tests {
     use super::*;
     use mandate_core::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
-    use mandate_core::hashing::ring_hash_sha3_256;
+    use mandate_core::hashing::ring_hash;
     use mandate_core::ids::{EventId, EventUlid, OrganizationId, RingHash, Ulid};
     use mandate_core::key_manager::manager::{derive_poll_signing_ring, MandateDerivable};
     use nazgul::keypair::KeyPair;
@@ -506,7 +506,7 @@ mod tests {
         let org_id = OrganizationId(Ulid::new());
         let owner = KeyPair::generate(&mut csprng);
         let ring = Ring::new(vec![*owner.public()]);
-        let ring_hash = ring_hash_sha3_256(&ring);
+        let ring_hash = ring_hash(&ring);
 
         let ring_cache = crate::ring_cache::RingLogCache {
             log: Default::default(),
@@ -545,7 +545,7 @@ mod tests {
 
         let vote_signing_ring =
             derive_poll_signing_ring(&ctx.org_id, &ctx.ring_hash, &poll_id, &ctx.ring);
-        let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
+        let vote_signing_ring_hash = ring_hash(&vote_signing_ring);
         let vote_signer = ctx
             .owner
             .derive_poll_signing(&ctx.org_id, &ctx.ring_hash, &poll_id);

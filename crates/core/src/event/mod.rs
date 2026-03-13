@@ -110,7 +110,7 @@ mod tests {
     use super::*;
     use crate::crypto::ciphertext::Ciphertext;
     use crate::crypto::signature::{sign_contextual, SignatureKind, StorageMode};
-    use crate::hashing::ring_hash_sha3_256;
+    use crate::hashing::ring_hash;
     use crate::ids::{KeyImage, MasterPublicKey};
     use crate::test_utils::test_org_id;
     use nazgul::keypair::KeyPair;
@@ -150,7 +150,7 @@ mod tests {
             serialization_version: 1,
             event_type: EventType::MessageCreate(AnonymousMessage {
                 org_id: test_org_id(),
-                ring_hash: ring_hash_sha3_256(&ring),
+                ring_hash: ring_hash(&ring),
                 message_id: "m1".into(),
                 content: Ciphertext(b"hello".to_vec()),
                 sent_at: 123,
@@ -571,7 +571,7 @@ mod tests {
 
         let (signer, ring) = make_ring(3);
         let org = test_org_id();
-        let ring_hash = ring_hash_sha3_256(&ring);
+        let ring_hash = ring_hash(&ring);
 
         let identity1 = MemberIdentity::telegram("12345".to_string(), Some("alice".to_string()));
         let identity2 = MemberIdentity::standalone("user789".to_string(), Some("bob".to_string()));
@@ -632,7 +632,7 @@ mod tests {
 
         let (signer, ring) = make_ring(3);
         let org = test_org_id();
-        let ring_hash = ring_hash_sha3_256(&ring);
+        let ring_hash = ring_hash(&ring);
 
         let base_identity =
             MemberIdentity::standalone("user123".to_string(), Some("Alice".to_string()));

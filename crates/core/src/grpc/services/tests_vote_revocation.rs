@@ -7,7 +7,7 @@ use super::tests::{
 };
 use crate::crypto::ciphertext::Ciphertext;
 use crate::event::{Event, EventType, Poll, PollQuestion, PollQuestionKind, Vote, VoteSelection};
-use crate::hashing::ring_hash_sha3_256;
+use crate::hashing::ring_hash;
 use crate::ids::{EventId, EventUlid, OrganizationId, TenantId, Ulid};
 use crate::key_manager::manager::{derive_poll_signing_ring, MandateDerivable};
 use mandate_proto::mandate::v1::event_service_server::EventService;
@@ -65,11 +65,11 @@ impl VoteRevocationTestSetup {
         let owner = KeyPair::generate(&mut csprng);
         set_test_owner_key(&services, tenant, org_id, &owner).await;
         let ring = Ring::new(vec![*owner.public()]);
-        let ring_hash = ring_hash_sha3_256(&ring);
+        let member_ring_hash = ring_hash(&ring);
 
         let poll = Poll {
             org_id,
-            ring_hash,
+            ring_hash: member_ring_hash,
             poll_id: poll_id.into(),
             questions: vec![PollQuestion {
                 question_id: "q1".into(),
@@ -91,9 +91,10 @@ impl VoteRevocationTestSetup {
             .await
             .expect("poll accepted");
 
-        let vote_signing_ring = derive_poll_signing_ring(&org_id, &ring_hash, poll_id, &ring);
-        let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
-        let vote_signer = owner.derive_poll_signing(&org_id, &ring_hash, poll_id);
+        let vote_signing_ring =
+            derive_poll_signing_ring(&org_id, &member_ring_hash, poll_id, &ring);
+        let vote_signing_ring_hash = ring_hash(&vote_signing_ring);
+        let vote_signer = owner.derive_poll_signing(&org_id, &member_ring_hash, poll_id);
 
         Self {
             services,
@@ -101,7 +102,7 @@ impl VoteRevocationTestSetup {
             org_id,
             owner,
             _ring: ring,
-            ring_hash,
+            ring_hash: member_ring_hash,
             poll_id: poll_id.into(),
             vote_signing_ring,
             vote_signing_ring_hash,
@@ -224,7 +225,7 @@ async fn setup_two_member_org() -> (
     set_test_owner_key(&services, tenant, org_id, &owner).await;
 
     let owner_only_ring = Ring::new(vec![*owner.public()]);
-    let owner_only_ring_hash = ring_hash_sha3_256(&owner_only_ring);
+    let owner_only_ring_hash = ring_hash(&owner_only_ring);
     let member2_mpk = MasterPublicKey(member2.public().compress().to_bytes());
 
     let mut ring_update_event = test_event(
@@ -247,8 +248,16 @@ async fn setup_two_member_org() -> (
         .expect("ring update accepted");
 
     let ring = Ring::new(vec![*owner.public(), *member2.public()]);
-    let ring_hash = ring_hash_sha3_256(&ring);
-    (services, tenant, org_id, owner, member2, ring, ring_hash)
+    let member_ring_hash = ring_hash(&ring);
+    (
+        services,
+        tenant,
+        org_id,
+        owner,
+        member2,
+        ring,
+        member_ring_hash,
+    )
 }
 
 /// Helper: push a PollBundlePublished event.
@@ -277,38 +286,55 @@ async fn push_bundle(
 }
 
 /// Helper: push a signed vote event.
-async fn push_vote(
-    svc: &CoreServices,
-    t: TenantId,
-    org: OrganizationId,
-    poll_id: &str,
+struct VotePushRequest<'a> {
+    services: &'a CoreServices,
+    tenant: TenantId,
+    org_id: OrganizationId,
+    poll_id: &'a str,
     poll_hash: crate::ids::ContentHash,
-    ring_hash: crate::ids::RingHash,
-    vsr_hash: crate::ids::RingHash,
-    signer: &crate::key_manager::manager::SessionNazgulKeyPair,
-    vsr: &Ring,
+    poll_ring_hash: crate::ids::RingHash,
+    vote_ring_hash: crate::ids::RingHash,
+    signer: &'a crate::key_manager::manager::SessionNazgulKeyPair,
+    vote_signing_ring: &'a Ring,
     option_ids: Vec<String>,
-    ts: u64,
-) {
+    processed_at: u64,
+}
+
+async fn push_vote(request: VotePushRequest<'_>) {
+    let VotePushRequest {
+        services,
+        tenant,
+        org_id,
+        poll_id,
+        poll_hash,
+        poll_ring_hash,
+        vote_ring_hash,
+        signer,
+        vote_signing_ring,
+        option_ids,
+        processed_at,
+    } = request;
+
     let mut ev = test_event(
-        org,
+        org_id,
         EventType::VoteCast(Vote {
-            org_id: org,
-            ring_hash: vsr_hash,
+            org_id,
+            ring_hash: vote_ring_hash,
             poll_id: poll_id.into(),
             poll_hash,
-            poll_ring_hash: ring_hash,
+            poll_ring_hash,
             selections: vec![VoteSelection {
                 question_id: "q1".into(),
                 option_ids,
                 write_in: None,
             }],
         }),
-        ts,
+        processed_at,
     );
-    sign_event_archival(&mut ev, signer.as_keypair(), vsr);
-    svc.event
-        .push_event(make_push_event_request(t, &ev))
+    sign_event_archival(&mut ev, signer.as_keypair(), vote_signing_ring);
+    services
+        .event
+        .push_event(make_push_event_request(tenant, &ev))
         .await
         .expect("vote accepted");
 }
@@ -380,13 +406,14 @@ async fn vote_revocation_rejected_before_bundle_published() {
 async fn vote_revocation_rejected_key_image_mismatch() {
     use crate::event::VoteRevocation;
 
-    let (services, tenant, org_id, owner, member2, ring, ring_hash) = setup_two_member_org().await;
+    let (services, tenant, org_id, owner, member2, ring, member_ring_hash) =
+        setup_two_member_org().await;
     let poll_id = "poll-ki-mismatch-2member";
 
     // Create poll
     let poll = Poll {
         org_id,
-        ring_hash,
+        ring_hash: member_ring_hash,
         poll_id: poll_id.into(),
         questions: vec![PollQuestion {
             question_id: "q1".into(),
@@ -409,30 +436,30 @@ async fn vote_revocation_rejected_key_image_mismatch() {
         .await
         .expect("poll accepted");
 
-    let vote_signing_ring = derive_poll_signing_ring(&org_id, &ring_hash, poll_id, &ring);
-    let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
+    let vote_signing_ring = derive_poll_signing_ring(&org_id, &member_ring_hash, poll_id, &ring);
+    let vote_signing_ring_hash = ring_hash(&vote_signing_ring);
 
     // Cast vote with owner's per-poll key (only owner votes)
-    let owner_vote_signer = owner.derive_poll_signing(&org_id, &ring_hash, poll_id);
-    push_vote(
-        &services,
+    let owner_vote_signer = owner.derive_poll_signing(&org_id, &member_ring_hash, poll_id);
+    push_vote(VotePushRequest {
+        services: &services,
         tenant,
         org_id,
         poll_id,
         poll_hash,
-        ring_hash,
-        vote_signing_ring_hash,
-        &owner_vote_signer,
-        &vote_signing_ring,
-        vec![],
-        3,
-    )
+        poll_ring_hash: member_ring_hash,
+        vote_ring_hash: vote_signing_ring_hash,
+        signer: &owner_vote_signer,
+        vote_signing_ring: &vote_signing_ring,
+        option_ids: vec![],
+        processed_at: 3,
+    })
     .await;
 
     push_bundle(&services, tenant, org_id, &owner, poll_id, 4).await;
 
     // VoteRevocation with member2's per-poll key (member2 never voted)
-    let member2_vote_signer = member2.derive_poll_signing(&org_id, &ring_hash, poll_id);
+    let member2_vote_signer = member2.derive_poll_signing(&org_id, &member_ring_hash, poll_id);
     let mut revocation_event = test_event(
         org_id,
         EventType::VoteRevocation(VoteRevocation {
@@ -594,7 +621,8 @@ async fn vote_revocation_tally_exclusion_and_bundle() {
     use crate::key_manager::{derive_poll_key_bytes, encrypt_event_content};
     use mandate_proto::mandate::v1::{GetPollBundleRequest, GetPollResultsRequest};
 
-    let (services, tenant, org_id, owner, member2, ring, ring_hash) = setup_two_member_org().await;
+    let (services, tenant, org_id, owner, member2, ring, member_ring_hash) =
+        setup_two_member_org().await;
     let poll_id = "poll-tally-exclusion";
 
     // Generate poll_event_ulid upfront so we can derive poll_key for encryption
@@ -609,7 +637,7 @@ async fn vote_revocation_tally_exclusion_and_bundle() {
     };
     let poll = Poll {
         org_id,
-        ring_hash,
+        ring_hash: member_ring_hash,
         poll_id: poll_id.into(),
         questions: vec![PollQuestion {
             question_id: "q1".into(),
@@ -653,39 +681,39 @@ async fn vote_revocation_tally_exclusion_and_bundle() {
         .expect("poll accepted");
 
     // Derive per-poll signing keys
-    let vote_signing_ring = derive_poll_signing_ring(&org_id, &ring_hash, poll_id, &ring);
-    let vote_signing_ring_hash = ring_hash_sha3_256(&vote_signing_ring);
-    let owner_vote_signer = owner.derive_poll_signing(&org_id, &ring_hash, poll_id);
-    let member2_vote_signer = member2.derive_poll_signing(&org_id, &ring_hash, poll_id);
+    let vote_signing_ring = derive_poll_signing_ring(&org_id, &member_ring_hash, poll_id, &ring);
+    let vote_signing_ring_hash = ring_hash(&vote_signing_ring);
+    let owner_vote_signer = owner.derive_poll_signing(&org_id, &member_ring_hash, poll_id);
+    let member2_vote_signer = member2.derive_poll_signing(&org_id, &member_ring_hash, poll_id);
 
     // Owner votes for opt_a, member2 votes for opt_b
-    push_vote(
-        &services,
+    push_vote(VotePushRequest {
+        services: &services,
         tenant,
         org_id,
         poll_id,
         poll_hash,
-        ring_hash,
-        vote_signing_ring_hash,
-        &owner_vote_signer,
-        &vote_signing_ring,
-        vec!["opt_a".into()],
-        3,
-    )
+        poll_ring_hash: member_ring_hash,
+        vote_ring_hash: vote_signing_ring_hash,
+        signer: &owner_vote_signer,
+        vote_signing_ring: &vote_signing_ring,
+        option_ids: vec!["opt_a".into()],
+        processed_at: 3,
+    })
     .await;
-    push_vote(
-        &services,
+    push_vote(VotePushRequest {
+        services: &services,
         tenant,
         org_id,
         poll_id,
         poll_hash,
-        ring_hash,
-        vote_signing_ring_hash,
-        &member2_vote_signer,
-        &vote_signing_ring,
-        vec!["opt_b".into()],
-        4,
-    )
+        poll_ring_hash: member_ring_hash,
+        vote_ring_hash: vote_signing_ring_hash,
+        signer: &member2_vote_signer,
+        vote_signing_ring: &vote_signing_ring,
+        option_ids: vec!["opt_b".into()],
+        processed_at: 4,
+    })
     .await;
 
     // Publish bundle → Finalized (verification_window = 0)

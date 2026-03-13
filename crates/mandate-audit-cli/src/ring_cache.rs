@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use mandate_core::hashing::ring_hash_sha3_256;
+use mandate_core::hashing::ring_hash;
 use mandate_core::ids::RingHash;
 use mandate_core::proto::ring_delta_from_bytes;
 use mandate_core::ring_log::RingDeltaLog;
@@ -69,7 +69,7 @@ impl RingLogCache {
         }
         if let Some(hash) = last_hash {
             if hash != expected {
-                let computed = ring_hash_sha3_256(ring);
+                let computed = ring_hash(ring);
                 anyhow::bail!(
                     "ring hash mismatch: entry={}, last_delta={}, computed={}",
                     hex::encode(expected.0),

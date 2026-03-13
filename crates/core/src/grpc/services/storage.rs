@@ -64,7 +64,7 @@ impl StorageService for StorageServiceImpl {
         if body.blobs.iter().any(|b| b.blob.len() > max_blob_bytes) {
             return Err(RpcError::InvalidArgument {
                 field: "blobs",
-                reason: format!("blob too large (max {} bytes)", max_blob_bytes),
+                reason: format!("blob too large (max {max_blob_bytes} bytes)"),
             }
             .into());
         }
@@ -133,7 +133,7 @@ impl StorageService for StorageServiceImpl {
         self.egress_meter
             .check_egress(&org_id_str, total_bytes)
             .await
-            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
+            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {e}")))?;
 
         // Record egress after preparing response
         let _ = self
@@ -174,7 +174,7 @@ impl StorageService for StorageServiceImpl {
         {
             return Err(RpcError::InvalidArgument {
                 field: "blobs",
-                reason: format!("blob too large (max {} bytes)", max_blob_bytes),
+                reason: format!("blob too large (max {max_blob_bytes} bytes)"),
             }
             .into());
         }
