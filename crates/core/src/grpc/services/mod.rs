@@ -200,3 +200,5 @@ pub(crate) async fn extract_tenant_id<T>(
 mod tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests_vote_revocation;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests_vote_revocation_tally;
