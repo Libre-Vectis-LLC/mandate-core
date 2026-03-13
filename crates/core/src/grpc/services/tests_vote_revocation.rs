@@ -19,7 +19,11 @@ use tonic::Code;
 use crate::grpc::wiring::CoreServices;
 
 /// Build an unsigned Event with common test defaults.
-pub(super) fn test_event(org_id: OrganizationId, event_type: EventType, processed_at: u64) -> Event {
+pub(super) fn test_event(
+    org_id: OrganizationId,
+    event_type: EventType,
+    processed_at: u64,
+) -> Event {
     Event {
         event_ulid: EventUlid(Ulid::new()),
         previous_event_hash: EventId([0u8; 32]),
@@ -33,7 +37,11 @@ pub(super) fn test_event(org_id: OrganizationId, event_type: EventType, processe
 }
 
 /// Sign an event with the owner's delegate key (for admin events).
-pub(super) fn sign_event_delegate_archival(event: &mut Event, owner: &KeyPair, org_id: &OrganizationId) {
+pub(super) fn sign_event_delegate_archival(
+    event: &mut Event,
+    owner: &KeyPair,
+    org_id: &OrganizationId,
+) {
     let delegate = owner.derive_delegate(org_id);
     let delegate_ring = Ring::new(vec![*delegate.public()]);
     sign_event_archival(event, delegate.as_keypair(), &delegate_ring);
@@ -604,4 +612,3 @@ async fn poll_bundle_published_duplicate_rejected() {
     assert_eq!(err.code(), Code::FailedPrecondition);
     assert!(err.message().contains("bundle"));
 }
-
