@@ -47,7 +47,8 @@ pub use vote_revocation::InMemoryVoteRevocations;
 mod tests {
     use super::*;
     use crate::event::{Event, EventType, MemberIdentity, RingOperation, RingUpdate};
-    use crate::hashing::ring_hash_sha3_256;
+    use crate::hashing::ring_hash;
+    use crate::hashing::Blake3_512;
     use crate::ids::{
         EventId, EventUlid, MasterPublicKey, Nanos, OrganizationId, RingHash, TenantId,
     };
@@ -60,13 +61,12 @@ mod tests {
     use curve25519_dalek::ristretto::RistrettoPoint;
     use curve25519_dalek::Scalar;
     use nazgul::traits::{Derivable, LocalByteConvertible};
-    use sha3::Sha3_512;
     use std::sync::Arc;
 
     fn mpk(label: &[u8]) -> MasterPublicKey {
         let km = KeyManager::from_mnemonic(TEST_MNEMONIC, None).expect("valid test mnemonic");
         let master = km.derive_nazgul_master_keypair();
-        let child = master.0.derive_child::<Sha3_512>(label);
+        let child = master.0.derive_child::<Blake3_512>(label);
         MasterPublicKey(child.public().to_bytes())
     }
 
@@ -81,7 +81,7 @@ mod tests {
             .await
             .expect("append should succeed");
         let ring = rings.current_ring(tenant, org).await.expect("ring exists");
-        assert_eq!(ring_hash_sha3_256(&ring), h1);
+        assert_eq!(ring_hash(&ring), h1);
 
         // Path from scratch to current should contain founder delta.
         let path = rings

@@ -60,7 +60,7 @@ impl EventServiceImpl {
         self.egress_meter
             .check_egress(&org_id_str, total_bytes)
             .await
-            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
+            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {e}")))?;
 
         let (tx, rx) = mpsc::channel(1);
         let sequence_nos: Vec<i64> = records.iter().map(|(_, _, seq)| seq.as_i64()).collect();

@@ -1,20 +1,23 @@
-//! Hashing helpers with a SHA3-first policy.
+//! Hashing helpers for mandate content hashes and protocol digests.
 //!
-//! - Default digest: SHA3-256.
-//! - SHA3-512 is available when a longer digest is strictly required.
+//! - Default 256-bit digest: SHA3-256.
+//! - Default 64-byte protocol digest: BLAKE3-XOF-512.
 //! - Provides helpers for raw bytes, ciphertexts, and ring consensus hashes
 //!   using nazgul's `Ring::consensus_hash`.
 
+mod blake3;
 pub mod canonical;
 pub mod event_hashing;
 pub mod primitives;
 
 // Re-export public API
+pub use blake3::Blake3_512;
 pub use canonical::{canonical_content_hash_sha3_256, canonical_json, CanonicalHashError};
 pub use event_hashing::{event_hash_sha3_256, poll_hash_sha3_256, vote_hash_sha3_256};
 pub use primitives::{
-    content_hash_bytes, content_hash_ciphertext, domain, ring_hash_sha3_256, sha3_256_bytes,
-    sha3_512_bytes, DigestAlgorithm, Hash256, Hash512, Sha3_256Digest, Sha3_512Digest,
+    blake3_512_bytes, content_hash_bytes, content_hash_ciphertext, domain, ring_hash,
+    ring_hash_sha3_256, sha3_256_bytes, Blake3_512Digest, DigestAlgorithm, Hash256, Hash512,
+    Sha3_256Digest,
 };
 
 #[cfg(test)]
@@ -28,10 +31,8 @@ mod tests {
     use proptest::prelude::*;
     use serde::Serialize;
     use serde_json::Value;
-    use sha3::Sha3_512;
-
     fn point(label: &[u8]) -> RistrettoPoint {
-        RistrettoPoint::hash_from_bytes::<Sha3_512>(label)
+        RistrettoPoint::hash_from_bytes::<Blake3_512>(label)
     }
 
     #[test]
@@ -50,8 +51,8 @@ mod tests {
         let ring_a = Ring::new(vec![p1, p2, p3]);
         let ring_b = Ring::new(vec![p3, p1, p2]);
 
-        let ha = ring_hash_sha3_256(&ring_a);
-        let hb = ring_hash_sha3_256(&ring_b);
+        let ha = ring_hash(&ring_a);
+        let hb = ring_hash(&ring_b);
 
         assert_eq!(ha, hb, "ring hash should be independent of input order");
     }
@@ -144,12 +145,12 @@ mod tests {
             prop_assert_eq!(hash1, hash2);
         }
 
-        /// Property: SHA3-512 hash is deterministic.
+        /// Property: BLAKE3-XOF-512 hash is deterministic.
         /// The same input bytes always produce the same hash output.
         #[test]
-        fn prop_sha3_512_deterministic(data in prop::collection::vec(any::<u8>(), 0..1024)) {
-            let hash1 = sha3_512_bytes(&data);
-            let hash2 = sha3_512_bytes(&data);
+        fn prop_blake3_512_deterministic(data in prop::collection::vec(any::<u8>(), 0..1024)) {
+            let hash1 = blake3_512_bytes(&data);
+            let hash2 = blake3_512_bytes(&data);
             prop_assert_eq!(hash1, hash2);
         }
 
@@ -184,13 +185,13 @@ mod tests {
         fn prop_ring_hash_deterministic(ring_size in 2usize..20) {
             let mut members = Vec::new();
             for i in 0..ring_size {
-                let label = format!("member-{}", i);
+                let label = format!("member-{i}");
                 members.push(point(label.as_bytes()));
             }
             let ring = Ring::new(members);
 
-            let hash1 = ring_hash_sha3_256(&ring);
-            let hash2 = ring_hash_sha3_256(&ring);
+            let hash1 = ring_hash(&ring);
+            let hash2 = ring_hash(&ring);
 
             prop_assert_eq!(hash1, hash2);
         }
@@ -273,11 +274,11 @@ mod tests {
         }
 
         /// Property: Hash output length is always correct.
-        /// SHA3-256 should always produce 32 bytes, SHA3-512 should always produce 64 bytes.
+        /// SHA3-256 should always produce 32 bytes, BLAKE3-XOF-512 should always produce 64 bytes.
         #[test]
         fn prop_hash_output_length(data in prop::collection::vec(any::<u8>(), 0..512)) {
             let hash256 = sha3_256_bytes(&data);
-            let hash512 = sha3_512_bytes(&data);
+            let hash512 = blake3_512_bytes(&data);
 
             prop_assert_eq!(hash256.as_bytes().len(), 32);
             prop_assert_eq!(hash512.as_bytes().len(), 64);
@@ -298,10 +299,10 @@ mod tests {
         let p1 = point(b"member-a");
         let p2 = point(b"member-b");
         let ring = Ring::new(vec![p1, p2]);
-        let h = ring_hash_sha3_256(&ring);
+        let h = ring_hash(&ring);
         assert_eq!(
             encode(h.0),
-            "fce2d27f03c9b5f108778fa8e670de601324d877ec33086e5dec76c718986f96"
+            "470800394804e2f9423420a8a5bbe0345f1e12327e5630d2d14b87c2db5a1983"
         );
     }
 

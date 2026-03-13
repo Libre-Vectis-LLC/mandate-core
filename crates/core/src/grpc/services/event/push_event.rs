@@ -6,7 +6,7 @@ use super::super::{
 use super::service::EventServiceImpl;
 use super::validation::banned_operation_for_event;
 use crate::event::Event;
-use crate::hashing::ring_hash_sha3_256;
+use crate::hashing::ring_hash;
 use crate::key_manager::MandateDerivable;
 use crate::rpc::RpcError;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
@@ -106,10 +106,7 @@ impl EventServiceImpl {
                 if content_chars > max_chars {
                     return Err(RpcError::InvalidArgument {
                         field: "message_content",
-                        reason: format!(
-                            "too long: {} characters > {} limit",
-                            content_chars, max_chars
-                        ),
+                        reason: format!("too long: {content_chars} characters > {max_chars} limit"),
                     }
                     .into());
                 }
@@ -345,7 +342,7 @@ impl EventServiceImpl {
             if banned {
                 return Err(RpcError::FailedPrecondition {
                     operation: "banned_check",
-                    reason: format!("key image banned for {:?}", operation),
+                    reason: format!("key image banned for {operation:?}"),
                 }
                 .into());
             }
@@ -392,7 +389,7 @@ impl EventServiceImpl {
 
                 // Build single-element ring containing only the delegate public key
                 let delegate_ring = Ring::new(vec![*delegate_kp.public()]);
-                let delegate_hash = ring_hash_sha3_256(&delegate_ring);
+                let delegate_hash = ring_hash(&delegate_ring);
 
                 // Verify that the signature's ring hash matches the expected delegate ring hash
                 // Use sig.ring_hash() as the authoritative source for what ring was used to sign
@@ -485,8 +482,7 @@ impl EventServiceImpl {
                                 &vote.poll_id,
                             )
                             .await?;
-                        let expected_vote_ring_hash =
-                            ring_hash_sha3_256(vote_signing_ring.as_ref());
+                        let expected_vote_ring_hash = ring_hash(vote_signing_ring.as_ref());
                         if vote.ring_hash != expected_vote_ring_hash {
                             return Err(RpcError::FailedPrecondition {
                                 operation: "vote_signing_ring_binding",
@@ -514,8 +510,7 @@ impl EventServiceImpl {
                                 &vr.poll_id,
                             )
                             .await?;
-                        let expected_ring_hash =
-                            ring_hash_sha3_256(revocation_signing_ring.as_ref());
+                        let expected_ring_hash = ring_hash(revocation_signing_ring.as_ref());
                         if vr.ring_hash != expected_ring_hash {
                             return Err(RpcError::FailedPrecondition {
                                 operation: "revocation_signing_ring_binding",
@@ -556,7 +551,7 @@ impl EventServiceImpl {
                         &vote.poll_id,
                     )
                     .await?;
-                let expected_vote_ring_hash = ring_hash_sha3_256(vote_signing_ring.as_ref());
+                let expected_vote_ring_hash = ring_hash(vote_signing_ring.as_ref());
                 if vote.ring_hash != expected_vote_ring_hash {
                     return Err(RpcError::FailedPrecondition {
                         operation: "vote_signing_ring_binding",
@@ -580,7 +575,7 @@ impl EventServiceImpl {
                         &vr.poll_id,
                     )
                     .await?;
-                let expected_ring_hash = ring_hash_sha3_256(revocation_signing_ring.as_ref());
+                let expected_ring_hash = ring_hash(revocation_signing_ring.as_ref());
                 if vr.ring_hash != expected_ring_hash {
                     return Err(RpcError::FailedPrecondition {
                         operation: "revocation_signing_ring_binding",

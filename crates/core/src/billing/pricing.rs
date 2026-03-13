@@ -429,9 +429,6 @@ mod tests {
         // Termux should be cheapest (despite CPU normalization)
         // Note: This might not always be true depending on workload mix,
         // but for CPU-heavy workloads it should hold
-        println!(
-            "AWS: {:?}, Hetzner: {:?}, Termux: {:?}",
-            aws_cost, hetzner_cost, termux_cost
-        );
+        println!("AWS: {aws_cost:?}, Hetzner: {hetzner_cost:?}, Termux: {termux_cost:?}");
     }
 }

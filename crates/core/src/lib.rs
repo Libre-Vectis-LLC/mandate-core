@@ -1,8 +1,9 @@
 //! Mandate core: audit-first, WASM-friendly, no-I/O protocol primitives.
 //!
 //! Key contracts:
-//! - Hashing: canonical JSON (sorted keys, compact) + domain separation, SHA3-256 default with
-//!   pluggable digest trait; no floats, ciphertext hashed as-is.
+//! - Hashing: canonical JSON (sorted keys, compact) + domain separation, SHA3-256 for 256-bit
+//!   content hashes and BLAKE3-XOF-512 for protocol paths that require 64-byte digest material;
+//!   no floats, ciphertext hashed as-is.
 //! - Audit chain: events are signed, signature excluded from content hash; chain is for audit, not
 //!   full state replay.
 //! - Rings: append-only delta log; reconstruction chooses shortest path from cached anchor to
@@ -13,7 +14,8 @@
 //!   with keyset pagination.
 //! - WASM: no std I/O; `getrandom` wasm_js enabled; target `wasm32-unknown-unknown` should compile
 //!   via `cargo check --target wasm32-unknown-unknown`. gRPC surface is host-only.
-//! - Pluggability: digest trait leaves room for future BLAKE3 swap without API breakage.
+//! - Pluggability: digest roles remain explicit so protocol-facing hash functions can evolve
+//!   without changing higher-level APIs.
 //!
 pub mod billing;
 pub mod config;

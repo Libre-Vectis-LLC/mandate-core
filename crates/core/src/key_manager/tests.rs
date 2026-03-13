@@ -12,13 +12,13 @@ const GOLDEN_ORG_SHARED_SECRET_HEX: &str =
     "528b73d2c79cf44b481aabc75365403511fbaf986bf475bfa869af8a75a3cd7b";
 // Golden vector for length-prefixed info() encoding. Update if info() encoding changes.
 const GOLDEN_DELEGATE_KEY_HEX: &str =
-    "8d4eade191e9a054f3616e356f77716b7ecea113191a9174fdf79e5006215908";
+    "6cdaa5ef81f4f139226dd8a65e345c55429990f5c85293ce691af9fae2e6fe0a";
 // Golden vector for length-prefixed info() encoding. Update if info() encoding changes.
 const GOLDEN_MEMBER_SESSION_KEY_HEX: &str =
-    "3d87103479fb08c17a7d742b7daf7b883fd9b80da3b2daf48500ffd75cb79800";
+    "a1296153cdff4e94df161512cd5cd116265a9b8c61a249751e52c300e002ac0c";
 // Golden vector for length-prefixed info() encoding. Update if info() encoding changes.
 const GOLDEN_POLL_SIGNING_KEY_HEX: &str =
-    "b8d6b80eb231118701d9550c82e4420b52fc0b4b888f50b12c82806121c25c0b";
+    "1548c56588758aec3c33fa6cd562dfdca90072c7ef4aaf00814a6a01092c2701";
 // Golden vector for length-prefixed info() encoding. Update if info() encoding changes.
 const GOLDEN_EVENT_KEY_HEX: &str =
     "f739c2b7153c97c3ee4ae56bc70ce951f110eae496cac3fce7151b030ce6368c";

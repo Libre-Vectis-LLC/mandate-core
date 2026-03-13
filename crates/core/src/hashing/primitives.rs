@@ -3,7 +3,9 @@
 use crate::crypto::ciphertext::Ciphertext;
 use crate::ids::ContentHash;
 use nazgul::ring::{Ring, RingHash};
-use sha3::{Digest, Sha3_256, Sha3_512};
+use sha3::{Digest, Sha3_256};
+
+use super::Blake3_512;
 
 /// 256-bit hash output type (newtype for stronger typing).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,9 +66,9 @@ pub fn sha3_256_bytes(data: impl AsRef<[u8]>) -> Hash256 {
     Hash256(hasher.finalize().into())
 }
 
-/// Hash arbitrary bytes with SHA3-512 (use only when digest extension is required).
-pub fn sha3_512_bytes(data: impl AsRef<[u8]>) -> Hash512 {
-    let mut hasher = Sha3_512::new();
+/// Hash arbitrary bytes with BLAKE3 XOF using a 64-byte output.
+pub fn blake3_512_bytes(data: impl AsRef<[u8]>) -> Hash512 {
+    let mut hasher = Blake3_512::new();
     hasher.update(data);
     Hash512(hasher.finalize().into())
 }
@@ -81,13 +83,18 @@ pub fn content_hash_ciphertext(ciphertext: &Ciphertext) -> ContentHash {
     ContentHash(sha3_256_bytes(&ciphertext.0).into_inner())
 }
 
-/// Derive a deterministic ring hash using nazgul's consensus hash with SHA3-512.
+/// Derive a deterministic ring hash using nazgul's consensus hash with BLAKE3-XOF-512.
 /// The underlying `Ring` already sorts members, so the result is order-invariant.
 ///
 /// This matches the hash stored by ContextualBLSAG compact signatures
-/// (Sha3_512 consensus hash truncated to 32 bytes).
+/// (BLAKE3-XOF-512 consensus hash truncated to 32 bytes).
+pub fn ring_hash(ring: &Ring) -> RingHash {
+    RingHash::from_output::<Blake3_512>(ring.consensus_hash::<Blake3_512>())
+}
+
+/// Compatibility shim for workspace crates that have not yet renamed their import.
 pub fn ring_hash_sha3_256(ring: &Ring) -> RingHash {
-    RingHash::from_output::<Sha3_512>(ring.consensus_hash::<Sha3_512>())
+    ring_hash(ring)
 }
 
 /// Domain prefixes for hashing distinct mandate payloads.
@@ -126,14 +133,14 @@ impl DigestAlgorithm for Sha3_256Digest {
     }
 }
 
-/// SHA3-512 digest algorithm for extended outputs.
-pub struct Sha3_512Digest;
+/// BLAKE3-XOF-512 digest algorithm for extended outputs.
+pub struct Blake3_512Digest;
 
-impl DigestAlgorithm for Sha3_512Digest {
+impl DigestAlgorithm for Blake3_512Digest {
     type Output = Hash512;
 
     fn hash_with_domain(domain: &[u8], message: &[u8]) -> Self::Output {
-        let mut hasher = Sha3_512::new();
+        let mut hasher = Blake3_512::new();
         hasher.update(domain);
         hasher.update(message);
         Hash512(hasher.finalize().into())

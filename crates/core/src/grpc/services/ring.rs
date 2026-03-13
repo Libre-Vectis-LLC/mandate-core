@@ -64,7 +64,7 @@ impl RingService for RingServiceImpl {
             .current_ring(tenant, org_id)
             .await
             .map_err(to_status)?;
-        let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
+        let ring_hash = crate::hashing::ring_hash(&ring);
         let members: Vec<Vec<u8>> = ring
             .members()
             .iter()
@@ -112,7 +112,7 @@ impl RingService for RingServiceImpl {
             .current_ring(tenant, org_id)
             .await
             .map_err(to_status)?;
-        let current_hash = crate::hashing::ring_hash_sha3_256(&current_ring);
+        let current_hash = crate::hashing::ring_hash(&current_ring);
 
         if after_hash.as_ref() == Some(&current_hash) {
             let (tx, rx) = mpsc::channel(1);
@@ -163,7 +163,7 @@ impl RingService for RingServiceImpl {
         self.egress_meter
             .check_egress(&org_id_str, total_bytes)
             .await
-            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {}", e)))?;
+            .map_err(|e| Status::resource_exhausted(format!("egress check failed: {e}")))?;
 
         let (tx, rx) = mpsc::channel(1);
 
@@ -220,7 +220,7 @@ async fn encode_ring_delta_path(
         })
         .collect::<Result<Vec<_>, Status>>()?;
 
-    let ring_hash = crate::hashing::ring_hash_sha3_256(&ring);
+    let ring_hash = crate::hashing::ring_hash(&ring);
 
     Ok(vec![mandate_proto::mandate::v1::RingDeltaEntry {
         ring_hash: ring_hash.0.to_vec(),
