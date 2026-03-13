@@ -92,11 +92,6 @@ pub fn ring_hash(ring: &Ring) -> RingHash {
     RingHash::from_output::<Blake3_512>(ring.consensus_hash::<Blake3_512>())
 }
 
-/// Compatibility shim for workspace crates that have not yet renamed their import.
-pub fn ring_hash_sha3_256(ring: &Ring) -> RingHash {
-    ring_hash(ring)
-}
-
 /// Domain prefixes for hashing distinct mandate payloads.
 pub mod domain {
     /// Domain prefix for events.

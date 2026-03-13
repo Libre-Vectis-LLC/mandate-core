@@ -16,8 +16,7 @@ pub use canonical::{canonical_content_hash_sha3_256, canonical_json, CanonicalHa
 pub use event_hashing::{event_hash_sha3_256, poll_hash_sha3_256, vote_hash_sha3_256};
 pub use primitives::{
     blake3_512_bytes, content_hash_bytes, content_hash_ciphertext, domain, ring_hash,
-    ring_hash_sha3_256, sha3_256_bytes, Blake3_512Digest, DigestAlgorithm, Hash256, Hash512,
-    Sha3_256Digest,
+    sha3_256_bytes, Blake3_512Digest, DigestAlgorithm, Hash256, Hash512, Sha3_256Digest,
 };
 
 #[cfg(test)]
