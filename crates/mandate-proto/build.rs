@@ -1,5 +1,9 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path().unwrap());
+    // Use vendored protoc if available, otherwise fall back to system protoc.
+    // protoc-bin-vendored doesn't ship binaries for all targets (e.g. aarch64-android).
+    if let Ok(path) = protoc_bin_vendored::protoc_bin_path() {
+        std::env::set_var("PROTOC", path);
+    }
 
     let protos = [
         "../protos/common.proto",
