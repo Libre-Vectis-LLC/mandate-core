@@ -89,7 +89,7 @@ pub fn content_hash_ciphertext(ciphertext: &Ciphertext) -> ContentHash {
 /// This matches the hash stored by ContextualBLSAG compact signatures
 /// (BLAKE3-XOF-512 consensus hash truncated to 32 bytes).
 pub fn ring_hash(ring: &Ring) -> RingHash {
-    RingHash::from_output::<Blake3_512>(ring.consensus_hash::<Blake3_512>())
+    ring.canonical_hash()
 }
 
 /// Domain prefixes for hashing distinct mandate payloads.

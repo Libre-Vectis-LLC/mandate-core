@@ -190,8 +190,8 @@ impl EventServiceImpl {
         external_ring: Option<&Ring>,
     ) -> Option<usize> {
         match sig.ring_context() {
-            RingContext::Compact(_) => external_ring.map(|ring| ring.members().len()),
-            RingContext::Archival(ring) => Some(ring.members().len()),
+            RingContext::Compact(_) => external_ring.map(|ring| ring.len()),
+            RingContext::Archival(ring) => Some(ring.len()),
         }
     }
 

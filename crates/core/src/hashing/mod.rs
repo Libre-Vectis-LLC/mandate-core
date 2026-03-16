@@ -301,7 +301,7 @@ mod tests {
         let h = ring_hash(&ring);
         assert_eq!(
             encode(h.0),
-            "470800394804e2f9423420a8a5bbe0345f1e12327e5630d2d14b87c2db5a1983"
+            "6af8b2f99f33bbe9dc4139fea0f81e2db17f18643f3c80a447ffeb68849ec6ce"
         );
     }
 

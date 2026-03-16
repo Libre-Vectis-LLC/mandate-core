@@ -56,7 +56,7 @@ fn serialize_proof(proof: &ContextualBLSAG) -> Option<Vec<u8>> {
 impl Signature {
     /// Extract the key image (uncompressed Ristretto point).
     pub fn key_image(&self) -> KeyImage {
-        self.proof.signature.key_image()
+        *self.proof.signature.key_image()
     }
 
     /// Return the storage mode (Compact/Archival).
@@ -74,7 +74,7 @@ impl Signature {
     pub fn verify(
         &self,
         external_ring: Option<&Ring>,
-        precomputed: Option<&nazgul::ring::PrecomputedRingData>,
+        precomputed: Option<&nazgul::ring::PreparedRing<Blake3_512>>,
         message: &[u8],
     ) -> Result<bool, SigVerificationError> {
         match self.mode() {
