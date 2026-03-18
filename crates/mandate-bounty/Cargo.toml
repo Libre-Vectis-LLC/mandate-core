@@ -1,0 +1,50 @@
+[package]
+name = "mandate-bounty"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Config parsing
+toml = { workspace = true }
+
+# Unicode normalization
+unicode-normalization = { workspace = true }
+
+# Cryptography / KDF
+sha3.workspace = true
+sha2.workspace = true
+argon2.workspace = true
+age.workspace = true
+
+# Security
+zeroize.workspace = true
+
+# Encoding
+bs58.workspace = true
+hex.workspace = true
+
+# Keypair generation / ring signatures
+curve25519-dalek.workspace = true
+rand.workspace = true
+nazgul.workspace = true
+
+# Event construction
+mandate-core.workspace = true
+mandate-verify.workspace = true
+ulid.workspace = true
+
+# XLSX generation
+rust_xlsxwriter.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+tempfile = "3"
