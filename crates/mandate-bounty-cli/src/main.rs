@@ -112,12 +112,7 @@ fn main() -> Result<()> {
             seed,
             force_tty,
         } => cmd_generate_solution(&config, seed, force_tty),
-        Command::Generate {
-            config: _,
-            output_dir: _,
-        } => {
-            anyhow::bail!("generate: not yet implemented")
-        }
+        Command::Generate { config, output_dir } => cmd_generate(&config, &output_dir),
         Command::VerifySolution {
             csv: _,
             voters: _,
@@ -180,6 +175,45 @@ fn cmd_generate_solution(
 
     // Serialize to JSON on stdout.
     serde_json::to_writer(std::io::stdout().lock(), &bundle)?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// generate
+// ---------------------------------------------------------------------------
+
+fn cmd_generate(config_path: &std::path::Path, output_dir: &std::path::Path) -> Result<()> {
+    use std::io::Read as _;
+
+    use mandate_bounty::config::BountyConfig;
+    use mandate_bounty::generate::generate_artifacts;
+    use mandate_bounty::solution_bundle::SolutionBundle;
+
+    // Load and validate config.
+    let config = BountyConfig::load(config_path)?;
+
+    // Read SolutionBundle JSON from stdin.
+    eprintln!("Reading solution bundle from stdin...");
+    let mut stdin_buf = String::new();
+    std::io::stdin().lock().read_to_string(&mut stdin_buf)?;
+    let bundle: SolutionBundle = serde_json::from_str(&stdin_buf)
+        .map_err(|e| anyhow::anyhow!("failed to parse solution bundle from stdin: {e}"))?;
+
+    anyhow::ensure!(
+        bundle.version == 1,
+        "unsupported solution bundle version: {}",
+        bundle.version
+    );
+    anyhow::ensure!(
+        bundle.solution.len() == config.voters.total as usize,
+        "solution entry count ({}) does not match config voters.total ({})",
+        bundle.solution.len(),
+        config.voters.total
+    );
+
+    eprintln!("Generating artifacts...");
+    generate_artifacts(&config, &bundle, output_dir)?;
 
     Ok(())
 }
