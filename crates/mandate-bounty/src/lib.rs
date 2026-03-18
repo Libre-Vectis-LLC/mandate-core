@@ -1,4 +1,5 @@
 pub mod canonical_csv;
 pub mod config;
 pub mod derive_identity;
+pub mod generate_solution;
 pub mod solution_bundle;

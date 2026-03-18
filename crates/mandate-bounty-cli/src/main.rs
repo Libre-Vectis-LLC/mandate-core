@@ -3,6 +3,7 @@
 //! Provides commands for generating, verifying, and auditing bounty challenge
 //! artifacts that prove anonymous poll integrity.
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -25,12 +26,21 @@ struct Cli {
 enum Command {
     /// Generate the canonical solution (operator-only).
     ///
-    /// Reads the challenge config and produces the solution CSV containing
-    /// voter-to-identity mappings and vote assignments.
+    /// Reads the challenge config and produces the solution JSON containing
+    /// voter-to-identity mappings and vote assignments. Output goes to stdout
+    /// for piping to encryption.
     GenerateSolution {
         /// Path to the bounty challenge TOML config.
         #[arg(long)]
         config: PathBuf,
+
+        /// Deterministic seed for testing (uses StdRng instead of OsRng).
+        #[arg(long)]
+        seed: Option<u64>,
+
+        /// Allow writing secret material to a terminal (unsafe, for debugging).
+        #[arg(long)]
+        force_tty: bool,
     },
 
     /// Generate the public challenge artifacts.
@@ -97,9 +107,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::GenerateSolution { config: _ } => {
-            anyhow::bail!("generate-solution: not yet implemented")
-        }
+        Command::GenerateSolution {
+            config,
+            seed,
+            force_tty,
+        } => cmd_generate_solution(&config, seed, force_tty),
         Command::Generate {
             config: _,
             output_dir: _,
@@ -121,4 +133,53 @@ fn main() -> Result<()> {
             anyhow::bail!("derive-identity: not yet implemented")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// generate-solution
+// ---------------------------------------------------------------------------
+
+fn cmd_generate_solution(
+    config_path: &std::path::Path,
+    seed: Option<u64>,
+    force_tty: bool,
+) -> Result<()> {
+    use mandate_bounty::config::{load_names, BountyConfig};
+    use mandate_bounty::generate_solution::generate_solution;
+
+    // TTY protection: refuse to dump secrets to a terminal.
+    if std::io::stdout().is_terminal() && !force_tty {
+        anyhow::bail!(
+            "refusing to write secret material to terminal; \
+             pipe to a file or encrypt (use --force-tty to override)"
+        );
+    }
+
+    // Load and validate config.
+    let config = BountyConfig::load(config_path)?;
+
+    // Resolve names file relative to config directory.
+    let config_dir = config_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("config path has no parent directory"))?;
+    let names = load_names(&config.voters.names_file, config_dir)?;
+    config
+        .validate_names(&names)
+        .map_err(|e| anyhow::anyhow!("name validation failed: {e}"))?;
+
+    // Generate the solution bundle.
+    let bundle = if let Some(s) = seed {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+        let mut rng = StdRng::seed_from_u64(s);
+        generate_solution(&config, &names, &mut rng)?
+    } else {
+        let mut rng = rand::rngs::OsRng;
+        generate_solution(&config, &names, &mut rng)?
+    };
+
+    // Serialize to JSON on stdout.
+    serde_json::to_writer(std::io::stdout().lock(), &bundle)?;
+
+    Ok(())
 }

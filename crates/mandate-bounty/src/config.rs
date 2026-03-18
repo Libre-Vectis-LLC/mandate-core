@@ -242,6 +242,18 @@ impl BountyConfig {
     }
 }
 
+/// Load voter names from a file (one name per line).
+///
+/// The path is resolved relative to `config_dir` (the directory containing
+/// the bounty TOML config). Trailing empty lines are stripped.
+pub fn load_names(names_file: &str, config_dir: &Path) -> anyhow::Result<Vec<String>> {
+    let path = config_dir.join(names_file);
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("failed to read names file {}: {e}", path.display()))?;
+    let names: Vec<String> = content.lines().map(|l| l.to_owned()).collect();
+    Ok(names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

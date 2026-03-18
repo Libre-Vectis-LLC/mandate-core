@@ -14,5 +14,11 @@ mandate-bounty = { path = "../mandate-bounty" }
 # CLI
 clap = { workspace = true, features = ["derive"] }
 
+# Serialization
+serde_json.workspace = true
+
+# RNG (for --seed deterministic mode)
+rand.workspace = true
+
 # Error handling
 anyhow.workspace = true

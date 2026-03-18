@@ -26,8 +26,14 @@ zeroize.workspace = true
 # Encoding
 bs58.workspace = true
 
+# Keypair generation
+curve25519-dalek.workspace = true
+rand.workspace = true
+nazgul.workspace = true
+
 # Error handling
 thiserror.workspace = true
 anyhow.workspace = true
 
 [dev-dependencies]
+rand.workspace = true
