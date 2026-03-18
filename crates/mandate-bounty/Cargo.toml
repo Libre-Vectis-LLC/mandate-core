@@ -1,0 +1,20 @@
+[package]
+name = "mandate-bounty"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+# Serialization
+serde.workspace = true
+
+# Config parsing
+toml = { workspace = true }
+
+# Unicode normalization
+unicode-normalization = { workspace = true }
+
+# Error handling
+thiserror.workspace = true
+
+[dev-dependencies]
