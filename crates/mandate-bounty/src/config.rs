@@ -4,6 +4,7 @@
 //! that prove anonymous poll integrity.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use serde::Deserialize;
 use unicode_normalization::UnicodeNormalization;
@@ -116,6 +117,18 @@ pub struct BountyRewardConfig {
 // ---------------------------------------------------------------------------
 
 impl BountyConfig {
+    /// Load and validate a config from a TOML file path.
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("failed to read config file {}: {e}", path.display()))?;
+        let config: Self = toml::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("failed to parse config TOML: {e}"))?;
+        config
+            .validate()
+            .map_err(|e| anyhow::anyhow!("config validation failed: {e}"))?;
+        Ok(config)
+    }
+
     /// Validate internal consistency of the configuration.
     pub fn validate(&self) -> Result<(), ValidationError> {
         // 0. Version check
