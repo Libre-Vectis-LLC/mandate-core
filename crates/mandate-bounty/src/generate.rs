@@ -10,7 +10,7 @@
 
 mod artifacts;
 mod events;
-mod manifest;
+pub(crate) mod manifest;
 
 use std::collections::HashMap;
 use std::path::Path;

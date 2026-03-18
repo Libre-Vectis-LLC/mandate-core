@@ -114,19 +114,13 @@ fn main() -> Result<()> {
         } => cmd_generate_solution(&config, seed, force_tty),
         Command::Generate { config, output_dir } => cmd_generate(&config, &output_dir),
         Command::VerifySolution {
-            csv: _,
+            csv,
             voters: _,
-            encrypted: _,
-            config: _,
-        } => {
-            anyhow::bail!("verify-solution: not yet implemented")
-        }
-        Command::AuditArtifacts { dir: _ } => {
-            anyhow::bail!("audit-artifacts: not yet implemented")
-        }
-        Command::DeriveIdentity { config: _ } => {
-            anyhow::bail!("derive-identity: not yet implemented")
-        }
+            encrypted,
+            config,
+        } => cmd_verify_solution(&csv, &encrypted, &config),
+        Command::AuditArtifacts { dir } => cmd_audit_artifacts(&dir),
+        Command::DeriveIdentity { config } => cmd_derive_identity(&config),
     }
 }
 
@@ -214,6 +208,103 @@ fn cmd_generate(config_path: &std::path::Path, output_dir: &std::path::Path) -> 
 
     eprintln!("Generating artifacts...");
     generate_artifacts(&config, &bundle, output_dir)?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// verify-solution
+// ---------------------------------------------------------------------------
+
+fn cmd_verify_solution(
+    csv_path: &std::path::Path,
+    encrypted_path: &std::path::Path,
+    config_path: &std::path::Path,
+) -> Result<()> {
+    use mandate_bounty::config::BountyConfig;
+    use mandate_bounty::verify::verify_solution;
+
+    let config = BountyConfig::load(config_path)?;
+
+    eprintln!("Verifying solution...");
+    eprintln!("  CSV:       {}", csv_path.display());
+    eprintln!("  Encrypted: {}", encrypted_path.display());
+    eprintln!("  KDF salt:  {}", config.kdf.salt);
+
+    match verify_solution(csv_path, encrypted_path, &config.kdf) {
+        Ok(plaintext) => {
+            eprintln!("Verification PASSED — decryption succeeded.");
+            // Write decrypted content to stdout.
+            let text = String::from_utf8_lossy(&plaintext);
+            println!("{text}");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Verification FAILED.");
+            Err(e)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// audit-artifacts
+// ---------------------------------------------------------------------------
+
+fn cmd_audit_artifacts(dir: &std::path::Path) -> Result<()> {
+    use mandate_bounty::audit::audit_artifacts;
+
+    eprintln!("Auditing artifacts in {}...", dir.display());
+
+    let results = audit_artifacts(dir)?;
+
+    let mut all_passed = true;
+    for check in &results {
+        let status = if check.passed { "PASS" } else { "FAIL" };
+        eprintln!("  [{status}] {}", check.name);
+        if !check.passed {
+            eprintln!("    expected: {}", check.expected);
+            eprintln!("    actual:   {}", check.actual);
+            all_passed = false;
+        }
+    }
+
+    if all_passed {
+        eprintln!("All {} artifacts passed integrity check.", results.len());
+        Ok(())
+    } else {
+        let failed: Vec<&str> = results
+            .iter()
+            .filter(|c| !c.passed)
+            .map(|c| c.name.as_str())
+            .collect();
+        anyhow::bail!("artifact integrity check failed for: {}", failed.join(", "))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// derive-identity
+// ---------------------------------------------------------------------------
+
+fn cmd_derive_identity(config_path: &std::path::Path) -> Result<()> {
+    use std::io::Read as _;
+
+    use mandate_bounty::config::BountyConfig;
+    use mandate_bounty::derive_identity::derive_identity;
+
+    let config = BountyConfig::load(config_path)?;
+
+    // Read CSV from stdin.
+    eprintln!("Reading CSV from stdin...");
+    let mut csv_buf = Vec::new();
+    std::io::stdin().lock().read_to_end(&mut csv_buf)?;
+
+    anyhow::ensure!(!csv_buf.is_empty(), "stdin is empty — provide CSV content");
+
+    eprintln!("Running KDF chain (this may take a while)...");
+    let identity = derive_identity(&csv_buf, &config.kdf)?;
+    let pubkey = identity.to_public().to_string();
+
+    println!("{pubkey}");
 
     Ok(())
 }
