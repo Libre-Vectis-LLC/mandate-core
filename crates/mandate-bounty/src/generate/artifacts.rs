@@ -81,11 +81,13 @@ pub fn generate_results_json(
 /// Generate the age-encrypted bounty secret.
 ///
 /// Derives the age public key from the canonical CSV via the KDF chain,
-/// then encrypts a placeholder secret with that key.
+/// then encrypts the secret with that key. If `custom_plaintext` is provided,
+/// it is used as-is; otherwise a default reverse-prompt is used.
 pub fn generate_encrypted_secret(
     config: &BountyConfig,
     bundle: &SolutionBundle,
     output: &Path,
+    custom_plaintext: Option<&[u8]>,
 ) -> anyhow::Result<()> {
     // Derive the age identity from the canonical CSV.
     let csv_entries = bundle.to_csv_entries();
@@ -93,8 +95,8 @@ pub fn generate_encrypted_secret(
     let identity = derive_identity(csv_text.as_bytes(), &config.kdf)?;
     let recipient = identity.to_public();
 
-    // Encrypt a placeholder bounty secret.
-    let plaintext = b"BOUNTY_MNEMONIC_PLACEHOLDER";
+    let default_plaintext = b"BOUNTY_SECRET_PLACEHOLDER";
+    let plaintext = custom_plaintext.unwrap_or(default_plaintext);
 
     let recipients = [Box::new(recipient) as Box<dyn age::Recipient>];
     let encryptor = age::Encryptor::with_recipients(recipients.iter().map(|r| r.as_ref()))

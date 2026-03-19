@@ -55,6 +55,15 @@ enum Command {
         /// Directory to write generated artifacts into.
         #[arg(long)]
         output_dir: PathBuf,
+
+        /// File containing the bounty secret plaintext to encrypt.
+        ///
+        /// Use process substitution to pipe from age decryption:
+        ///   --secret-file <(age -d bounty-secret.age)
+        ///
+        /// If omitted, a default reverse-prompt placeholder is used.
+        #[arg(long)]
+        secret_file: Option<PathBuf>,
     },
 
     /// Verify a submitted solution against the challenge artifacts.
@@ -112,7 +121,11 @@ fn main() -> Result<()> {
             seed,
             force_tty,
         } => cmd_generate_solution(&config, seed, force_tty),
-        Command::Generate { config, output_dir } => cmd_generate(&config, &output_dir),
+        Command::Generate {
+            config,
+            output_dir,
+            secret_file,
+        } => cmd_generate(&config, &output_dir, secret_file.as_deref()),
         Command::VerifySolution {
             csv,
             voters: _,
@@ -177,7 +190,11 @@ fn cmd_generate_solution(
 // generate
 // ---------------------------------------------------------------------------
 
-fn cmd_generate(config_path: &std::path::Path, output_dir: &std::path::Path) -> Result<()> {
+fn cmd_generate(
+    config_path: &std::path::Path,
+    output_dir: &std::path::Path,
+    secret_file: Option<&std::path::Path>,
+) -> Result<()> {
     use std::io::Read as _;
 
     use mandate_bounty::config::BountyConfig;
@@ -186,6 +203,17 @@ fn cmd_generate(config_path: &std::path::Path, output_dir: &std::path::Path) -> 
 
     // Load and validate config.
     let config = BountyConfig::load(config_path)?;
+
+    // Read custom secret plaintext if provided.
+    let secret_plaintext = if let Some(path) = secret_file {
+        eprintln!("Reading bounty secret from {}...", path.display());
+        let content = std::fs::read(path)
+            .map_err(|e| anyhow::anyhow!("failed to read secret file {}: {e}", path.display()))?;
+        anyhow::ensure!(!content.is_empty(), "secret file is empty");
+        Some(content)
+    } else {
+        None
+    };
 
     // Read SolutionBundle JSON from stdin.
     eprintln!("Reading solution bundle from stdin...");
@@ -207,7 +235,7 @@ fn cmd_generate(config_path: &std::path::Path, output_dir: &std::path::Path) -> 
     );
 
     eprintln!("Generating artifacts...");
-    generate_artifacts(&config, &bundle, output_dir)?;
+    generate_artifacts(&config, &bundle, output_dir, secret_plaintext.as_deref())?;
 
     Ok(())
 }
