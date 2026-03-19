@@ -93,13 +93,26 @@ pub fn generate_poll_bundle(
         .map(|e| (e.pubkey_bs58.as_str(), e.option.as_str()))
         .collect();
 
-    // Sign all VoteCast events.
+    // Sign all VoteCast events in randomized order.
+    //
+    // Each VoteCast event contains a ULID with a millisecond timestamp from
+    // `Ulid::new()`.  If we iterated `keypairs` sequentially, the monotonic
+    // ULID timestamps would directly encode each voter's index — an attacker
+    // could sort by timestamp to recover the voter → vote mapping.
+    //
+    // To simulate realistic server-side reception order (where voters submit
+    // at unpredictable times through Tor), we shuffle the generation order so
+    // that ULID timestamps are decorrelated from the keypair array index.
+    let mut gen_order: Vec<usize> = (0..keypairs.len()).collect();
+    gen_order.shuffle(&mut rand::rngs::OsRng);
+
     let mut vote_events_raw: Vec<Vec<u8>> = Vec::with_capacity(keypairs.len());
-    for (i, kp) in keypairs.iter().enumerate() {
+    for (progress, &voter_idx) in gen_order.iter().enumerate() {
+        let kp = &keypairs[voter_idx];
         let pubkey_bs58 = LocalByteConvertible::to_base58(kp.public());
         let option_id = vote_map
             .get(pubkey_bs58.as_str())
-            .ok_or_else(|| anyhow::anyhow!("voter {i} pubkey not found in solution"))?;
+            .ok_or_else(|| anyhow::anyhow!("voter {voter_idx} pubkey not found in solution"))?;
 
         let vote_signer = kp.derive_poll_signing(&org_id, &master_ring_hash, poll_id);
         let event_bytes = sign_vote_cast(
@@ -114,12 +127,12 @@ pub fn generate_poll_bundle(
         )?;
         vote_events_raw.push(event_bytes);
 
-        if (i + 1) % 100 == 0 || i + 1 == keypairs.len() {
-            eprintln!("    VoteCast signed: {}/{}", i + 1, keypairs.len());
+        if (progress + 1) % 100 == 0 || progress + 1 == keypairs.len() {
+            eprintln!("    VoteCast signed: {}/{}", progress + 1, keypairs.len());
         }
     }
 
-    // CRITICAL: Shuffle vote_events_raw with CSPRNG to break index → voter correlation.
+    // Defense in depth: shuffle the final array as well.
     vote_events_raw.shuffle(&mut rand::rngs::OsRng);
 
     // Build PollBundle.
