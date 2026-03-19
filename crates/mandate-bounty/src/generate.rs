@@ -20,11 +20,15 @@ use crate::solution_bundle::SolutionBundle;
 
 /// Generate all public challenge artifacts into `output_dir`.
 ///
+/// If `secret_plaintext` is `Some`, that content is encrypted as the bounty
+/// secret. Otherwise a default reverse-prompt placeholder is used.
+///
 /// The caller must ensure `output_dir` exists (or this function creates it).
 pub fn generate_artifacts(
     config: &BountyConfig,
     bundle: &SolutionBundle,
     output_dir: &Path,
+    secret_plaintext: Option<&[u8]>,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(output_dir)?;
 
@@ -45,7 +49,7 @@ pub fn generate_artifacts(
 
     // 4. Generate encrypted_secret.rage.
     let encrypted_path = output_dir.join("encrypted_secret.rage");
-    artifacts::generate_encrypted_secret(config, bundle, &encrypted_path)?;
+    artifacts::generate_encrypted_secret(config, bundle, &encrypted_path, secret_plaintext)?;
     eprintln!("  encrypted_secret.rage");
 
     // 5. Generate RULES.md.
