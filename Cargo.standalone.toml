@@ -66,7 +66,7 @@ zeroize = { version = "1", features = ["derive"] }
 argon2 = "0.5"
 subtle = "2.5"
 bip39 = { version = "2", features = ["rand"] }
-age = { git = "https://github.com/RyderFreeman4Logos/rage", rev = "538c2cef6e32b69b09058b31fe045094c54fb2f6" }
+age = { git = "https://github.com/RyderFreeman4Logos/rage", rev = "51030aed0d8f449dc01af606d8966b18ed9a265a" }
 nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "c4c20a0", features = ["progress-callback", "smallvec-responses", "blake3"] }
 curve25519-dalek = { version = "4.1", features = ["serde"] }
 rspow = { version = "0.5", features = ["equix", "near-stateless"] }
