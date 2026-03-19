@@ -1,0 +1,111 @@
+# Standalone workspace manifest for building mandate-core outside the monorepo.
+#
+# Usage:
+#   cp Cargo.standalone.toml Cargo.toml
+#   cargo build --release -p mandate-bounty-cli
+#
+# A pre-generated Cargo.lock is provided for reproducible builds.
+
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/core",
+    "crates/mandate-proto",
+    "crates/verify",
+    "crates/verify-cli",
+    "crates/mandate-bounty",
+    "crates/mandate-bounty-cli",
+    "crates/mandate-audit-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88.0"
+authors = ["Ryder Freeman <RyderFreeman@librevectis.com>"]
+license = "MIT"
+repository = "https://github.com/Libre-Vectis/mandate-core"
+
+# ===== Internal crates =====
+[workspace.dependencies]
+mandate-core = { path = "crates/core" }
+mandate-proto = { path = "crates/mandate-proto" }
+mandate-verify = { path = "crates/verify" }
+mandate-bounty = { path = "crates/mandate-bounty" }
+
+# ===== Serialization =====
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# ===== Error handling =====
+thiserror = "2"
+anyhow = "1"
+
+# ===== Async runtime =====
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
+tokio-stream = "0.1"
+async-trait = "0.1"
+futures-util = "0.3"
+
+# ===== gRPC =====
+tonic = { version = "0.12", default-features = false, features = ["prost", "codegen"] }
+tonic-web = "0.12"
+prost = "0.13"
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+# ===== Cryptography =====
+sha2 = "0.10"
+sha3 = "0.10"
+rand = "0.8"
+hkdf = "0.12"
+hmac = "0.12"
+zeroize = { version = "1", features = ["derive"] }
+argon2 = "0.5"
+subtle = "2.5"
+bip39 = { version = "2", features = ["rand"] }
+age = { git = "https://github.com/RyderFreeman4Logos/rage", rev = "538c2cef6e32b69b09058b31fe045094c54fb2f6" }
+nazgul = { git = "https://github.com/RyderFreeman4Logos/nazgul", rev = "c4c20a0", features = ["progress-callback", "smallvec-responses", "blake3"] }
+curve25519-dalek = { version = "4.1", features = ["serde"] }
+rspow = { version = "0.5", features = ["equix", "near-stateless"] }
+
+# ===== Data types =====
+bs58 = "0.5"
+ulid = { version = "1.1", features = ["serde"] }
+hex = "0.4"
+base64 = "0.22"
+indexmap = { version = "2", features = ["serde"] }
+
+# ===== Parallel processing =====
+rayon = "1"
+
+# ===== Caching & collections =====
+dashmap = "6"
+moka = { version = "0.12", features = ["future"] }
+arc-swap = "1"
+
+# ===== CLI =====
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"
+
+# ===== XLSX =====
+rust_xlsxwriter = "0.94"
+calamine = "0.33"
+
+# ===== i18n =====
+rust-i18n = "3"
+opencc-rust = "1.1"
+unicode-normalization = "0.1"
+
+# ===== Utilities =====
+num_cpus = "1.16"
+
+# ===== Testing =====
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
