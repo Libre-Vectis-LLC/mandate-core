@@ -17,6 +17,20 @@ use tonic::{Request, Response, Status};
 
 use super::super::{extract_tenant_id, to_status};
 
+/// Safety cap on events loaded per poll tallying request.
+///
+/// Poll results scan the org event stream for votes, revocations, and
+/// bundle-published markers.  This cap prevents unbounded memory growth
+/// while remaining far above any realistic poll size.
+///
+/// If the org has more events than this, results are computed from the
+/// most recent `MAX_POLL_EVENTS` events.  A `tracing::warn!` is emitted
+/// so operators can investigate.
+///
+/// TODO: Add poll-specific storage queries to avoid scanning the entire
+/// org event stream.  That removes the need for this cap entirely.
+const MAX_POLL_EVENTS: usize = 100_000;
+
 /// Map an `ElectionPhase` to its wire-format string for the proto response.
 fn election_phase_to_string(phase: ElectionPhase) -> String {
     match phase {
@@ -73,7 +87,7 @@ impl EventServiceImpl {
         // 3. Find the Poll event
         let event_records = self
             .store
-            .stream_events(tenant, org_id, None, usize::MAX)
+            .stream_events(tenant, org_id, None, MAX_POLL_EVENTS)
             .await
             .map_err(to_status)?;
 
@@ -241,7 +255,7 @@ impl EventServiceImpl {
         // 3. Stream all events for this org
         let event_records = self
             .store
-            .stream_events(tenant, org_id, None, usize::MAX)
+            .stream_events(tenant, org_id, None, MAX_POLL_EVENTS)
             .await
             .map_err(to_status)?;
 

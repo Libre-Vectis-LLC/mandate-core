@@ -80,12 +80,22 @@ pub trait BillingStore: Send + Sync {
 
     /// Transfer funds from tenant balance to an org with optional idempotency replay.
     ///
-    /// Implementations should prefer an atomic "claim key -> execute -> persist result"
-    /// strategy when `idempotency_key` is provided, to avoid TOCTOU races under retries.
+    /// # Implementation Note (M-05)
     ///
-    /// Default behavior composes `check_idempotency_key`, `transfer_to_organization`,
-    /// and `record_idempotency_result`, which is functionally correct but not fully
-    /// race-free under high concurrency.
+    /// The default implementation has a TOCTOU (time-of-check-to-time-of-use) race window
+    /// between `check_idempotency_key` and `record_idempotency_result`. Two concurrent
+    /// requests with the same idempotency key can both pass the check, both execute the
+    /// transfer, and then race to record the result — potentially causing a double-spend.
+    ///
+    /// Concrete implementations MUST override this method with an atomic
+    /// check-and-insert operation (e.g., `INSERT ... ON CONFLICT DO NOTHING` in SQL,
+    /// or a single lock scope covering check + execute + record) to prevent duplicate
+    /// processing.
+    ///
+    /// The `InMemoryBilling` implementation correctly holds `idempotency_keys` lock
+    /// across check + execute + record, eliminating the race. Database-backed
+    /// implementations should use a transaction with serializable isolation or an
+    /// atomic upsert.
     async fn transfer_to_organization_idempotent(
         &self,
         tenant: TenantId,

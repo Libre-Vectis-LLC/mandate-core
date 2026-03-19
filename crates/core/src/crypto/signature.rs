@@ -13,7 +13,6 @@ use nazgul::ring::{Ring, RingContext, RingHash};
 use nazgul::traits::Derivable;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use thiserror::Error;
 
 /// Storage mode of the contextual signature.
@@ -37,6 +36,12 @@ pub struct Signature {
     pub proof: ContextualBLSAG,
 }
 
+/// Test-only equality via serde JSON comparison.
+///
+/// M-02 security audit: non-constant-time comparison is a timing side-channel
+/// risk if used in production code.  Restrict to `#[cfg(test)]` so the impl
+/// is only available in test builds.
+#[cfg(test)]
 impl PartialEq for Signature {
     fn eq(&self, other: &Self) -> bool {
         if self.kind != other.kind {
@@ -46,8 +51,10 @@ impl PartialEq for Signature {
     }
 }
 
+#[cfg(test)]
 impl Eq for Signature {}
 
+#[cfg(test)]
 fn serialize_proof(proof: &ContextualBLSAG) -> Option<Vec<u8>> {
     // Serde-based comparison to avoid implementing equality for third-party types.
     serde_json::to_vec(proof).ok()

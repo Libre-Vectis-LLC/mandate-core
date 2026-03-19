@@ -1,4 +1,15 @@
 /// In-memory billing store and gift card management.
+///
+/// # Lock Ordering (M-03)
+///
+/// All methods in this module MUST acquire locks in the following canonical order
+/// to prevent deadlocks:
+///
+///   `idempotency_keys` → `tg_user_to_tenant` → `tenants` → `orgs`
+///
+/// A method may skip locks it does not need, but it MUST NOT acquire a lock that
+/// precedes (in the ordering above) any lock it already holds. When only a single
+/// lock is needed, ordering is trivially satisfied.
 use crate::ids::{Nanos, OrganizationId, TenantId};
 use crate::storage::{
     BillingStore, GiftCard, GiftCardStore, IdempotencyErrorCode, IdempotencyResult, NotFound,
@@ -121,10 +132,10 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
-        // Record tg_user_id -> tenant mapping
+        // Lock ordering: tg_user_to_tenant → tenants
         let mut tg_map = self.tg_user_to_tenant.lock();
         tg_map.insert(owner_tg_user_id.to_string(), tenant);
-        drop(tg_map); // Release lock before acquiring tenants lock
+        drop(tg_map);
 
         let mut map = self.tenants.lock();
         let record = map.entry(tenant).or_insert(TenantBalance {
@@ -149,6 +160,7 @@ impl BillingStore for InMemoryBilling {
     ) -> Result<Nanos, StorageError> {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
+        // Lock ordering: tenants → orgs
         let mut tenants = self.tenants.lock();
         let tenant_record = tenants.entry(tenant).or_insert(TenantBalance {
             balance: 0,
@@ -207,6 +219,7 @@ impl BillingStore for InMemoryBilling {
         let now = Instant::now();
         let expires_at = now + Duration::from_secs(ttl_secs);
         let scoped_key = (tenant, key.to_string());
+        // Lock ordering: idempotency_keys → tenants → orgs (all held together for atomicity)
         let mut keys = self.idempotency_keys.lock();
         if let Some(existing) = keys.get(&scoped_key) {
             if existing.expires_at > now {
@@ -217,6 +230,7 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
         let transfer_result = {
+            // Lock ordering: tenants → orgs (under idempotency_keys held above)
             let mut tenants = self.tenants.lock();
             let mut orgs = self.orgs.lock();
             let tenant_record = tenants.entry(tenant).or_insert(TenantBalance {
@@ -273,6 +287,7 @@ impl BillingStore for InMemoryBilling {
         &self,
         org_id: OrganizationId,
     ) -> Result<Nanos, StorageError> {
+        // Lock ordering: orgs only (single lock, trivially ordered)
         let orgs = self.orgs.lock();
         let record = orgs
             .get(&org_id)
@@ -286,6 +301,7 @@ impl BillingStore for InMemoryBilling {
         &self,
         tenant: TenantId,
     ) -> Result<crate::storage::TenantBalanceInfo, StorageError> {
+        // Lock ordering: tenants only (single lock, trivially ordered)
         let tenants = self.tenants.lock();
         let record = tenants
             .get(&tenant)
@@ -306,6 +322,7 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
+        // Lock ordering: orgs only (single lock, trivially ordered)
         let mut orgs = self.orgs.lock();
         let record = orgs
             .get_mut(&org_id)
@@ -328,6 +345,7 @@ impl BillingStore for InMemoryBilling {
         &self,
         tg_user_id: &str,
     ) -> Result<Option<TenantId>, StorageError> {
+        // Lock ordering: tg_user_to_tenant only (single lock, trivially ordered)
         let tg_map = self.tg_user_to_tenant.lock();
         Ok(tg_map.get(tg_user_id).copied())
     }
@@ -336,6 +354,7 @@ impl BillingStore for InMemoryBilling {
         &self,
         tg_user_id: &str,
     ) -> Result<Option<(TenantId, OrganizationId)>, StorageError> {
+        // Lock ordering: tg_user_to_tenant → orgs
         let tg_map = self.tg_user_to_tenant.lock();
         let tenant_id = match tg_map.get(tg_user_id) {
             Some(&id) => id,
@@ -343,8 +362,6 @@ impl BillingStore for InMemoryBilling {
         };
         drop(tg_map);
 
-        // 2. Find the first org owned by this tenant
-        // (In production, we might want to return the most recently created one)
         let orgs = self.orgs.lock();
         let org_id = orgs.iter().find_map(|(gid, record)| {
             if record.tenant == tenant_id {
@@ -365,6 +382,7 @@ impl BillingStore for InMemoryBilling {
         tenant: TenantId,
         key: &str,
     ) -> Result<Option<IdempotencyResult>, StorageError> {
+        // Lock ordering: idempotency_keys only (single lock, trivially ordered)
         let keys = self.idempotency_keys.lock();
         let scoped_key = (tenant, key.to_string());
         match keys.get(&scoped_key) {
@@ -380,6 +398,7 @@ impl BillingStore for InMemoryBilling {
         result: IdempotencyResult,
         ttl_secs: u64,
     ) -> Result<Option<IdempotencyResult>, StorageError> {
+        // Lock ordering: idempotency_keys only (single lock, trivially ordered)
         let mut keys = self.idempotency_keys.lock();
         let scoped_key = (tenant, key.to_string());
         // Atomic first-write-wins: if entry already exists and is not expired,
@@ -406,19 +425,20 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
+        // Lock ordering: tenants → orgs (M-03 fix: previously acquired orgs before tenants)
+        let mut tenants = self.tenants.lock();
         let mut orgs = self.orgs.lock();
+
         let org_record = orgs
             .get_mut(&org_id)
             .ok_or(StorageError::NotFound(NotFound::Organization { org_id }))?;
 
-        // Verify org belongs to tenant
         if org_record.tenant != tenant {
             return Err(StorageError::PreconditionFailed(
                 "org does not belong to tenant".into(),
             ));
         }
 
-        // Check org has sufficient balance
         if org_record.balance_nanos < delta {
             return Err(StorageError::PreconditionFailed(
                 "insufficient org balance".into(),
@@ -428,11 +448,7 @@ impl BillingStore for InMemoryBilling {
         // Deduct from org
         org_record.balance_nanos -= delta;
 
-        // Release orgs lock before acquiring tenants lock
-        drop(orgs);
-
         // Credit to tenant
-        let mut tenants = self.tenants.lock();
         let tenant_record = tenants.entry(tenant).or_insert(TenantBalance {
             balance: 0,
             updated_at_ms: current_timestamp_ms(),
@@ -458,6 +474,7 @@ impl BillingStore for InMemoryBilling {
         let delta = i64::try_from(amount.as_u64())
             .map_err(|_| StorageError::PreconditionFailed("amount too large".into()))?;
 
+        // Lock ordering: orgs only (single lock, trivially ordered)
         let mut orgs = self.orgs.lock();
 
         // Get source org

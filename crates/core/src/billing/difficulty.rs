@@ -3,6 +3,8 @@
 //! Calculates POW parameters (proof count) such that:
 //! POW computation cost ≥ verification cost × multiplier
 
+use std::num::NonZeroU64;
+
 use super::VerificationCostModel;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,6 +25,7 @@ use crate::pow::PowParams;
 /// # Examples
 ///
 /// ```
+/// use std::num::NonZeroU64;
 /// use mandate_core::billing::{PowDifficultyCalculator, VerificationCostModel};
 ///
 /// let verification_model = VerificationCostModel {
@@ -34,7 +37,7 @@ use crate::pow::PowParams;
 ///
 /// let calculator = PowDifficultyCalculator::new(
 ///     verification_model,
-///     50_000,  // cycles per proof
+///     NonZeroU64::new(50_000).unwrap(),  // cycles per proof
 ///     10,      // min proofs
 ///     7,       // fixed bits
 /// );
@@ -53,7 +56,7 @@ pub struct PowDifficultyCalculator {
     verification_model: VerificationCostModel,
 
     /// Average CPU cycles to compute one rspow proof (from benchmarks).
-    pow_cycles_per_proof: u64,
+    pow_cycles_per_proof: NonZeroU64,
 
     /// Minimum number of proofs (safety floor).
     min_proofs: usize,
@@ -75,6 +78,7 @@ impl PowDifficultyCalculator {
     /// # Examples
     ///
     /// ```
+    /// use std::num::NonZeroU64;
     /// use mandate_core::billing::{PowDifficultyCalculator, VerificationCostModel};
     ///
     /// let model = VerificationCostModel {
@@ -84,11 +88,11 @@ impl PowDifficultyCalculator {
     ///     reference_device: "test".to_string(),
     /// };
     ///
-    /// let calculator = PowDifficultyCalculator::new(model, 50_000, 10, 7);
+    /// let calculator = PowDifficultyCalculator::new(model, NonZeroU64::new(50_000).unwrap(), 10, 7);
     /// ```
     pub fn new(
         verification_model: VerificationCostModel,
-        pow_cycles_per_proof: u64,
+        pow_cycles_per_proof: NonZeroU64,
         min_proofs: usize,
         fixed_bits: u32,
     ) -> Self {
@@ -125,6 +129,7 @@ impl PowDifficultyCalculator {
     /// # Examples
     ///
     /// ```
+    /// use std::num::NonZeroU64;
     /// use mandate_core::billing::{PowDifficultyCalculator, VerificationCostModel};
     ///
     /// let model = VerificationCostModel {
@@ -134,7 +139,7 @@ impl PowDifficultyCalculator {
     ///     reference_device: "test".to_string(),
     /// };
     ///
-    /// let calculator = PowDifficultyCalculator::new(model, 50_000, 10, 7);
+    /// let calculator = PowDifficultyCalculator::new(model, NonZeroU64::new(50_000).unwrap(), 10, 7);
     ///
     /// #[cfg(not(target_arch = "wasm32"))]
     /// {
@@ -163,7 +168,7 @@ impl PowDifficultyCalculator {
         // Calculate required proof count using ceiling division
         // to ensure POW cost >= verification cost × multiplier
         let required_proofs = target_cycles
-            .div_ceil(self.pow_cycles_per_proof)
+            .div_ceil(self.pow_cycles_per_proof.get())
             .max(self.min_proofs as u64) as usize;
 
         PowParams {
@@ -179,7 +184,7 @@ impl PowDifficultyCalculator {
     }
 
     /// Returns the POW cycles per proof.
-    pub fn pow_cycles_per_proof(&self) -> u64 {
+    pub fn pow_cycles_per_proof(&self) -> NonZeroU64 {
         self.pow_cycles_per_proof
     }
 
@@ -210,9 +215,9 @@ mod tests {
     fn test_calculator() -> PowDifficultyCalculator {
         PowDifficultyCalculator::new(
             test_model(),
-            50_000, // 50k cycles per proof
-            10,     // min 10 proofs
-            7,      // 7 bits per proof
+            NonZeroU64::new(50_000).unwrap(), // 50k cycles per proof
+            10,                               // min 10 proofs
+            7,                                // 7 bits per proof
         )
     }
 
@@ -306,8 +311,8 @@ mod tests {
     fn test_min_proofs_floor() {
         let calc = PowDifficultyCalculator::new(
             test_model(),
-            1_000_000, // Very expensive POW (unrealistic)
-            100,       // High min proofs
+            NonZeroU64::new(1_000_000).unwrap(), // Very expensive POW (unrealistic)
+            100,                                 // High min proofs
             7,
         );
 
@@ -320,7 +325,10 @@ mod tests {
     fn test_accessors() {
         let calc = test_calculator();
 
-        assert_eq!(calc.pow_cycles_per_proof(), 50_000);
+        assert_eq!(
+            calc.pow_cycles_per_proof(),
+            NonZeroU64::new(50_000).unwrap()
+        );
         assert_eq!(calc.min_proofs(), 10);
         assert_eq!(calc.fixed_bits(), 7);
         assert_eq!(

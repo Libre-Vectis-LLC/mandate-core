@@ -24,7 +24,8 @@ pub use ring::{CredentialRef, IdentitySource, MemberIdentity, RingOperation, Rin
 pub use vote::{Vote, VoteSelection};
 pub use vote_revocation::VoteRevocation;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Event {
     pub event_ulid: EventUlid,
     pub previous_event_hash: EventId,

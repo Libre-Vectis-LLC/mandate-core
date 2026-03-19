@@ -3,6 +3,8 @@
 //! This module is gated behind `#[cfg(not(target_arch = "wasm32"))]` at the crate root,
 //! so all code here is host-only (no WASM).
 
+use std::num::NonZeroU64;
+
 use crate::billing::OrgPowState;
 use crate::billing::{
     default_egress_meter, default_verification_meter, OrgPowConfig, PowDifficultyCalculator,
@@ -106,9 +108,9 @@ impl EventServiceImpl {
                 base_difficulty: 8000.0,
                 reference_device: "AMD Ryzen 9 5900X @ 3.7GHz".to_string(),
             },
-            50_000, // cycles per proof (from rspow benchmarks)
-            10,     // minimum proofs floor
-            7,      // fixed bits per proof
+            NonZeroU64::new(50_000).unwrap(), // cycles per proof (from rspow benchmarks)
+            10,                               // minimum proofs floor
+            7,                                // fixed bits per proof
         )
     }
 
