@@ -135,7 +135,7 @@ impl StorageFacade {
             .await
     }
 
-    /// Withdraw credits from org wallet back to tenant wallet.
+    /// Withdraw credits from org balance back to tenant balance.
     ///
     /// This is the reverse operation of `transfer_to_organization`, moving funds from
     /// an org's operational budget back to the tenant's personal balance.
@@ -148,7 +148,7 @@ impl StorageFacade {
         self.billing.withdraw_from_org(tenant, org_id, amount).await
     }
 
-    /// Transfer credits between two org wallets.
+    /// Transfer credits between two org balances.
     ///
     /// Both orgs must belong to the same tenant. Returns a tuple of
     /// (source_balance, dest_balance) after the transfer.

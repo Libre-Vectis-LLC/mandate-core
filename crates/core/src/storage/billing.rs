@@ -270,7 +270,7 @@ pub trait BillingStore: Send + Sync {
         ttl_secs: u64,
     ) -> Result<Option<IdempotencyResult>, StorageError>;
 
-    /// Withdraw credits from org wallet back to tenant wallet.
+    /// Withdraw credits from org balance back to tenant balance.
     ///
     /// This method moves funds from an org's operational budget back to the tenant's
     /// personal balance. This is the reverse operation of `transfer_to_organization`.
@@ -298,7 +298,7 @@ pub trait BillingStore: Send + Sync {
         amount: Nanos,
     ) -> Result<Nanos, StorageError>;
 
-    /// Transfer credits between two org wallets (must be same tenant).
+    /// Transfer credits between two org balances (must be same tenant).
     ///
     /// This method moves funds from one org's operational budget to another org's
     /// budget. Both orgs must belong to the same tenant.

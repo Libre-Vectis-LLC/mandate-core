@@ -33,7 +33,7 @@ pub struct MemberInfo {
 }
 
 /// Summary of a member's org membership.
-/// This struct is returned by `list_organizations_for_member` for wallet restore flow.
+/// This struct is returned by `list_organizations_for_member` for identity restore flow.
 #[derive(Clone, Debug)]
 pub struct OrganizationMembershipInfo {
     pub org_id: OrganizationId,
@@ -287,7 +287,7 @@ pub trait PendingMemberStore {
 
     /// List all orgs that a member belongs to, by their Nazgul public key.
     ///
-    /// This method is used for wallet restore flow where the client needs to discover
+    /// This method is used for identity restore flow where the client needs to discover
     /// its org memberships after recovering from a seed phrase.
     ///
     /// # Arguments
