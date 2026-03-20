@@ -454,38 +454,45 @@ impl EventServiceImpl {
                     }
                     Some(proto_sub) => {
                         // Lazy verification: if sig verification is in-flight, park this request.
-                        let parking_state = self
-                            .pow_parking
-                            .entry(pow_key)
-                            .or_insert_with(|| Arc::new(super::service::OrgParkingState::new()))
-                            .clone();
-
-                        if parking_state
-                            .sig_in_flight
-                            .load(std::sync::atomic::Ordering::SeqCst)
-                            > 0
+                        // Skip parking if DashMap is at capacity (verify PoW immediately instead).
+                        let parking_state = if self.pow_parking_at_capacity()
+                            && !self.pow_parking.contains_key(&pow_key)
                         {
+                            None
+                        } else {
+                            Some(
+                                self.pow_parking
+                                    .entry(pow_key)
+                                    .or_insert_with(|| {
+                                        Arc::new(super::service::OrgParkingState::new())
+                                    })
+                                    .clone(),
+                            )
+                        };
+
+                        let should_park = parking_state
+                            .as_ref()
+                            .map(|ps| {
+                                ps.sig_in_flight.load(std::sync::atomic::Ordering::SeqCst) > 0
+                            })
+                            .unwrap_or(false);
+
+                        if should_park {
+                            let ps = parking_state.as_ref().unwrap();
                             // Check parking capacity.
-                            let current_parked = parking_state
-                                .parked
-                                .load(std::sync::atomic::Ordering::SeqCst);
+                            let current_parked =
+                                ps.parked.load(std::sync::atomic::Ordering::SeqCst);
                             if current_parked >= self.pow_parking_limit {
                                 // Parking full — reject immediately with current challenge.
                                 return Err(self.make_pow_challenge_status(tenant, event.org_id));
                             }
 
                             // Park: wait for sig verification to complete (with TTL).
-                            parking_state
-                                .parked
-                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            let park_result = tokio::time::timeout(
-                                self.pow_parking_ttl,
-                                parking_state.notify.notified(),
-                            )
-                            .await;
-                            parking_state
-                                .parked
-                                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                            ps.parked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            let park_result =
+                                tokio::time::timeout(self.pow_parking_ttl, ps.notify.notified())
+                                    .await;
+                            ps.parked.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
 
                             if park_result.is_err() {
                                 // TTL expired — reject with current challenge.
@@ -500,9 +507,7 @@ impl EventServiceImpl {
                                 .unwrap_or(false);
                             if !still_required {
                                 // Recovery happened — skip PoW verification entirely.
-                                // No PoW proof count to bill.
                             } else {
-                                // Still required — verify PoW now.
                                 self.verify_pow_submission(tenant, event.org_id, proto_sub)
                                     .await?;
                                 let (params, _) =
@@ -510,7 +515,7 @@ impl EventServiceImpl {
                                 pow_proof_count = Some(params.required_proofs);
                             }
                         } else {
-                            // No in-flight sig verification — verify PoW immediately.
+                            // No in-flight sig verification or parking unavailable — verify PoW immediately.
                             self.verify_pow_submission(tenant, event.org_id, proto_sub)
                                 .await?;
                             let (params, _) =
@@ -666,12 +671,18 @@ impl EventServiceImpl {
 
         // Acquire sig verification guard: tracks in-flight count and notifies parked
         // PoW requests when dropped (on completion, error, or panic).
-        let parking_state = self
-            .pow_parking
-            .entry(pow_key)
-            .or_insert_with(|| Arc::new(super::service::OrgParkingState::new()))
-            .clone();
-        let _sig_guard = super::service::SigVerificationGuard::new(parking_state);
+        // Skip guard if parking DashMap is at capacity for new orgs.
+        let _sig_guard =
+            if self.pow_parking_at_capacity() && !self.pow_parking.contains_key(&pow_key) {
+                None
+            } else {
+                let ps = self
+                    .pow_parking
+                    .entry(pow_key)
+                    .or_insert_with(|| Arc::new(super::service::OrgParkingState::new()))
+                    .clone();
+                Some(super::service::SigVerificationGuard::new(ps))
+            };
 
         let results =
             self.verifier
@@ -683,18 +694,21 @@ impl EventServiceImpl {
                 })?;
         if !results[0] {
             // Record failure in POW state machine — may trigger or escalate POW requirement.
-            {
-                let mut state = self.pow_states.entry(pow_key).or_default();
-                state.on_verification_failure(&self.pow_config);
+            // Guard: skip tracking if DashMap is at capacity (graceful degradation for new orgs).
+            let should_challenge =
+                if self.pow_states_at_capacity() && !self.pow_states.contains_key(&pow_key) {
+                    // DashMap at capacity — skip PoW tracking for this new org (graceful degradation).
+                    false
+                } else {
+                    let mut state = self.pow_states.entry(pow_key).or_default();
+                    state.on_verification_failure(&self.pow_config);
+                    state.should_require_pow()
+                };
 
-                // If POW just became required, return ResourceExhausted with challenge
-                // so the client knows to submit POW on retry.
-                if state.should_require_pow() {
-                    drop(state);
-                    // Drop guard before returning to notify parked requests.
-                    drop(_sig_guard);
-                    return Err(self.make_pow_challenge_status(tenant, event.org_id));
-                }
+            if should_challenge {
+                // Drop guard before returning to notify parked requests.
+                drop(_sig_guard);
+                return Err(self.make_pow_challenge_status(tenant, event.org_id));
             }
 
             return Err(RpcError::Unauthenticated {

@@ -22,6 +22,13 @@ use std::time::Duration;
 
 /// Composite key for per-tenant, per-org POW state tracking.
 type PowStateKey = (TenantId, OrganizationId);
+
+/// Max number of orgs tracked in pow_states DashMap.
+/// Prevents unbounded memory growth from many distinct org attacks.
+const MAX_POW_STATE_ENTRIES: usize = 10_000;
+
+/// Max number of orgs tracked in pow_parking DashMap.
+const MAX_POW_PARKING_ENTRIES: usize = 10_000;
 /// Cache key for derived per-poll vote signing rings.
 type VoteSigningRingCacheKey = (TenantId, OrganizationId, RingHash, String);
 
@@ -153,6 +160,17 @@ impl EventServiceImpl {
         egress_meter: SharedEgressMeter,
     ) -> Self {
         Self::with_meters(store, verifier, egress_meter, default_verification_meter())
+    }
+
+    /// Check if pow_states DashMap is at capacity.
+    /// When at capacity, new orgs won't get PoW protection (graceful degradation).
+    pub(super) fn pow_states_at_capacity(&self) -> bool {
+        self.pow_states.len() >= MAX_POW_STATE_ENTRIES
+    }
+
+    /// Check if pow_parking DashMap is at capacity.
+    pub(super) fn pow_parking_at_capacity(&self) -> bool {
+        self.pow_parking.len() >= MAX_POW_PARKING_ENTRIES
     }
 
     /// Override parking configuration (for testing).
