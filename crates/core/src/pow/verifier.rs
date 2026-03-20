@@ -8,8 +8,8 @@ use blake3::Hasher as Blake3Hasher;
 use moka::future::Cache;
 use rspow::near_stateless::prf::DeterministicNonceProvider;
 use rspow::near_stateless::{
-    MokaReplayCache, NearStatelessVerifier, Submission as NsSubmission, SystemTimeProvider,
-    VerifierConfig,
+    MokaReplayCache, NearStatelessVerifier, ReplayCache, ReplayCacheError,
+    Submission as NsSubmission, SystemTimeProvider, VerifierConfig,
 };
 use rspow::ProofBundle;
 use sha3::{Digest, Sha3_256};
@@ -17,8 +17,23 @@ use thiserror::Error;
 
 use super::types::{PowIssuedParams, PowParams, PowSubmission, PowVerifyResult};
 
+/// Type-erased replay cache: allows PowVerifier to use any ReplayCache backend
+/// (in-memory Moka, Redis, etc.) without making PowVerifier itself generic.
+pub struct DynReplayCache(Box<dyn ReplayCache>);
+
+impl ReplayCache for DynReplayCache {
+    fn insert_if_absent(
+        &self,
+        client_nonce: [u8; 32],
+        expires_at: u64,
+        now: u64,
+    ) -> Result<bool, ReplayCacheError> {
+        self.0.insert_if_absent(client_nonce, expires_at, now)
+    }
+}
+
 type NsVerifier =
-    NearStatelessVerifier<ContextBoundNonceProvider, MokaReplayCache, SystemTimeProvider>;
+    NearStatelessVerifier<ContextBoundNonceProvider, DynReplayCache, SystemTimeProvider>;
 
 /// POW verification errors.
 #[derive(Debug, Error)]
@@ -105,7 +120,7 @@ impl DeterministicNonceProvider for ContextBoundNonceProvider {
 /// The near-stateless path is the default. The legacy dual-cache verifier is
 /// retained as an env-switched fallback during migration.
 pub struct PowVerifier {
-    near_stateless_replay_cache: Arc<MokaReplayCache>,
+    near_stateless_replay_cache: Arc<DynReplayCache>,
     time_provider: Arc<SystemTimeProvider>,
     server_secret: [u8; 32],
     use_legacy_fallback: bool,
@@ -147,11 +162,36 @@ impl PowVerifier {
             .build();
 
         Self {
-            near_stateless_replay_cache: Arc::new(MokaReplayCache::new(cache_capacity)),
+            near_stateless_replay_cache: Arc::new(DynReplayCache(Box::new(MokaReplayCache::new(
+                cache_capacity,
+            )))),
             time_provider: Arc::new(SystemTimeProvider),
             server_secret,
             use_legacy_fallback: Self::env_flag(LEGACY_FALLBACK_ENV),
             replay_cache,
+            proof_bundle_cache,
+        }
+    }
+
+    /// Creates a PowVerifier with a custom replay cache backend (e.g., Redis).
+    pub fn with_replay_cache(cache_ttl_secs: u64, replay_cache: Box<dyn ReplayCache>) -> Self {
+        let moka_cache = Cache::builder()
+            .max_capacity(100_000)
+            .time_to_live(Duration::from_secs(cache_ttl_secs))
+            .build();
+        let proof_bundle_cache = Cache::builder()
+            .max_capacity(100_000)
+            .time_to_live(Duration::from_secs(cache_ttl_secs))
+            .build();
+        Self {
+            near_stateless_replay_cache: Arc::new(DynReplayCache(replay_cache)),
+            time_provider: Arc::new(SystemTimeProvider),
+            server_secret: Self::resolve_server_secret(
+                Self::load_server_secret_from_env(),
+                Self::pow_environment().as_deref(),
+            ),
+            use_legacy_fallback: false,
+            replay_cache: moka_cache,
             proof_bundle_cache,
         }
     }
