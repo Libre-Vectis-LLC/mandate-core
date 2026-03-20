@@ -723,4 +723,52 @@ mod tests {
     fn test_default_secret_panics_outside_development_and_test() {
         let _ = PowVerifier::resolve_server_secret(None, Some("production"));
     }
+
+    #[tokio::test]
+    async fn test_equix_benchmark_calibration() {
+        // Benchmark: measure time to solve and verify N proofs.
+        // This validates the cycles_per_proof parameter used in PowDifficultyCalculator.
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [99u8; 32]);
+        let proofs_to_generate = 10;
+        let bits = 7;
+        let params = PowParams::new(bits, proofs_to_generate, 60);
+
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
+
+        let start = std::time::Instant::now();
+        let submission = build_submission(&verifier, &issued, [200u8; 32]);
+        let solve_duration = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let result = verifier
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
+            .await;
+        let verify_duration = start.elapsed();
+
+        assert!(result.is_ok(), "benchmark proof must verify");
+        let per_proof_solve_ms = solve_duration.as_millis() as f64 / proofs_to_generate as f64;
+        let per_proof_verify_ms = verify_duration.as_millis() as f64 / proofs_to_generate as f64;
+
+        // Just log — actual calibration values depend on hardware.
+        eprintln!(
+            "EquiX benchmark: {proofs_to_generate} proofs @ {bits} bits: \
+             solve={:.1}ms/proof, verify={:.1}ms/proof, total_solve={:.0}ms",
+            per_proof_solve_ms,
+            per_proof_verify_ms,
+            solve_duration.as_millis()
+        );
+
+        // Sanity: solve should take measurable time but not minutes.
+        assert!(
+            solve_duration.as_secs() < 60,
+            "EquiX solve took too long: {solve_duration:?}"
+        );
+    }
 }
