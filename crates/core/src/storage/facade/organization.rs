@@ -134,7 +134,7 @@ impl StorageFacade {
 
     /// List all orgs that a member belongs to, by their Nazgul public key.
     ///
-    /// Used for wallet restore flow to discover org memberships.
+    /// Used for identity restore flow to discover org memberships.
     pub async fn list_organizations_for_member(
         &self,
         tenant: TenantId,
