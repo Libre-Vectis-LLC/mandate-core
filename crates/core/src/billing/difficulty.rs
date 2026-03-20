@@ -45,7 +45,7 @@ use crate::pow::PowParams;
 /// // Ring size 16, message 1KB, initial multiplier 3.0
 /// #[cfg(not(target_arch = "wasm32"))]
 /// {
-///     let params = calculator.calculate_pow_params(16, 1024, 3.0);
+///     let params = calculator.calculate_pow_params(16, 1024, 3.0, 60);
 ///     assert!(params.required_proofs >= 10);
 ///     assert_eq!(params.bits, 7);
 /// }
@@ -121,6 +121,7 @@ impl PowDifficultyCalculator {
     /// - `ring_size`: Number of ring members
     /// - `message_bytes`: Signed message length
     /// - `cost_multiplier`: POW cost multiplier (typically 3.0 initially)
+    /// - `time_window_secs`: Validity window for the issued POW challenge
     ///
     /// # Returns
     ///
@@ -144,7 +145,7 @@ impl PowDifficultyCalculator {
     /// #[cfg(not(target_arch = "wasm32"))]
     /// {
     ///     // Large ring (128 members), 2KB message, 3× multiplier
-    ///     let params = calculator.calculate_pow_params(128, 2048, 3.0);
+    ///     let params = calculator.calculate_pow_params(128, 2048, 3.0, 60);
     ///     assert!(params.required_proofs > 100);
     ///     assert_eq!(params.bits, 7);
     ///     assert_eq!(params.time_window_secs, 60);
@@ -156,6 +157,7 @@ impl PowDifficultyCalculator {
         ring_size: usize,
         message_bytes: usize,
         cost_multiplier: f64,
+        time_window_secs: u64,
     ) -> PowParams {
         // Calculate verification cost in CPU cycles
         let verify_cycles = self
@@ -174,7 +176,7 @@ impl PowDifficultyCalculator {
         PowParams {
             bits: self.fixed_bits,
             required_proofs,
-            time_window_secs: 60, // 1 minute validity
+            time_window_secs,
         }
     }
 
@@ -227,7 +229,7 @@ mod tests {
         let calc = test_calculator();
 
         // Small ring (2 members), small message (100 bytes)
-        let params = calc.calculate_pow_params(2, 100, 3.0);
+        let params = calc.calculate_pow_params(2, 100, 3.0, 60);
 
         // verify_cycles = 12.5*100 + 77750*2 + 8000 = 164750
         // target = 164750 * 3 = 494250
@@ -243,13 +245,14 @@ mod tests {
         let calc = test_calculator();
 
         // Medium ring (16 members), 1KB message
-        let params = calc.calculate_pow_params(16, 1024, 3.0);
+        let params = calc.calculate_pow_params(16, 1024, 3.0, 90);
 
         // verify_cycles = 12.5*1024 + 77750*16 + 8000 = 1264800
         // target = 1264800 * 3 = 3794400
         // required = ceil(3794400 / 50000) = ceil(75.888) = 76
         assert_eq!(params.required_proofs, 76);
         assert_eq!(params.bits, 7);
+        assert_eq!(params.time_window_secs, 90);
     }
 
     #[test]
@@ -258,7 +261,7 @@ mod tests {
         let calc = test_calculator();
 
         // Large ring (128 members), 2KB message
-        let params = calc.calculate_pow_params(128, 2048, 3.0);
+        let params = calc.calculate_pow_params(128, 2048, 3.0, 60);
 
         // verify_cycles = 12.5*2048 + 77750*128 + 8000 = 25600 + 9958000 + 8000 = 9985600
         // target = 9985600 * 3 = 29956800
@@ -275,9 +278,9 @@ mod tests {
         let ring_size = 16;
         let msg_bytes = 1024;
 
-        let params_3x = calc.calculate_pow_params(ring_size, msg_bytes, 3.0);
-        let params_6x = calc.calculate_pow_params(ring_size, msg_bytes, 6.0);
-        let params_12x = calc.calculate_pow_params(ring_size, msg_bytes, 12.0);
+        let params_3x = calc.calculate_pow_params(ring_size, msg_bytes, 3.0, 60);
+        let params_6x = calc.calculate_pow_params(ring_size, msg_bytes, 6.0, 60);
+        let params_12x = calc.calculate_pow_params(ring_size, msg_bytes, 12.0, 60);
 
         // Proofs should approximately double each time (exponential escalation)
         // Using ceiling division: 3794400/50000=76, 7588800/50000=152, 15177600/50000=304
@@ -294,9 +297,9 @@ mod tests {
         let ring_size = 16;
         let msg_bytes = 1024;
 
-        let params_3x = calc.calculate_pow_params(ring_size, msg_bytes, 3.0);
-        let params_4x = calc.calculate_pow_params(ring_size, msg_bytes, 4.0);
-        let params_5x = calc.calculate_pow_params(ring_size, msg_bytes, 5.0);
+        let params_3x = calc.calculate_pow_params(ring_size, msg_bytes, 3.0, 60);
+        let params_4x = calc.calculate_pow_params(ring_size, msg_bytes, 4.0, 60);
+        let params_5x = calc.calculate_pow_params(ring_size, msg_bytes, 5.0, 60);
 
         // Linear escalation: +1x each time
         // verify_cycles = 1264800, using ceiling division
@@ -317,7 +320,7 @@ mod tests {
         );
 
         // Even tiny verification cost should trigger min proofs
-        let params = calc.calculate_pow_params(2, 10, 1.0);
+        let params = calc.calculate_pow_params(2, 10, 1.0, 60);
         assert_eq!(params.required_proofs, 100); // min proofs enforced
     }
 

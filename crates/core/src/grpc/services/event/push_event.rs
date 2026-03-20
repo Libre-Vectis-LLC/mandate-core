@@ -432,9 +432,14 @@ impl EventServiceImpl {
 
         // 3. POW gate: if this org is in POW mode, require valid proof before
         //    spending CPU on expensive signature verification.
+        //
+        //    Lazy PoW verification: when sig verification is in-flight for this org,
+        //    park the request. When sig verification completes:
+        //    - If sig failed → difficulty upgraded → parked request's PoW is stale → reject O(1)
+        //    - If sig passed → maybe recovery → skip PoW entirely if no longer required
         let mut pow_proof_count: Option<usize> = None;
+        let pow_key = (tenant, event.org_id);
         {
-            let pow_key = (tenant, event.org_id);
             let pow_required = self
                 .pow_states
                 .get(&pow_key)
@@ -448,19 +453,70 @@ impl EventServiceImpl {
                         return Err(self.make_pow_challenge_status(tenant, event.org_id));
                     }
                     Some(proto_sub) => {
-                        // Validate the submitted POW proof.
-                        self.verify_pow_submission(tenant, event.org_id, proto_sub)
-                            .await?;
-                        // Track proof count for billing after signature verification.
-                        let multiplier = self
-                            .pow_states
-                            .get(&pow_key)
-                            .map(|s| s.get_current_multiplier())
-                            .unwrap_or(3.0);
-                        let params = self
-                            .pow_calculator
-                            .calculate_pow_params(16, 1024, multiplier);
-                        pow_proof_count = Some(params.required_proofs as usize);
+                        // Lazy verification: if sig verification is in-flight, park this request.
+                        let parking_state = self
+                            .pow_parking
+                            .entry(pow_key)
+                            .or_insert_with(|| Arc::new(super::service::OrgParkingState::new()))
+                            .clone();
+
+                        if parking_state
+                            .sig_in_flight
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                            > 0
+                        {
+                            // Check parking capacity.
+                            let current_parked = parking_state
+                                .parked
+                                .load(std::sync::atomic::Ordering::SeqCst);
+                            if current_parked >= self.pow_parking_limit {
+                                // Parking full — reject immediately with current challenge.
+                                return Err(self.make_pow_challenge_status(tenant, event.org_id));
+                            }
+
+                            // Park: wait for sig verification to complete (with TTL).
+                            parking_state
+                                .parked
+                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            let park_result = tokio::time::timeout(
+                                self.pow_parking_ttl,
+                                parking_state.notify.notified(),
+                            )
+                            .await;
+                            parking_state
+                                .parked
+                                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+
+                            if park_result.is_err() {
+                                // TTL expired — reject with current challenge.
+                                return Err(self.make_pow_challenge_status(tenant, event.org_id));
+                            }
+
+                            // Re-check: sig verification completed, pow state may have changed.
+                            let still_required = self
+                                .pow_states
+                                .get(&pow_key)
+                                .map(|s| s.should_require_pow())
+                                .unwrap_or(false);
+                            if !still_required {
+                                // Recovery happened — skip PoW verification entirely.
+                                // No PoW proof count to bill.
+                            } else {
+                                // Still required — verify PoW now.
+                                self.verify_pow_submission(tenant, event.org_id, proto_sub)
+                                    .await?;
+                                let (params, _) =
+                                    self.current_pow_params_and_version(tenant, event.org_id);
+                                pow_proof_count = Some(params.required_proofs);
+                            }
+                        } else {
+                            // No in-flight sig verification — verify PoW immediately.
+                            self.verify_pow_submission(tenant, event.org_id, proto_sub)
+                                .await?;
+                            let (params, _) =
+                                self.current_pow_params_and_version(tenant, event.org_id);
+                            pow_proof_count = Some(params.required_proofs);
+                        }
                     }
                 }
             }
@@ -605,7 +661,17 @@ impl EventServiceImpl {
             message: signed_msg,
             weight: 1,
             external_ring,
+            organization_id: event.org_id.to_string(),
         };
+
+        // Acquire sig verification guard: tracks in-flight count and notifies parked
+        // PoW requests when dropped (on completion, error, or panic).
+        let parking_state = self
+            .pow_parking
+            .entry(pow_key)
+            .or_insert_with(|| Arc::new(super::service::OrgParkingState::new()))
+            .clone();
+        let _sig_guard = super::service::SigVerificationGuard::new(parking_state);
 
         let results =
             self.verifier
@@ -618,7 +684,6 @@ impl EventServiceImpl {
         if !results[0] {
             // Record failure in POW state machine — may trigger or escalate POW requirement.
             {
-                let pow_key = (tenant, event.org_id);
                 let mut state = self.pow_states.entry(pow_key).or_default();
                 state.on_verification_failure(&self.pow_config);
 
@@ -626,6 +691,8 @@ impl EventServiceImpl {
                 // so the client knows to submit POW on retry.
                 if state.should_require_pow() {
                     drop(state);
+                    // Drop guard before returning to notify parked requests.
+                    drop(_sig_guard);
                     return Err(self.make_pow_challenge_status(tenant, event.org_id));
                 }
             }
@@ -639,11 +706,13 @@ impl EventServiceImpl {
 
         // Signature verified successfully — record success, potentially recover from POW mode.
         {
-            let pow_key = (tenant, event.org_id);
             if let Some(mut state) = self.pow_states.get_mut(&pow_key) {
                 state.on_verification_success(&self.pow_config);
             }
         }
+
+        // Drop guard to notify parked requests that sig verification is complete.
+        drop(_sig_guard);
 
         // Charge verification AFTER successful signature verification.
         // This prevents economic DoS where attackers drain balance with invalid signatures.

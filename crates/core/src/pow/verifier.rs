@@ -4,11 +4,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bincode::Options;
+use blake3::Hasher as Blake3Hasher;
 use moka::future::Cache;
 use rspow::near_stateless::prf::DeterministicNonceProvider;
 use rspow::near_stateless::{
-    Blake3NonceProvider, MokaReplayCache, NearStatelessVerifier, Submission as NsSubmission,
-    SystemTimeProvider, VerifierConfig,
+    MokaReplayCache, NearStatelessVerifier, Submission as NsSubmission, SystemTimeProvider,
+    VerifierConfig,
 };
 use rspow::ProofBundle;
 use sha3::{Digest, Sha3_256};
@@ -16,7 +17,8 @@ use thiserror::Error;
 
 use super::types::{PowIssuedParams, PowParams, PowSubmission, PowVerifyResult};
 
-type NsVerifier = NearStatelessVerifier<Blake3NonceProvider, MokaReplayCache, SystemTimeProvider>;
+type NsVerifier =
+    NearStatelessVerifier<ContextBoundNonceProvider, MokaReplayCache, SystemTimeProvider>;
 
 /// POW verification errors.
 #[derive(Debug, Error)]
@@ -67,8 +69,36 @@ type ReplayKey = [u8; 64];
 /// Upper bound for serialized rspow proof bundle payload.
 const MAX_PROOF_BUNDLE_BYTES: usize = 1024 * 1024;
 const DEFAULT_SERVER_SECRET_TAG: &[u8] = b"mandate:pow:server-secret:v1";
+const CONTEXT_BOUND_NONCE_TAG: &[u8] = b"mandate:pow:nonce:v2";
 const SERVER_SECRET_ENV: &str = "MANDATE_POW_SERVER_SECRET_HEX";
+const ENVIRONMENT_ENV: &str = "MANDATE_POW_ENVIRONMENT";
 const LEGACY_FALLBACK_ENV: &str = "MANDATE_POW_USE_LEGACY_FALLBACK";
+
+#[derive(Debug, Clone)]
+struct ContextBoundNonceProvider {
+    organization_id: Arc<str>,
+    difficulty_version: u64,
+}
+
+impl ContextBoundNonceProvider {
+    fn new(organization_id: &str, difficulty_version: u64) -> Self {
+        Self {
+            organization_id: Arc::<str>::from(organization_id),
+            difficulty_version,
+        }
+    }
+}
+
+impl DeterministicNonceProvider for ContextBoundNonceProvider {
+    fn derive(&self, secret: [u8; 32], ts: u64) -> [u8; 32] {
+        let mut hasher = Blake3Hasher::new_keyed(&secret);
+        hasher.update(CONTEXT_BOUND_NONCE_TAG);
+        hasher.update(&ts.to_le_bytes());
+        hasher.update(self.organization_id.as_bytes());
+        hasher.update(&self.difficulty_version.to_le_bytes());
+        hasher.finalize().into()
+    }
+}
 
 /// POW verifier using rspow's near-stateless protocol.
 ///
@@ -76,7 +106,6 @@ const LEGACY_FALLBACK_ENV: &str = "MANDATE_POW_USE_LEGACY_FALLBACK";
 /// retained as an env-switched fallback during migration.
 pub struct PowVerifier {
     near_stateless_replay_cache: Arc<MokaReplayCache>,
-    nonce_provider: Arc<Blake3NonceProvider>,
     time_provider: Arc<SystemTimeProvider>,
     server_secret: [u8; 32],
     use_legacy_fallback: bool,
@@ -89,13 +118,16 @@ impl PowVerifier {
     /// Creates a new POW verifier.
     ///
     /// The verifier loads `MANDATE_POW_SERVER_SECRET_HEX` when available.
-    /// Otherwise it falls back to a deterministic baked-in secret so server and
-    /// edge stay aligned until dedicated secret plumbing lands.
+    /// Otherwise it only allows the deterministic baked-in secret in
+    /// `development` or `test` environments.
     pub fn new(cache_capacity: u64, cache_ttl_secs: u64) -> Self {
         Self::with_server_secret(
             cache_capacity,
             cache_ttl_secs,
-            Self::load_server_secret_from_env().unwrap_or_else(Self::default_server_secret),
+            Self::resolve_server_secret(
+                Self::load_server_secret_from_env(),
+                Self::pow_environment().as_deref(),
+            ),
         )
     }
 
@@ -116,7 +148,6 @@ impl PowVerifier {
 
         Self {
             near_stateless_replay_cache: Arc::new(MokaReplayCache::new(cache_capacity)),
-            nonce_provider: Arc::new(Blake3NonceProvider),
             time_provider: Arc::new(SystemTimeProvider),
             server_secret,
             use_legacy_fallback: Self::env_flag(LEGACY_FALLBACK_ENV),
@@ -135,6 +166,38 @@ impl PowVerifier {
         let value = std::env::var(SERVER_SECRET_ENV).ok()?;
         let decoded = hex::decode(value).ok()?;
         decoded.as_slice().try_into().ok()
+    }
+
+    fn pow_environment() -> Option<String> {
+        std::env::var(ENVIRONMENT_ENV).ok().or_else(|| {
+            // debug_assertions is true for all test/debug builds (cargo test, nextest),
+            // false for release builds (production). This is the most reliable heuristic.
+            if cfg!(debug_assertions) {
+                Some("test".to_string())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn resolve_server_secret(
+        server_secret: Option<[u8; 32]>,
+        environment: Option<&str>,
+    ) -> [u8; 32] {
+        if let Some(server_secret) = server_secret {
+            return server_secret;
+        }
+
+        if matches!(
+            environment,
+            Some(environment)
+                if environment.eq_ignore_ascii_case("development")
+                    || environment.eq_ignore_ascii_case("test")
+        ) {
+            return Self::default_server_secret();
+        }
+
+        panic!("{SERVER_SECRET_ENV} must be set when {ENVIRONMENT_ENV} is not development/test");
     }
 
     fn default_server_secret() -> [u8; 32] {
@@ -158,11 +221,16 @@ impl PowVerifier {
     fn build_near_stateless_verifier(
         &self,
         params: &PowParams,
+        organization_id: &str,
+        difficulty_version: u64,
     ) -> Result<NsVerifier, PowVerifyError> {
         NearStatelessVerifier::new(
             Self::verifier_config(params)?,
             self.server_secret,
-            self.nonce_provider.clone(),
+            Arc::new(ContextBoundNonceProvider::new(
+                organization_id,
+                difficulty_version,
+            )),
             self.near_stateless_replay_cache.clone(),
             self.time_provider.clone(),
         )
@@ -184,15 +252,30 @@ impl PowVerifier {
     }
 
     /// Derive the deterministic nonce for a previously issued timestamp.
-    pub fn deterministic_nonce_for_timestamp(&self, timestamp: u64) -> [u8; 32] {
-        self.nonce_provider.derive(self.server_secret, timestamp)
+    pub fn deterministic_nonce_for_timestamp(
+        &self,
+        timestamp: u64,
+        organization_id: &str,
+        difficulty_version: u64,
+    ) -> [u8; 32] {
+        ContextBoundNonceProvider::new(organization_id, difficulty_version)
+            .derive(self.server_secret, timestamp)
     }
 
     /// Create the concrete challenge parameters to return to a client.
-    pub fn issue_params(&self, params: &PowParams) -> Result<PowIssuedParams, PowVerifyError> {
-        let solve_params = self.build_near_stateless_verifier(params)?.issue_params();
+    pub fn issue_params(
+        &self,
+        params: &PowParams,
+        organization_id: &str,
+        difficulty_version: u64,
+    ) -> Result<PowIssuedParams, PowVerifyError> {
+        let solve_params = self
+            .build_near_stateless_verifier(params, organization_id, difficulty_version)?
+            .issue_params();
         Ok(PowIssuedParams::from_params(
             params,
+            organization_id,
+            difficulty_version,
             solve_params.deterministic_nonce,
             solve_params.timestamp,
         ))
@@ -203,11 +286,15 @@ impl PowVerifier {
         &self,
         submission: &PowSubmission,
         params: &PowParams,
+        organization_id: &str,
+        difficulty_version: u64,
     ) -> Result<PowVerifyResult, PowVerifyError> {
         if self.use_legacy_fallback {
             // TODO: remove the legacy dual-cache verifier once all supported
             // deployments have migrated to rspow near-stateless verification.
-            return self.verify_submission_legacy(submission, params).await;
+            return self
+                .verify_submission_legacy(submission, params, organization_id, difficulty_version)
+                .await;
         }
 
         let bundle = Self::deserialize_proof_bundle(submission)?;
@@ -234,7 +321,7 @@ impl PowVerifier {
         };
 
         match self
-            .build_near_stateless_verifier(params)?
+            .build_near_stateless_verifier(params, organization_id, difficulty_version)?
             .verify_submission(&ns_submission)
         {
             Ok(()) => Ok(PowVerifyResult::success(proofs_verified)),
@@ -277,6 +364,8 @@ impl PowVerifier {
         &self,
         submission: &PowSubmission,
         params: &PowParams,
+        organization_id: &str,
+        difficulty_version: u64,
     ) -> Result<PowVerifyResult, PowVerifyError> {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -319,6 +408,21 @@ impl PowVerifier {
             });
         }
 
+        let expected_deterministic_nonce = self.deterministic_nonce_for_timestamp(
+            submission.timestamp,
+            organization_id,
+            difficulty_version,
+        );
+        let expected_master_challenge = rspow::near_stateless::derive_master_challenge(
+            expected_deterministic_nonce,
+            submission.client_nonce,
+        );
+        if bundle.master_challenge != expected_master_challenge {
+            return Err(PowVerifyError::VerificationFailed(
+                "master challenge mismatch".to_string(),
+            ));
+        }
+
         bundle
             .verify_strict(params.bits, params.required_proofs)
             .map_err(|err| PowVerifyError::VerificationFailed(err.to_string()))?;
@@ -353,6 +457,10 @@ mod tests {
 
     use super::*;
 
+    const TEST_ORG_ALPHA: &str = "org-alpha";
+    const TEST_ORG_BETA: &str = "org-beta";
+    const TEST_DIFFICULTY_VERSION: u64 = 7;
+
     fn build_submission(
         verifier: &PowVerifier,
         issued: &PowIssuedParams,
@@ -381,21 +489,35 @@ mod tests {
     async fn test_verifier_creation() {
         let verifier = PowVerifier::new(10_000, 300);
         let issued = verifier
-            .issue_params(&PowParams::new(1, 1, 60))
+            .issue_params(
+                &PowParams::new(1, 1, 60),
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
             .expect("issue params");
         assert!(issued.timestamp > 0);
         assert_ne!(issued.deterministic_nonce, [0u8; 32]);
+        assert_eq!(issued.organization_id, TEST_ORG_ALPHA);
+        assert_eq!(issued.difficulty_version, TEST_DIFFICULTY_VERSION);
     }
 
     #[tokio::test]
     async fn test_issue_params_matches_deterministic_nonce_derivation() {
         let verifier = PowVerifier::with_server_secret(10_000, 300, [7u8; 32]);
         let issued = verifier
-            .issue_params(&PowParams::new(1, 1, 60))
+            .issue_params(
+                &PowParams::new(1, 1, 60),
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
             .expect("issue params");
         assert_eq!(
             issued.deterministic_nonce,
-            verifier.deterministic_nonce_for_timestamp(issued.timestamp)
+            verifier.deterministic_nonce_for_timestamp(
+                issued.timestamp,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
         );
     }
 
@@ -403,11 +525,20 @@ mod tests {
     async fn test_expired_submission() {
         let verifier = PowVerifier::with_server_secret(10_000, 300, [6u8; 32]);
         let params = PowParams::new(1, 1, 60);
-        let issued = verifier.issue_params(&params).expect("issue params");
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
         let mut submission = build_submission(&verifier, &issued, [1u8; 32]);
         submission.timestamp = submission.timestamp.saturating_sub(7_200);
 
-        let result = verifier.verify_submission(&submission, &params).await;
+        let result = verifier
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
+            .await;
         assert!(matches!(result, Err(PowVerifyError::Expired { .. })));
     }
 
@@ -424,7 +555,14 @@ mod tests {
             vec![0u8; MAX_PROOF_BUNDLE_BYTES + 1],
         );
 
-        let result = verifier.verify_submission(&submission, &params).await;
+        let result = verifier
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
+            .await;
         assert!(matches!(
             result,
             Err(PowVerifyError::ProofBundleTooLarge { .. })
@@ -435,11 +573,18 @@ mod tests {
     async fn test_round_trip_verification_uses_near_stateless_binding() {
         let verifier = PowVerifier::with_server_secret(10_000, 300, [9u8; 32]);
         let params = PowParams::new(1, 1, 60);
-        let issued = verifier.issue_params(&params).expect("issue params");
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
         let submission = build_submission(&verifier, &issued, [11u8; 32]);
 
         let result = verifier
-            .verify_submission(&submission, &params)
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
             .await
             .expect("verification should succeed");
         assert!(result.valid);
@@ -450,15 +595,29 @@ mod tests {
     async fn test_replay_detection_uses_near_stateless_cache() {
         let verifier = PowVerifier::with_server_secret(10_000, 300, [3u8; 32]);
         let params = PowParams::new(1, 1, 60);
-        let issued = verifier.issue_params(&params).expect("issue params");
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
         let submission = build_submission(&verifier, &issued, [5u8; 32]);
 
         verifier
-            .verify_submission(&submission, &params)
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
             .await
             .expect("first verification should succeed");
 
-        let result = verifier.verify_submission(&submission, &params).await;
+        let result = verifier
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
+            .await;
         assert!(matches!(result, Err(PowVerifyError::ReplayDetected)));
     }
 
@@ -466,12 +625,62 @@ mod tests {
     async fn test_master_challenge_mismatch_is_rejected() {
         let verifier = PowVerifier::with_server_secret(10_000, 300, [2u8; 32]);
         let params = PowParams::new(1, 1, 60);
-        let issued = verifier.issue_params(&params).expect("issue params");
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
 
         let mut submission = build_submission(&verifier, &issued, [8u8; 32]);
         submission.client_nonce = [9u8; 32];
 
-        let result = verifier.verify_submission(&submission, &params).await;
+        let result = verifier
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION,
+            )
+            .await;
         assert!(matches!(result, Err(PowVerifyError::VerificationFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_proof_is_not_reusable_across_organizations() {
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [4u8; 32]);
+        let params = PowParams::new(1, 1, 60);
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
+        let submission = build_submission(&verifier, &issued, [10u8; 32]);
+
+        let result = verifier
+            .verify_submission(&submission, &params, TEST_ORG_BETA, TEST_DIFFICULTY_VERSION)
+            .await;
+        assert!(matches!(result, Err(PowVerifyError::VerificationFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_proof_is_not_reusable_across_difficulty_versions() {
+        let verifier = PowVerifier::with_server_secret(10_000, 300, [5u8; 32]);
+        let params = PowParams::new(1, 1, 60);
+        let issued = verifier
+            .issue_params(&params, TEST_ORG_ALPHA, TEST_DIFFICULTY_VERSION)
+            .expect("issue params");
+        let submission = build_submission(&verifier, &issued, [12u8; 32]);
+
+        let result = verifier
+            .verify_submission(
+                &submission,
+                &params,
+                TEST_ORG_ALPHA,
+                TEST_DIFFICULTY_VERSION + 1,
+            )
+            .await;
+        assert!(matches!(result, Err(PowVerifyError::VerificationFailed(_))));
+    }
+
+    #[test]
+    #[should_panic(expected = "MANDATE_POW_SERVER_SECRET_HEX must be set")]
+    fn test_default_secret_panics_outside_development_and_test() {
+        let _ = PowVerifier::resolve_server_secret(None, Some("production"));
     }
 }

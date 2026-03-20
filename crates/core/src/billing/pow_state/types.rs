@@ -17,6 +17,10 @@ where
     Ok(normalize_max_multiplier(value))
 }
 
+fn default_time_window_secs() -> u64 {
+    60
+}
+
 /// Organization POW configuration (set by org owner).
 ///
 /// Controls when POW is triggered and how difficulty escalates/recovers.
@@ -26,10 +30,10 @@ where
 /// ```
 /// use mandate_core::billing::{OrgPowConfig, UpgradeStrategy, EscalationStrategy, RecoveryStrategy};
 ///
-/// // Conservative config: trigger POW after 3 consecutive failures, escalate linearly
+/// // Conservative config: trigger POW immediately, escalate linearly on later failures
 /// let config = OrgPowConfig {
 ///     upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
-///         trigger_threshold: 3,
+///         trigger_threshold: 1,
 ///         escalate_every: 1,
 ///         growth: EscalationStrategy::Linear { step: 1.0 },
 ///     },
@@ -37,6 +41,7 @@ where
 ///     max_multiplier: 1000.0,
 ///     recovery_success_count: 10,
 ///     recovery_strategy: RecoveryStrategy::Gradual { steps: 3 },
+///     time_window_secs: 60,
 ///     max_event_history: 1000,
 /// };
 ///
@@ -52,6 +57,7 @@ where
 ///     max_multiplier: 1000.0,
 ///     recovery_success_count: 10,
 ///     recovery_strategy: RecoveryStrategy::Immediate,
+///     time_window_secs: 60,
 ///     max_event_history: 1000,
 /// };
 /// ```
@@ -80,6 +86,10 @@ pub struct OrgPowConfig {
     /// How to recover when successes meet threshold.
     pub recovery_strategy: RecoveryStrategy,
 
+    /// Time window in seconds for issued POW challenges.
+    #[serde(default = "default_time_window_secs")]
+    pub time_window_secs: u64,
+
     /// Maximum number of verification events to keep in history.
     ///
     /// Used by TimeWindowBased and RateBased strategies. Events older than
@@ -94,7 +104,8 @@ impl Default for OrgPowConfig {
             initial_multiplier: 3.0,
             max_multiplier: default_max_multiplier(),
             recovery_success_count: 10,
-            recovery_strategy: RecoveryStrategy::Immediate,
+            recovery_strategy: RecoveryStrategy::Gradual { steps: 1 },
+            time_window_secs: default_time_window_secs(),
             max_event_history: 1000,
         }
     }
@@ -120,9 +131,9 @@ pub enum RecoveryStrategy {
     /// Immediately return to no POW state.
     Immediate,
 
-    /// Gradually reduce multiplier over `steps` successes before disabling POW.
+    /// Gradually reduce difficulty one level at a time after each recovery streak.
     ///
-    /// Example with steps=3: 12 → 8 → 4 → 0 (disabled)
+    /// `steps` is retained for serialized compatibility with earlier configs.
     Gradual { steps: u32 },
 }
 
@@ -144,9 +155,9 @@ pub enum RecoveryStrategy {
 ///     growth: EscalationStrategy::Linear { step: 1.0 },
 /// };
 ///
-/// // Consecutive failure: trigger after 3 consecutive failures
+/// // Consecutive failure: trigger on the first failure
 /// let consecutive = UpgradeStrategy::ConsecutiveFailure {
-///     trigger_threshold: 3,
+///     trigger_threshold: 1,
 ///     escalate_every: 1,
 ///     growth: EscalationStrategy::Exponential { base: 2.0 },
 /// };
@@ -204,9 +215,9 @@ pub enum UpgradeStrategy {
 
 impl Default for UpgradeStrategy {
     fn default() -> Self {
-        // Default to simple consecutive failure strategy (backward compatible)
+        // Default to simple consecutive failure strategy.
         UpgradeStrategy::ConsecutiveFailure {
-            trigger_threshold: 3,
+            trigger_threshold: 1,
             escalate_every: 1,
             growth: EscalationStrategy::Linear { step: 1.0 },
         }
@@ -245,6 +256,13 @@ pub struct OrgPowState {
     /// Current POW cost multiplier (1.0 = no POW, >1.0 = POW active).
     pub current_multiplier: f64,
 
+    /// Monotonic version for the active POW difficulty semantics.
+    ///
+    /// Incremented whenever the effective challenge difficulty changes so
+    /// previously issued proofs cannot be replayed across difficulty epochs.
+    #[serde(default)]
+    pub difficulty_version: u64,
+
     /// Number of consecutive verification failures.
     pub consecutive_failures: u32,
 
@@ -264,6 +282,7 @@ impl Default for OrgPowState {
         Self {
             pow_required: false,
             current_multiplier: 1.0,
+            difficulty_version: 0,
             consecutive_failures: 0,
             consecutive_successes: 0,
             event_history: VecDeque::new(),

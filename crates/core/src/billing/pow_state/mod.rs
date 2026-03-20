@@ -44,25 +44,22 @@ mod tests {
         let state = OrgPowState::new();
         assert!(!state.should_require_pow());
         assert_eq!(state.get_current_multiplier(), 1.0);
+        assert_eq!(state.get_difficulty_version(), 0);
         assert_eq!(state.consecutive_failures, 0);
         assert_eq!(state.consecutive_successes, 0);
     }
 
     #[test]
-    fn test_trigger_pow_after_threshold() {
+    fn test_trigger_pow_on_first_failure_by_default() {
         let mut state = OrgPowState::new();
-        let config = OrgPowConfig::default(); // threshold=3
+        let config = OrgPowConfig::default();
 
-        // First two failures don't trigger
-        state.on_verification_failure(&config);
-        assert!(!state.should_require_pow());
-        state.on_verification_failure(&config);
-        assert!(!state.should_require_pow());
-
-        // Third failure triggers POW
+        // First failure immediately triggers POW
         state.on_verification_failure(&config);
         assert!(state.should_require_pow());
         assert_eq!(state.get_current_multiplier(), 3.0);
+        assert_eq!(state.get_difficulty_version(), 1);
+        assert_eq!(state.consecutive_failures, 1);
     }
 
     #[test]
@@ -78,22 +75,27 @@ mod tests {
             max_multiplier: 1000.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
+            time_window_secs: 60,
             max_event_history: 1000,
         };
 
         // Trigger POW
         state.on_verification_failure(&config);
         assert_eq!(state.get_current_multiplier(), 3.0);
+        assert_eq!(state.get_difficulty_version(), 1);
 
         // Escalate linearly: +1.5 each time
         state.on_verification_failure(&config);
         assert_eq!(state.get_current_multiplier(), 4.5);
+        assert_eq!(state.get_difficulty_version(), 2);
 
         state.on_verification_failure(&config);
         assert_eq!(state.get_current_multiplier(), 6.0);
+        assert_eq!(state.get_difficulty_version(), 3);
 
         state.on_verification_failure(&config);
         assert_eq!(state.get_current_multiplier(), 7.5);
+        assert_eq!(state.get_difficulty_version(), 4);
     }
 
     #[test]
@@ -109,6 +111,7 @@ mod tests {
             max_multiplier: 1000.0,
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
+            time_window_secs: 60,
             max_event_history: 1000,
         };
 
@@ -140,6 +143,7 @@ mod tests {
             max_multiplier: 1000.0,
             recovery_success_count: 2,
             recovery_strategy: RecoveryStrategy::Immediate,
+            time_window_secs: 60,
             max_event_history: 1000,
         };
 
@@ -148,6 +152,7 @@ mod tests {
         state.on_verification_failure(&config);
         state.on_verification_failure(&config);
         assert_eq!(state.get_current_multiplier(), 5.0); // 3 + 1 + 1
+        assert_eq!(state.get_difficulty_version(), 3);
 
         // First success
         state.on_verification_success(&config);
@@ -158,77 +163,74 @@ mod tests {
         state.on_verification_success(&config);
         assert!(!state.should_require_pow());
         assert_eq!(state.get_current_multiplier(), 1.0);
+        assert_eq!(state.get_difficulty_version(), 4);
         assert_eq!(state.consecutive_successes, 0);
     }
 
     #[test]
-    fn test_gradual_recovery() {
-        let mut state = OrgPowState::new();
+    fn test_gradual_recovery_hysteresis_decrements_one_level_per_streak() {
+        let mut state = OrgPowState {
+            pow_required: true,
+            current_multiplier: 30.0,
+            ..OrgPowState::default()
+        };
         let config = OrgPowConfig {
             upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
                 trigger_threshold: 1,
                 escalate_every: 1,
-                growth: EscalationStrategy::Linear { step: 3.0 },
+                growth: EscalationStrategy::Linear { step: 1.0 },
             },
             initial_multiplier: 3.0,
             max_multiplier: 1000.0,
-            recovery_success_count: 2,
+            recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Gradual { steps: 3 },
+            time_window_secs: 60,
             max_event_history: 1000,
         };
 
-        // Escalate to 12.0:
-        // - Failure 1: triggers POW at 3.0
-        // - Failure 2: escalate to 6.0
-        // - Failure 3: escalate to 9.0
-        // - Failure 4: escalate to 12.0
-        state.on_verification_failure(&config);
-        state.on_verification_failure(&config);
-        state.on_verification_failure(&config);
-        state.on_verification_failure(&config);
-        assert_eq!(state.get_current_multiplier(), 12.0);
-
-        // Step size = (12 - 3) / 3 = 3.0
-        // Recovery step 1: 12 → 9
+        // Recovery step 1: 30 -> 29 after 10 consecutive successes
         for _ in 0..config.recovery_success_count {
             state.on_verification_success(&config);
         }
-        assert_eq!(state.get_current_multiplier(), 9.0);
+        assert_eq!(state.get_current_multiplier(), 29.0);
         assert!(state.should_require_pow());
+        assert_eq!(state.consecutive_successes, 0);
 
-        // Recovery step 2: 9 → 6
+        // Recovery step 2: 29 -> 28 after another 10 successes
         for _ in 0..config.recovery_success_count {
             state.on_verification_success(&config);
         }
-        assert_eq!(state.get_current_multiplier(), 6.0);
-
-        // Recovery step 3: 6 → 3 (below or equal to initial, disables POW)
-        for _ in 0..config.recovery_success_count {
-            state.on_verification_success(&config);
-        }
-        assert!(!state.should_require_pow());
-        assert_eq!(state.get_current_multiplier(), 1.0);
+        assert_eq!(state.get_current_multiplier(), 28.0);
+        assert!(state.should_require_pow());
     }
 
     #[test]
     fn test_success_resets_failures() {
         let mut state = OrgPowState::new();
-        let config = OrgPowConfig::default(); // threshold=3
+        let config = OrgPowConfig {
+            upgrade_strategy: UpgradeStrategy::ConsecutiveFailure {
+                trigger_threshold: 2,
+                escalate_every: 1,
+                growth: EscalationStrategy::Linear { step: 1.0 },
+            },
+            ..OrgPowConfig::default()
+        };
 
-        // Two failures
+        // A single failure does not trigger with this custom threshold.
         state.on_verification_failure(&config);
-        state.on_verification_failure(&config);
-        assert_eq!(state.consecutive_failures, 2);
+        assert_eq!(state.consecutive_failures, 1);
+        assert!(!state.should_require_pow());
 
         // Success resets failure counter
         state.on_verification_success(&config);
         assert_eq!(state.consecutive_failures, 0);
         assert_eq!(state.consecutive_successes, 0); // Not in POW mode yet
 
-        // Need 3 consecutive failures again to trigger
-        state.on_verification_failure(&config);
+        // Need 2 consecutive failures again to trigger
         state.on_verification_failure(&config);
         assert!(!state.should_require_pow());
+        state.on_verification_failure(&config);
+        assert!(state.should_require_pow());
     }
 
     #[test]
@@ -244,6 +246,7 @@ mod tests {
             max_multiplier: 1000.0,
             recovery_success_count: 3,
             recovery_strategy: RecoveryStrategy::Immediate,
+            time_window_secs: 60,
             max_event_history: 1000,
         };
 
@@ -260,6 +263,7 @@ mod tests {
         state.on_verification_failure(&config);
         assert_eq!(state.consecutive_successes, 0);
         assert_eq!(state.get_current_multiplier(), 4.0); // Escalated
+        assert_eq!(state.get_difficulty_version(), 2);
     }
 
     #[test]
@@ -268,7 +272,7 @@ mod tests {
         assert_eq!(
             config.upgrade_strategy,
             UpgradeStrategy::ConsecutiveFailure {
-                trigger_threshold: 3,
+                trigger_threshold: 1,
                 escalate_every: 1,
                 growth: EscalationStrategy::Linear { step: 1.0 },
             }
@@ -276,7 +280,11 @@ mod tests {
         assert_eq!(config.initial_multiplier, 3.0);
         assert_eq!(config.max_multiplier, 1000.0);
         assert_eq!(config.recovery_success_count, 10);
-        assert_eq!(config.recovery_strategy, RecoveryStrategy::Immediate);
+        assert_eq!(
+            config.recovery_strategy,
+            RecoveryStrategy::Gradual { steps: 1 }
+        );
+        assert_eq!(config.time_window_secs, 60);
         assert_eq!(config.max_event_history, 1000);
     }
 
@@ -292,6 +300,7 @@ mod tests {
             max_multiplier: 50.0, // Set low cap for testing
             recovery_success_count: 10,
             recovery_strategy: RecoveryStrategy::Immediate,
+            time_window_secs: 60,
             max_event_history: 1000,
         };
 
@@ -317,30 +326,34 @@ mod tests {
     fn test_max_multiplier_default_normalization() {
         // Test that 0 or negative max_multiplier defaults to 1000.0
         let json_with_zero = r#"{
-            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 3, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
+            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 1, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
             "initial_multiplier": 3.0,
             "max_multiplier": 0.0,
             "recovery_success_count": 10,
             "recovery_strategy": "Immediate",
+            "time_window_secs": 60,
             "max_event_history": 1000
         }"#;
         let config: OrgPowConfig = serde_json::from_str(json_with_zero).unwrap();
         assert_eq!(config.max_multiplier, 1000.0);
+        assert_eq!(config.time_window_secs, 60);
 
         let json_with_negative = r#"{
-            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 3, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
+            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 1, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
             "initial_multiplier": 3.0,
             "max_multiplier": -5.0,
             "recovery_success_count": 10,
             "recovery_strategy": "Immediate",
+            "time_window_secs": 60,
             "max_event_history": 1000
         }"#;
         let config: OrgPowConfig = serde_json::from_str(json_with_negative).unwrap();
         assert_eq!(config.max_multiplier, 1000.0);
+        assert_eq!(config.time_window_secs, 60);
 
         // Test that missing max_multiplier uses default
         let json_without_field = r#"{
-            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 3, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
+            "upgrade_strategy": {"ConsecutiveFailure": {"trigger_threshold": 1, "escalate_every": 1, "growth": {"Linear": {"step": 1.0}}}},
             "initial_multiplier": 3.0,
             "recovery_success_count": 10,
             "recovery_strategy": "Immediate",
@@ -348,6 +361,7 @@ mod tests {
         }"#;
         let config: OrgPowConfig = serde_json::from_str(json_without_field).unwrap();
         assert_eq!(config.max_multiplier, 1000.0);
+        assert_eq!(config.time_window_secs, 60);
     }
 
     #[test]
