@@ -376,4 +376,100 @@ mod tests {
         let deserialized: OrgPowState = serde_json::from_str(&json).unwrap();
         assert_eq!(state, deserialized);
     }
+
+    /// Verify K=1 trigger semantics with default config: the very first signature
+    /// verification failure must activate PoW immediately, increment the difficulty
+    /// version, and set the initial multiplier.
+    #[test]
+    fn test_pow_k1_trigger_semantics() {
+        let config = OrgPowConfig::default();
+        let mut state = OrgPowState::new();
+
+        // Precondition: no PoW required before any failure
+        assert!(!state.should_require_pow());
+        assert_eq!(state.get_difficulty_version(), 0);
+        assert_eq!(state.get_current_multiplier(), 1.0);
+
+        // K=1: first failure must activate PoW
+        state.on_verification_failure(&config);
+        assert!(
+            state.should_require_pow(),
+            "K=1 trigger: first failure should activate PoW"
+        );
+        assert!(
+            state.get_difficulty_version() > 0,
+            "difficulty version must increment on trigger"
+        );
+        assert_eq!(
+            state.get_current_multiplier(),
+            config.initial_multiplier,
+            "multiplier must equal initial_multiplier on first trigger"
+        );
+    }
+
+    /// Test recovery using default config (Gradual recovery, recovery_success_count=10).
+    ///
+    /// With the default `RecoveryStrategy::Gradual { steps: 1 }` and `initial_multiplier: 3.0`,
+    /// after trigger the multiplier is 3.0. Each recovery streak of 10 successes decrements
+    /// the multiplier by 1.0 until it reaches 1.0 (PoW disabled).
+    #[test]
+    fn test_pow_recovery_default_config() {
+        let config = OrgPowConfig::default();
+        let mut state = OrgPowState::new();
+
+        // Trigger PoW
+        state.on_verification_failure(&config);
+        assert!(state.should_require_pow());
+        assert_eq!(state.get_current_multiplier(), 3.0);
+
+        // First recovery streak: 3.0 -> 2.0 (still active)
+        for _ in 0..config.recovery_success_count {
+            state.on_verification_success(&config);
+        }
+        assert!(
+            state.should_require_pow(),
+            "should still require PoW at multiplier 2.0"
+        );
+        assert_eq!(state.get_current_multiplier(), 2.0);
+
+        // Second recovery streak: 2.0 -> 1.0 (PoW disabled)
+        for _ in 0..config.recovery_success_count {
+            state.on_verification_success(&config);
+        }
+        assert!(
+            !state.should_require_pow(),
+            "should recover after multiplier reaches 1.0"
+        );
+        assert_eq!(state.get_current_multiplier(), 1.0);
+    }
+
+    /// Test difficulty escalation across consecutive failures (K=1 default config).
+    ///
+    /// With the default `ConsecutiveFailure { trigger_threshold: 1, escalate_every: 1,
+    /// growth: Linear { step: 1.0 } }`, each subsequent failure should escalate the
+    /// difficulty version and multiplier.
+    #[test]
+    fn test_pow_difficulty_escalation_default() {
+        let config = OrgPowConfig::default();
+        let mut state = OrgPowState::new();
+
+        // First failure triggers
+        state.on_verification_failure(&config);
+        let v1 = state.get_difficulty_version();
+        assert_eq!(v1, 1);
+
+        // Second failure should escalate
+        state.on_verification_failure(&config);
+        let v2 = state.get_difficulty_version();
+
+        assert!(
+            v2 > v1,
+            "second failure should escalate difficulty: v1={v1}, v2={v2}"
+        );
+        assert_eq!(
+            state.get_current_multiplier(),
+            config.initial_multiplier + 1.0,
+            "linear escalation should add step to multiplier"
+        );
+    }
 }
