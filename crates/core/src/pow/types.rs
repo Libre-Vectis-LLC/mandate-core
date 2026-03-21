@@ -28,6 +28,10 @@ pub struct PowIssuedParams {
     pub required_proofs: usize,
     /// Time window in seconds for the POW to be valid.
     pub time_window_secs: u64,
+    /// Organization identifier bound into the deterministic nonce derivation.
+    pub organization_id: String,
+    /// Monotonic version for the current POW difficulty state.
+    pub difficulty_version: u64,
     /// Server-derived deterministic nonce bound to the issued timestamp.
     pub deterministic_nonce: [u8; 32],
     /// Server timestamp used for deterministic nonce derivation.
@@ -69,11 +73,19 @@ impl PowParams {
 
 impl PowIssuedParams {
     /// Combines base POW parameters with the verifier-issued nonce and timestamp.
-    pub fn from_params(params: &PowParams, deterministic_nonce: [u8; 32], timestamp: u64) -> Self {
+    pub fn from_params(
+        params: &PowParams,
+        organization_id: &str,
+        difficulty_version: u64,
+        deterministic_nonce: [u8; 32],
+        timestamp: u64,
+    ) -> Self {
         Self {
             bits: params.bits,
             required_proofs: params.required_proofs,
             time_window_secs: params.time_window_secs,
+            organization_id: organization_id.to_string(),
+            difficulty_version,
             deterministic_nonce,
             timestamp,
         }
@@ -143,10 +155,13 @@ mod tests {
     #[test]
     fn test_pow_issued_params_creation() {
         let params = PowParams::new(7, 3, 60);
-        let issued = PowIssuedParams::from_params(&params, [9u8; 32], 1_234_567_890);
+        let issued =
+            PowIssuedParams::from_params(&params, "org-alpha", 42, [9u8; 32], 1_234_567_890);
         assert_eq!(issued.bits, 7);
         assert_eq!(issued.required_proofs, 3);
         assert_eq!(issued.time_window_secs, 60);
+        assert_eq!(issued.organization_id, "org-alpha");
+        assert_eq!(issued.difficulty_version, 42);
         assert_eq!(issued.deterministic_nonce, [9u8; 32]);
         assert_eq!(issued.timestamp, 1_234_567_890);
         assert_eq!(issued.base_params(), params);

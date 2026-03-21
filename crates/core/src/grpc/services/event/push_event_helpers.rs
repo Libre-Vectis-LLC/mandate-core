@@ -52,6 +52,35 @@ impl EventServiceImpl {
 
     // ── Proof-of-Work helpers ───────────────────────────────────────────
 
+    pub(super) fn current_pow_params_and_version(
+        &self,
+        tenant: crate::ids::TenantId,
+        org_id: crate::ids::OrganizationId,
+    ) -> (crate::pow::PowParams, u64) {
+        let pow_key = (tenant, org_id);
+        let org_config = self.resolve_pow_config(&pow_key);
+        let (multiplier, difficulty_version) = self
+            .pow_states
+            .get(&pow_key)
+            .map(|state| {
+                (
+                    state.get_current_multiplier(),
+                    state.get_difficulty_version(),
+                )
+            })
+            .unwrap_or((3.0, 0));
+
+        (
+            self.pow_calculator.calculate_pow_params(
+                16,
+                1024,
+                multiplier,
+                org_config.time_window_secs,
+            ),
+            difficulty_version,
+        )
+    }
+
     /// Build a `ResourceExhausted` status with POW challenge parameters encoded in details.
     ///
     /// The challenge is serialized as a protobuf `PowChallenge` message in the status details,
@@ -63,28 +92,18 @@ impl EventServiceImpl {
     ) -> Status {
         use prost::Message;
 
-        let pow_key = (tenant, org_id);
-        let multiplier = self
-            .pow_states
-            .get(&pow_key)
-            .map(|s| s.get_current_multiplier())
-            .unwrap_or(3.0);
-
-        // Calculate POW parameters based on a conservative ring size estimate.
-        // The actual ring size is unknown at this point (we haven't loaded it yet),
-        // so we use a reasonable upper bound that produces adequate difficulty.
-        let params = self.pow_calculator.calculate_pow_params(
-            16,   // conservative ring size estimate
-            1024, // conservative message size estimate
-            multiplier,
-        );
-
-        let issued = match self.pow_verifier.issue_params(&params) {
-            Ok(issued) => issued,
-            Err(err) => {
-                return Status::internal(format!("failed to issue POW challenge: {err}"));
-            }
-        };
+        let org_id_string = org_id.to_string();
+        let (params, difficulty_version) = self.current_pow_params_and_version(tenant, org_id);
+        let issued =
+            match self
+                .pow_verifier
+                .issue_params(&params, &org_id_string, difficulty_version)
+            {
+                Ok(issued) => issued,
+                Err(err) => {
+                    return Status::internal(format!("failed to issue POW challenge: {err}"));
+                }
+            };
 
         let pow_challenge = PowChallenge {
             bits: params.bits,
@@ -93,6 +112,7 @@ impl EventServiceImpl {
             challenge: issued.deterministic_nonce.to_vec(),
             deterministic_nonce: issued.deterministic_nonce.to_vec(),
             timestamp: issued.timestamp,
+            difficulty_version: issued.difficulty_version,
         };
 
         // Encode PowChallenge into status details so clients can parse it.
@@ -127,9 +147,16 @@ impl EventServiceImpl {
                 ),
             })?;
 
-        let expected_deterministic_nonce = self
-            .pow_verifier
-            .deterministic_nonce_for_timestamp(submission_timestamp);
+        let org_id_string = org_id.to_string();
+        let (params, difficulty_version) = self.current_pow_params_and_version(tenant, org_id);
+        if proto_sub.difficulty_version != 0 && proto_sub.difficulty_version != difficulty_version {
+            return Err(self.make_pow_challenge_status(tenant, org_id));
+        }
+        let expected_deterministic_nonce = self.pow_verifier.deterministic_nonce_for_timestamp(
+            submission_timestamp,
+            &org_id_string,
+            difficulty_version,
+        );
         if !proto_sub.challenge.is_empty()
             && proto_sub.challenge.as_slice() != expected_deterministic_nonce
         {
@@ -151,34 +178,46 @@ impl EventServiceImpl {
             proto_sub.proof_bundle.clone(),
         );
 
-        // Get current POW parameters for verification
-        let pow_key = (tenant, org_id);
-        let multiplier = self
-            .pow_states
-            .get(&pow_key)
-            .map(|s| s.get_current_multiplier())
-            .unwrap_or(3.0);
-
-        let params = self
-            .pow_calculator
-            .calculate_pow_params(16, 1024, multiplier);
-
         match self
             .pow_verifier
-            .verify_submission(&submission, &params)
+            .verify_submission(&submission, &params, &org_id_string, difficulty_version)
             .await
         {
-            Ok(result) if result.valid => Ok(()),
-            Ok(_) => Err(RpcError::ResourceExhausted {
-                resource: "pow_verification",
-                limit: "proof verification failed".into(),
+            Ok(result) if result.valid => {
+                tracing::info!(
+                    tenant_id = %tenant.0,
+                    organization_id = %org_id,
+                    proof_count = params.required_proofs,
+                    "pow_verified"
+                );
+                Ok(())
             }
-            .into()),
-            Err(e) => Err(RpcError::ResourceExhausted {
-                resource: "pow_verification",
-                limit: e.to_string(),
+            Ok(_) => {
+                tracing::warn!(
+                    tenant_id = %tenant.0,
+                    organization_id = %org_id,
+                    reason = "proof verification failed",
+                    "pow_rejected"
+                );
+                Err(RpcError::ResourceExhausted {
+                    resource: "pow_verification",
+                    limit: "proof verification failed".into(),
+                }
+                .into())
             }
-            .into()),
+            Err(e) => {
+                tracing::warn!(
+                    tenant_id = %tenant.0,
+                    organization_id = %org_id,
+                    reason = %e,
+                    "pow_rejected"
+                );
+                Err(RpcError::ResourceExhausted {
+                    resource: "pow_verification",
+                    limit: e.to_string(),
+                }
+                .into())
+            }
         }
     }
 

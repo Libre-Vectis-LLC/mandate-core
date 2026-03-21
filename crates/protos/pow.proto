@@ -41,6 +41,10 @@ message PowParams {
   // Timestamp when challenge was issued (Unix seconds).
   // Client must submit proofs within (timestamp + time_window_secs).
   uint64 timestamp = 5;
+
+  // Monotonic version of the organization-scoped POW difficulty state.
+  // Clients should echo this back in PowSubmission when retrying.
+  uint64 difficulty_version = 6;
 }
 
 // POW submission from client with computed proofs.
@@ -60,6 +64,10 @@ message PowSubmission {
   // Format is opaque to protobuf; interpreted by POW verifier.
   // Typically contains required_proofs nonces that satisfy difficulty.
   bytes proof_bundle = 3;
+
+  // Monotonic version of the organization-scoped POW difficulty state.
+  // New clients echo this back for fast mismatch rejection; older clients omit it.
+  uint64 difficulty_version = 4;
 }
 
 // POW verification result returned by server.

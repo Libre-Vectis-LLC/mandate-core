@@ -14,7 +14,7 @@ impl OrgPowState {
 
     /// Handles a verification failure event.
     ///
-    /// If failures exceed threshold (based on upgrade strategy), triggers POW or escalates difficulty.
+    /// If failures meet the configured threshold, triggers POW or escalates difficulty.
     ///
     /// # Parameters
     ///
@@ -28,21 +28,16 @@ impl OrgPowState {
     /// let mut state = OrgPowState::new();
     /// let config = OrgPowConfig::default();
     ///
-    /// // First failure
-    /// state.on_verification_failure(&config);
-    /// assert!(!state.pow_required);
-    /// assert_eq!(state.consecutive_failures, 1);
-    ///
-    /// // Second failure
-    /// state.on_verification_failure(&config);
-    /// assert!(!state.pow_required);
-    ///
-    /// // Third failure triggers POW (default threshold=3)
+    /// // First failure triggers POW with the default config
     /// state.on_verification_failure(&config);
     /// assert!(state.pow_required);
+    /// assert_eq!(state.consecutive_failures, 1);
     /// assert_eq!(state.current_multiplier, 3.0);
     /// ```
     pub fn on_verification_failure(&mut self, config: &OrgPowConfig) {
+        let previous_pow_required = self.pow_required;
+        let previous_multiplier = self.current_multiplier;
+
         // Reset success counter
         self.consecutive_successes = 0;
 
@@ -63,6 +58,8 @@ impl OrgPowState {
             // Already in POW mode - escalate
             self.escalate(config);
         }
+
+        self.bump_difficulty_version_if_changed(previous_pow_required, previous_multiplier);
     }
 
     /// Handles a verification success event.
@@ -76,16 +73,15 @@ impl OrgPowState {
     /// # Examples
     ///
     /// ```
-    /// use mandate_core::billing::{OrgPowState, OrgPowConfig};
+    /// use mandate_core::billing::{OrgPowState, OrgPowConfig, RecoveryStrategy};
     ///
     /// let mut state = OrgPowState::new();
     /// let mut config = OrgPowConfig::default();
     /// config.recovery_success_count = 2;
+    /// config.recovery_strategy = RecoveryStrategy::Immediate;
     ///
     /// // Trigger POW
-    /// for _ in 0..3 {
-    ///     state.on_verification_failure(&config);
-    /// }
+    /// state.on_verification_failure(&config);
     /// assert!(state.pow_required);
     ///
     /// // First success
@@ -97,6 +93,9 @@ impl OrgPowState {
     /// assert!(!state.pow_required); // Immediate recovery
     /// ```
     pub fn on_verification_success(&mut self, config: &OrgPowConfig) {
+        let previous_pow_required = self.pow_required;
+        let previous_multiplier = self.current_multiplier;
+
         // Reset failure counter
         self.consecutive_failures = 0;
 
@@ -112,6 +111,8 @@ impl OrgPowState {
                 self.recover(config);
             }
         }
+
+        self.bump_difficulty_version_if_changed(previous_pow_required, previous_multiplier);
     }
 
     /// Returns whether POW is currently required.
@@ -124,6 +125,11 @@ impl OrgPowState {
         self.current_multiplier
     }
 
+    /// Returns the current challenge binding version.
+    pub fn get_difficulty_version(&self) -> u64 {
+        self.difficulty_version
+    }
+
     /// Records a verification event in history (for time-window strategies).
     fn record_event(&mut self, success: bool, config: &OrgPowConfig) {
         let event = VerificationEvent::now(success);
@@ -132,6 +138,18 @@ impl OrgPowState {
         // Prune old events exceeding max history
         while self.event_history.len() > config.max_event_history {
             self.event_history.pop_front();
+        }
+    }
+
+    fn bump_difficulty_version_if_changed(
+        &mut self,
+        previous_pow_required: bool,
+        previous_multiplier: f64,
+    ) {
+        if self.pow_required != previous_pow_required
+            || self.current_multiplier != previous_multiplier
+        {
+            self.difficulty_version = self.difficulty_version.wrapping_add(1);
         }
     }
 
@@ -230,21 +248,11 @@ impl OrgPowState {
                 self.consecutive_successes = 0;
             }
             RecoveryStrategy::Gradual { steps: _ } => {
-                // Gradually reduce multiplier by reversing one escalation step
-                // This makes recovery symmetric with escalation
-                let growth = config.upgrade_strategy.growth();
-                let reduction = match growth {
-                    EscalationStrategy::Linear { step } => *step,
-                    EscalationStrategy::Exponential { base } => {
-                        // For exponential, divide by base (inverse of multiplication)
-                        self.current_multiplier - (self.current_multiplier / base)
-                    }
-                };
+                // Recovery hysteresis lowers the effective difficulty one level per
+                // success streak instead of resetting directly to the initial level.
+                self.current_multiplier = (self.current_multiplier - 1.0).max(1.0);
 
-                self.current_multiplier -= reduction;
-
-                // If we've reduced to or below initial multiplier, disable POW
-                if self.current_multiplier <= config.initial_multiplier {
+                if self.current_multiplier <= 1.0 {
                     self.pow_required = false;
                     self.current_multiplier = 1.0;
                 }

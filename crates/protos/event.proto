@@ -193,6 +193,10 @@ message PowSubmission {
   // Used for replay protection - each submission must have a unique nonce.
   // Server uses this to detect and reject duplicate submissions.
   bytes client_nonce = 4;
+
+  // Monotonic version of the organization-scoped POW difficulty state.
+  // New clients echo this back for fast mismatch rejection; older clients omit it.
+  uint64 difficulty_version = 5;
 }
 
 // POW challenge parameters returned in error response when POW is required.
@@ -220,6 +224,10 @@ message PowChallenge {
 
   // Server timestamp used to derive the deterministic nonce.
   uint64 timestamp = 6;
+
+  // Monotonic version of the organization-scoped POW difficulty state.
+  // Clients should echo this back in PowSubmission when retrying.
+  uint64 difficulty_version = 7;
 }
 
 // Request to get aggregated poll results.

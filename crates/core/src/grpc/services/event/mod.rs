@@ -9,6 +9,9 @@ mod validation;
 
 pub use service::EventServiceImpl;
 
+#[cfg(test)]
+mod pow_parking_tests;
+
 use mandate_proto::mandate::v1::event_service_server::EventService;
 use tonic::{Request, Response, Status};
 

@@ -22,6 +22,8 @@ pub struct SignatureItem {
     pub weight: u64,
     /// External ring required for compact signatures.
     pub external_ring: Option<Arc<Ring>>,
+    /// Organization identifier forwarded to org-aware verifiers for routing.
+    pub organization_id: String,
 }
 
 use crate::crypto::signature::SigVerificationError;
@@ -97,6 +99,7 @@ mod tests {
             message: msg.to_vec(),
             weight: 1,
             external_ring: None,
+            organization_id: String::new(),
         }];
         let out = verifier.verify_batch(&items).await.expect("verify");
         assert_eq!(out, vec![true]);
@@ -123,6 +126,7 @@ mod tests {
             message: msg.to_vec(),
             weight: 1,
             external_ring: None,
+            organization_id: String::new(),
         }];
         let err = verifier
             .verify_batch(&items)
@@ -136,6 +140,7 @@ mod tests {
             message: msg.to_vec(),
             weight: 1,
             external_ring: Some(ring.clone()),
+            organization_id: String::new(),
         }];
         let out = verifier.verify_batch(&items).await.expect("verify");
         assert_eq!(out, vec![true]);
