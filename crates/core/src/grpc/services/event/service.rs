@@ -25,7 +25,7 @@ type PowStateKey = (TenantId, OrganizationId);
 
 /// Max number of orgs tracked in pow_states DashMap.
 /// Prevents unbounded memory growth from many distinct org attacks.
-const MAX_POW_STATE_ENTRIES: usize = 10_000;
+pub(super) const MAX_POW_STATE_ENTRIES: usize = 10_000;
 
 /// Max number of orgs tracked in pow_parking DashMap.
 const MAX_POW_PARKING_ENTRIES: usize = 10_000;
@@ -89,8 +89,12 @@ pub struct EventServiceImpl {
     /// POW verifier for replay detection and proof validation.
     pub(super) pow_verifier: Arc<PowVerifier>,
 
-    /// POW configuration (shared across all orgs; per-org config is a future enhancement).
+    /// Default POW configuration used when no per-org override exists.
     pub(super) pow_config: OrgPowConfig,
+
+    /// Per-(tenant, org) POW configuration overrides.
+    /// When present, these take precedence over `pow_config`.
+    pub(super) pow_configs: Arc<DashMap<PowStateKey, OrgPowConfig>>,
 
     /// POW difficulty calculator for generating challenge parameters.
     pub(super) pow_calculator: Arc<PowDifficultyCalculator>,
@@ -122,6 +126,7 @@ impl EventServiceImpl {
             pow_states: Arc::new(DashMap::new()),
             pow_verifier: Arc::new(PowVerifier::new(100_000, 300)),
             pow_config: OrgPowConfig::default(),
+            pow_configs: Arc::new(DashMap::new()),
             pow_calculator: Arc::new(Self::default_pow_calculator()),
             vote_signing_ring_cache: Arc::new(Self::default_vote_signing_ring_cache()),
             pow_parking: Arc::new(DashMap::new()),
@@ -145,6 +150,7 @@ impl EventServiceImpl {
             pow_states: Arc::new(DashMap::new()),
             pow_verifier: Arc::new(PowVerifier::new(100_000, 300)),
             pow_config: OrgPowConfig::default(),
+            pow_configs: Arc::new(DashMap::new()),
             pow_calculator: Arc::new(Self::default_pow_calculator()),
             vote_signing_ring_cache: Arc::new(Self::default_vote_signing_ring_cache()),
             pow_parking: Arc::new(DashMap::new()),
@@ -178,6 +184,25 @@ impl EventServiceImpl {
         self.pow_parking_limit = limit;
         self.pow_parking_ttl = ttl;
         self
+    }
+
+    /// Resolve POW config for a specific (tenant, org) pair.
+    /// Returns per-org override if set, otherwise falls back to the global default.
+    pub(super) fn resolve_pow_config(&self, key: &PowStateKey) -> OrgPowConfig {
+        self.pow_configs
+            .get(key)
+            .map(|r| r.value().clone())
+            .unwrap_or_else(|| self.pow_config.clone())
+    }
+
+    /// Set per-org POW configuration override.
+    pub fn set_org_pow_config(&self, tenant: TenantId, org: OrganizationId, config: OrgPowConfig) {
+        self.pow_configs.insert((tenant, org), config);
+    }
+
+    /// Remove per-org POW configuration override (revert to global default).
+    pub fn remove_org_pow_config(&self, tenant: &TenantId, org: &OrganizationId) {
+        self.pow_configs.remove(&(*tenant, *org));
     }
 
     /// Default POW difficulty calculator using benchmark-derived coefficients.

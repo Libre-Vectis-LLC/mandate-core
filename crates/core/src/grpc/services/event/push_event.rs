@@ -484,6 +484,13 @@ impl EventServiceImpl {
                                 ps.parked.load(std::sync::atomic::Ordering::SeqCst);
                             if current_parked >= self.pow_parking_limit {
                                 // Parking full — reject immediately with current challenge.
+                                tracing::warn!(
+                                    tenant_id = %tenant.0,
+                                    organization_id = %event.org_id,
+                                    parked_count = current_parked,
+                                    limit = self.pow_parking_limit,
+                                    "pow_parking_full"
+                                );
                                 return Err(self.make_pow_challenge_status(tenant, event.org_id));
                             }
 
@@ -698,10 +705,43 @@ impl EventServiceImpl {
             let should_challenge =
                 if self.pow_states_at_capacity() && !self.pow_states.contains_key(&pow_key) {
                     // DashMap at capacity — skip PoW tracking for this new org (graceful degradation).
+                    tracing::error!(
+                        current_count = self.pow_states.len(),
+                        max_count = super::service::MAX_POW_STATE_ENTRIES,
+                        "pow_states_capacity_warning"
+                    );
                     false
                 } else {
                     let mut state = self.pow_states.entry(pow_key).or_default();
-                    state.on_verification_failure(&self.pow_config);
+                    let was_pow_required = state.pow_required;
+                    let old_version = state.difficulty_version;
+                    let org_config = self.resolve_pow_config(&pow_key);
+                    state.on_verification_failure(&org_config);
+                    let new_version = state.difficulty_version;
+
+                    if state.pow_required && !was_pow_required {
+                        // First time PoW is triggered for this org
+                        let (params, _) = self.current_pow_params_and_version(tenant, event.org_id);
+                        tracing::info!(
+                            tenant_id = %tenant.0,
+                            organization_id = %event.org_id,
+                            difficulty_version = new_version,
+                            required_proofs = params.required_proofs,
+                            "pow_triggered"
+                        );
+                    } else if state.pow_required && was_pow_required && new_version != old_version {
+                        // Difficulty escalated
+                        let (params, _) = self.current_pow_params_and_version(tenant, event.org_id);
+                        tracing::info!(
+                            tenant_id = %tenant.0,
+                            organization_id = %event.org_id,
+                            old_version = old_version,
+                            new_version = new_version,
+                            new_required_proofs = params.required_proofs,
+                            "pow_difficulty_escalated"
+                        );
+                    }
+
                     state.should_require_pow()
                 };
 
@@ -721,7 +761,16 @@ impl EventServiceImpl {
         // Signature verified successfully — record success, potentially recover from POW mode.
         {
             if let Some(mut state) = self.pow_states.get_mut(&pow_key) {
-                state.on_verification_success(&self.pow_config);
+                let was_pow_required = state.pow_required;
+                let org_config = self.resolve_pow_config(&pow_key);
+                state.on_verification_success(&org_config);
+                if was_pow_required && !state.pow_required {
+                    tracing::info!(
+                        tenant_id = %tenant.0,
+                        organization_id = %event.org_id,
+                        "pow_recovered"
+                    );
+                }
             }
         }
 

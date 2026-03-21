@@ -58,6 +58,7 @@ impl EventServiceImpl {
         org_id: crate::ids::OrganizationId,
     ) -> (crate::pow::PowParams, u64) {
         let pow_key = (tenant, org_id);
+        let org_config = self.resolve_pow_config(&pow_key);
         let (multiplier, difficulty_version) = self
             .pow_states
             .get(&pow_key)
@@ -74,7 +75,7 @@ impl EventServiceImpl {
                 16,
                 1024,
                 multiplier,
-                self.pow_config.time_window_secs,
+                org_config.time_window_secs,
             ),
             difficulty_version,
         )
@@ -182,17 +183,41 @@ impl EventServiceImpl {
             .verify_submission(&submission, &params, &org_id_string, difficulty_version)
             .await
         {
-            Ok(result) if result.valid => Ok(()),
-            Ok(_) => Err(RpcError::ResourceExhausted {
-                resource: "pow_verification",
-                limit: "proof verification failed".into(),
+            Ok(result) if result.valid => {
+                tracing::info!(
+                    tenant_id = %tenant.0,
+                    organization_id = %org_id,
+                    proof_count = params.required_proofs,
+                    "pow_verified"
+                );
+                Ok(())
             }
-            .into()),
-            Err(e) => Err(RpcError::ResourceExhausted {
-                resource: "pow_verification",
-                limit: e.to_string(),
+            Ok(_) => {
+                tracing::warn!(
+                    tenant_id = %tenant.0,
+                    organization_id = %org_id,
+                    reason = "proof verification failed",
+                    "pow_rejected"
+                );
+                Err(RpcError::ResourceExhausted {
+                    resource: "pow_verification",
+                    limit: "proof verification failed".into(),
+                }
+                .into())
             }
-            .into()),
+            Err(e) => {
+                tracing::warn!(
+                    tenant_id = %tenant.0,
+                    organization_id = %org_id,
+                    reason = %e,
+                    "pow_rejected"
+                );
+                Err(RpcError::ResourceExhausted {
+                    resource: "pow_verification",
+                    limit: e.to_string(),
+                }
+                .into())
+            }
         }
     }
 
