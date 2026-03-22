@@ -84,6 +84,22 @@ pub enum EventType {
 }
 
 impl EventType {
+    /// Returns a human-readable label for the event type variant.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EventType::PollCreate(_) => "PollCreate",
+            EventType::VoteCast(_) => "VoteCast",
+            EventType::VoteRevocation(_) => "VoteRevocation",
+            EventType::MessageCreate(_) => "MessageCreate",
+            EventType::RingUpdate(_) => "RingUpdate",
+            EventType::BanCreate(_) => "BanCreate",
+            EventType::BanRevoke(_) => "BanRevoke",
+            EventType::ProofOfInnocence(_) => "ProofOfInnocence",
+            EventType::PollBundlePublished(_) => "PollBundlePublished",
+            EventType::Unknown => "Unknown",
+        }
+    }
+
     /// Returns the ring hash associated with this event type, if stored in the event body.
     ///
     /// For most event types, this is the `ring_hash` field.

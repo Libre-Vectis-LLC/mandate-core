@@ -115,6 +115,35 @@ impl OrgPowState {
         self.bump_difficulty_version_if_changed(previous_pow_required, previous_multiplier);
     }
 
+    /// Full reset: clears POW requirement, counters, AND event history.
+    ///
+    /// Unlike `Default::default()`, this preserves and increments
+    /// `difficulty_version` to prevent nonce replay across reset boundaries.
+    ///
+    /// # What is cleared
+    /// - `pow_required` → false
+    /// - `current_multiplier` → 1.0
+    /// - `consecutive_failures` → 0
+    /// - `consecutive_successes` → 0
+    /// - `event_history` → empty
+    ///
+    /// # What is preserved
+    /// - `difficulty_version` (incremented to invalidate outstanding challenges)
+    ///
+    /// # What is NOT affected (external to this struct)
+    /// - POW config (`OrgPowConfig`)
+    /// - Nonce replay records
+    pub fn full_reset(&mut self) {
+        self.pow_required = false;
+        self.current_multiplier = 1.0;
+        self.consecutive_failures = 0;
+        self.consecutive_successes = 0;
+        self.event_history.clear();
+        // Increment difficulty_version so previously issued challenges are
+        // invalidated, but never decrease the global baseline.
+        self.difficulty_version = self.difficulty_version.wrapping_add(1);
+    }
+
     /// Returns whether POW is currently required.
     pub fn should_require_pow(&self) -> bool {
         self.pow_required

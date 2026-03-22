@@ -485,8 +485,11 @@ impl EventServiceImpl {
                             if current_parked >= self.pow_parking_limit {
                                 // Parking full — reject immediately with current challenge.
                                 tracing::warn!(
+                                    target: "pow_events",
                                     tenant_id = %tenant.0,
-                                    organization_id = %event.org_id,
+                                    org_id = %event.org_id,
+                                    difficulty_version = self.pow_states.get(&pow_key).map(|s| s.get_difficulty_version()).unwrap_or(0),
+                                    event_type = event.event_type.as_str(),
                                     parked_count = current_parked,
                                     limit = self.pow_parking_limit,
                                     "pow_parking_full"
@@ -515,16 +518,26 @@ impl EventServiceImpl {
                             if !still_required {
                                 // Recovery happened — skip PoW verification entirely.
                             } else {
-                                self.verify_pow_submission(tenant, event.org_id, proto_sub)
-                                    .await?;
+                                self.verify_pow_submission(
+                                    tenant,
+                                    event.org_id,
+                                    proto_sub,
+                                    event.event_type.as_str(),
+                                )
+                                .await?;
                                 let (params, _) =
                                     self.current_pow_params_and_version(tenant, event.org_id);
                                 pow_proof_count = Some(params.required_proofs);
                             }
                         } else {
                             // No in-flight sig verification or parking unavailable — verify PoW immediately.
-                            self.verify_pow_submission(tenant, event.org_id, proto_sub)
-                                .await?;
+                            self.verify_pow_submission(
+                                tenant,
+                                event.org_id,
+                                proto_sub,
+                                event.event_type.as_str(),
+                            )
+                            .await?;
                             let (params, _) =
                                 self.current_pow_params_and_version(tenant, event.org_id);
                             pow_proof_count = Some(params.required_proofs);
@@ -706,6 +719,10 @@ impl EventServiceImpl {
                 if self.pow_states_at_capacity() && !self.pow_states.contains_key(&pow_key) {
                     // DashMap at capacity — skip PoW tracking for this new org (graceful degradation).
                     tracing::error!(
+                        target: "pow_events",
+                        org_id = %event.org_id,
+                        difficulty_version = 0_u64,
+                        event_type = event.event_type.as_str(),
                         current_count = self.pow_states.len(),
                         max_count = super::service::MAX_POW_STATE_ENTRIES,
                         "pow_states_capacity_warning"
@@ -723,21 +740,26 @@ impl EventServiceImpl {
                         // First time PoW is triggered for this org
                         let (params, _) = self.current_pow_params_and_version(tenant, event.org_id);
                         tracing::info!(
-                            tenant_id = %tenant.0,
-                            organization_id = %event.org_id,
+                            target: "pow_events",
+                            org_id = %event.org_id,
                             difficulty_version = new_version,
                             required_proofs = params.required_proofs,
+                            multiplier = state.get_current_multiplier(),
+                            event_type = event.event_type.as_str(),
                             "pow_triggered"
                         );
                     } else if state.pow_required && was_pow_required && new_version != old_version {
                         // Difficulty escalated
                         let (params, _) = self.current_pow_params_and_version(tenant, event.org_id);
                         tracing::info!(
-                            tenant_id = %tenant.0,
-                            organization_id = %event.org_id,
+                            target: "pow_events",
+                            org_id = %event.org_id,
                             old_version = old_version,
                             new_version = new_version,
-                            new_required_proofs = params.required_proofs,
+                            difficulty_version = new_version,
+                            required_proofs = params.required_proofs,
+                            multiplier = state.get_current_multiplier(),
+                            event_type = event.event_type.as_str(),
                             "pow_difficulty_escalated"
                         );
                     }
@@ -766,8 +788,10 @@ impl EventServiceImpl {
                 state.on_verification_success(&org_config);
                 if was_pow_required && !state.pow_required {
                     tracing::info!(
-                        tenant_id = %tenant.0,
-                        organization_id = %event.org_id,
+                        target: "pow_events",
+                        org_id = %event.org_id,
+                        difficulty_version = state.get_difficulty_version(),
+                        event_type = event.event_type.as_str(),
                         "pow_recovered"
                     );
                 }

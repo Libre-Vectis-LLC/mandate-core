@@ -137,6 +137,7 @@ impl EventServiceImpl {
         tenant: crate::ids::TenantId,
         org_id: crate::ids::OrganizationId,
         proto_sub: &mandate_proto::mandate::v1::PowSubmission,
+        event_type_label: &str,
     ) -> Result<(), Status> {
         let submission_timestamp =
             u64::try_from(proto_sub.timestamp).map_err(|_| RpcError::InvalidArgument {
@@ -185,17 +186,22 @@ impl EventServiceImpl {
         {
             Ok(result) if result.valid => {
                 tracing::info!(
-                    tenant_id = %tenant.0,
-                    organization_id = %org_id,
-                    proof_count = params.required_proofs,
+                    target: "pow_events",
+                    org_id = %org_id,
+                    difficulty_version = difficulty_version,
+                    required_proofs = params.required_proofs,
+                    event_type = event_type_label,
                     "pow_verified"
                 );
                 Ok(())
             }
             Ok(_) => {
                 tracing::warn!(
-                    tenant_id = %tenant.0,
-                    organization_id = %org_id,
+                    target: "pow_events",
+                    org_id = %org_id,
+                    difficulty_version = difficulty_version,
+                    required_proofs = params.required_proofs,
+                    event_type = event_type_label,
                     reason = "proof verification failed",
                     "pow_rejected"
                 );
@@ -207,8 +213,11 @@ impl EventServiceImpl {
             }
             Err(e) => {
                 tracing::warn!(
-                    tenant_id = %tenant.0,
-                    organization_id = %org_id,
+                    target: "pow_events",
+                    org_id = %org_id,
+                    difficulty_version = difficulty_version,
+                    required_proofs = params.required_proofs,
+                    event_type = event_type_label,
                     reason = %e,
                     "pow_rejected"
                 );

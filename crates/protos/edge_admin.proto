@@ -7,6 +7,15 @@ package mandate.v1;
 // Requires `x-bot-secret` header matching the Edge's configured secret.
 // This service should be exposed only on internal interfaces.
 //
+// ## Known Limitations
+// The shared `x-bot-secret` authenticates the *caller* but does NOT
+// distinguish individual operators. All callers sharing the same secret
+// are treated identically. The `operator_label` field in reset requests
+// is audit-only (human-provided tag, not authenticated) — it can help
+// with post-incident investigation but cannot enforce accountability.
+// If per-operator attribution is required in the future, a per-operator
+// token or certificate scheme must be introduced.
+//
 // ## Use Cases
 // - Configuring POW recovery strategies per organization
 // - Monitoring POW state for organizations under attack
@@ -117,12 +126,23 @@ message GetPowStateResponse {
 
   // Total successes since POW was triggered.
   uint64 total_successes_since_trigger = 7;
+
+  // Monotonic version of the organization-scoped POW difficulty state.
+  // Incremented whenever the effective challenge difficulty changes.
+  uint64 difficulty_version = 8;
 }
 
 // Request to reset POW state for an organization.
 message ResetPowStateRequest {
   // Organization ID (ULID format) to reset.
   string org_id = 1;
+
+  // Human-readable reason for the reset (audit-only, not validated).
+  string reason = 2;
+
+  // Operator label for audit trail (audit-only, not authenticated).
+  // This is a human-provided tag, NOT a verified identity.
+  string operator_label = 3;
 }
 
 // Response after POW state reset.
@@ -130,6 +150,9 @@ message ResetPowStateResponse {
   // Whether the reset succeeded.
   bool success = 1;
 
-  // Previous state before reset (for audit logging).
+  // Snapshot of POW state before the reset (for audit trail).
   GetPowStateResponse previous_state = 2;
+
+  // Snapshot of POW state after the reset (for audit trail).
+  GetPowStateResponse new_state = 3;
 }
