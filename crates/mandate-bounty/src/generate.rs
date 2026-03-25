@@ -5,17 +5,17 @@
 //! - `poll-bundle.bin` — PollBundle protobuf with real BLSAG signatures
 //! - `results.json` — aggregate vote tally
 //! - `encrypted_secret.rage` — age-encrypted bounty secret placeholder
-//! - `RULES.md` — challenge rules with KDF params
-//! - `manifest.json` — SHA-256 hashes of all artifacts
+//! - `manifest.json` — hashes plus KDF / expected-age-key metadata
 
 mod artifacts;
 mod events;
-pub(crate) mod manifest;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::process::Command;
 
 use crate::config::BountyConfig;
+use crate::manifest;
 use crate::solution_bundle::SolutionBundle;
 
 /// Generate all public challenge artifacts into `output_dir`.
@@ -47,26 +47,40 @@ pub fn generate_artifacts(
     artifacts::generate_results_json(config, bundle, &results_path)?;
     eprintln!("  results.json");
 
-    // 4. Generate encrypted_secret.rage.
+    // 4. Derive the expected age recipient once and reuse it for encryption
+    // and manifest metadata.
+    let solution_identity = artifacts::derive_solution_identity(config, bundle)?;
+    let expected_age_pubkey = solution_identity.to_public().to_string();
+
+    // 5. Generate encrypted_secret.rage.
     let encrypted_path = output_dir.join("encrypted_secret.rage");
-    artifacts::generate_encrypted_secret(config, bundle, &encrypted_path, secret_plaintext)?;
+    artifacts::generate_encrypted_secret(
+        &solution_identity.to_public(),
+        &encrypted_path,
+        secret_plaintext,
+    )?;
     eprintln!("  encrypted_secret.rage");
 
-    // 5. Generate RULES.md.
-    let rules_path = output_dir.join("RULES.md");
-    artifacts::generate_rules_md(config, bundle, &rules_path)?;
-    eprintln!("  RULES.md");
-
-    // 6. Generate manifest.json (SHA-256 hashes of all other artifacts).
+    // 6. Generate manifest.json (hashes + KDF metadata + expected age key).
     let manifest_path = output_dir.join("manifest.json");
     let artifact_names = [
         "voters.xlsx",
         "poll-bundle.bin",
         "results.json",
         "encrypted_secret.rage",
-        "RULES.md",
     ];
-    manifest::generate_manifest(output_dir, &artifact_names, &manifest_path)?;
+    let git_commit = resolve_git_commit().unwrap_or_else(|err| {
+        eprintln!("  warning: failed to resolve git commit: {err}");
+        "UNKNOWN".to_owned()
+    });
+    let manifest_doc = manifest::build_manifest(
+        output_dir,
+        &artifact_names,
+        expected_age_pubkey,
+        git_commit,
+        &config.kdf,
+    )?;
+    manifest::write_manifest(&manifest_doc, &manifest_path)?;
     eprintln!("  manifest.json");
 
     // Summary
@@ -84,4 +98,26 @@ pub fn generate_artifacts(
     }
 
     Ok(())
+}
+
+fn resolve_git_commit() -> anyhow::Result<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| anyhow::anyhow!("git rev-parse failed: {e}"))?;
+
+    anyhow::ensure!(
+        output.status.success(),
+        "git rev-parse exited with {}",
+        output.status
+    );
+
+    let commit = String::from_utf8(output.stdout)
+        .map_err(|e| anyhow::anyhow!("git rev-parse output was not UTF-8: {e}"))?;
+    let commit = commit.trim().to_owned();
+    anyhow::ensure!(
+        !commit.is_empty(),
+        "git rev-parse returned an empty commit hash"
+    );
+    Ok(commit)
 }

@@ -38,7 +38,7 @@ pub fn generate_solution<R: Rng + CryptoRng>(
     let mut assignments: Vec<&str> = Vec::with_capacity(total);
     for opt in &config.poll.options {
         for _ in 0..opt.count {
-            assignments.push(&opt.id);
+            assignments.push(&opt.text_en);
         }
     }
     assignments.shuffle(rng);
@@ -149,9 +149,9 @@ challenge_days = 7
             *counts.entry(entry.option.as_str()).or_default() += 1;
         }
 
-        assert_eq!(counts.get("opt-a"), Some(&5));
-        assert_eq!(counts.get("opt-b"), Some(&3));
-        assert_eq!(counts.get("opt-c"), Some(&2));
+        assert_eq!(counts.get("Option A"), Some(&5));
+        assert_eq!(counts.get("Option B"), Some(&3));
+        assert_eq!(counts.get("Option C"), Some(&2));
     }
 
     #[test]

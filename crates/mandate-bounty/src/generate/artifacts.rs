@@ -1,4 +1,4 @@
-//! Non-cryptographic artifact generation (XLSX, results, rules, encrypted secret).
+//! Non-cryptographic artifact generation (XLSX, results, encrypted secret).
 
 use std::io::Write as _;
 use std::path::Path;
@@ -78,22 +78,26 @@ pub fn generate_results_json(
 // encrypted_secret.rage
 // ---------------------------------------------------------------------------
 
-/// Generate the age-encrypted bounty secret.
-///
-/// Derives the age public key from the canonical CSV via the KDF chain,
-/// then encrypts the secret with that key. If `custom_plaintext` is provided,
-/// it is used as-is; otherwise a default reverse-prompt is used.
-pub fn generate_encrypted_secret(
+/// Derive the challenge's expected age identity from the canonical solution CSV.
+pub fn derive_solution_identity(
     config: &BountyConfig,
     bundle: &SolutionBundle,
+) -> anyhow::Result<age::x25519::Identity> {
+    let csv_entries = bundle.to_csv_entries();
+    let csv_text = serialize_canonical_csv(&csv_entries);
+    derive_identity(csv_text.as_bytes(), &config.kdf)
+}
+
+/// Generate the age-encrypted bounty secret.
+///
+/// Encrypts `custom_plaintext` (or the default placeholder) to the supplied
+/// challenge recipient public key.
+pub fn generate_encrypted_secret(
+    recipient: &age::x25519::Recipient,
     output: &Path,
     custom_plaintext: Option<&[u8]>,
 ) -> anyhow::Result<()> {
-    // Derive the age identity from the canonical CSV.
-    let csv_entries = bundle.to_csv_entries();
-    let csv_text = serialize_canonical_csv(&csv_entries);
-    let identity = derive_identity(csv_text.as_bytes(), &config.kdf)?;
-    let recipient = identity.to_public();
+    let recipient = recipient.clone();
 
     let default_plaintext = b"BOUNTY_SECRET_PLACEHOLDER";
     let plaintext = custom_plaintext.unwrap_or(default_plaintext);
@@ -117,107 +121,6 @@ pub fn generate_encrypted_secret(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// RULES.md
-// ---------------------------------------------------------------------------
-
-/// Generate the RULES.md challenge description.
-pub fn generate_rules_md(
-    config: &BountyConfig,
-    bundle: &SolutionBundle,
-    output: &Path,
-) -> anyhow::Result<()> {
-    // Derive the public key for display in rules.
-    let csv_entries = bundle.to_csv_entries();
-    let csv_text = serialize_canonical_csv(&csv_entries);
-    let identity = derive_identity(csv_text.as_bytes(), &config.kdf)?;
-    let pubkey = identity.to_public().to_string();
-
-    let rules = format!(
-        r#"# Mandate Anonymous Voting Bounty Challenge
-
-## Objective
-
-De-anonymize the ring-signature-based anonymous poll by mapping each voter
-to their public key and vote choice.
-
-## Artifacts
-
-| File | Description |
-|------|-------------|
-| `voters.xlsx` | Voter name + public key registry |
-| `poll-bundle.bin` | PollBundle protobuf (PollCreate + VoteCast events with real BLSAG signatures) |
-| `results.json` | Aggregate vote tally |
-| `encrypted_secret.rage` | Age-encrypted bounty secret |
-| `manifest.json` | SHA-256 hashes of all artifacts |
-
-## Solution Format
-
-Submit a CSV file with one line per voter, sorted by public key (bs58 lexicographic):
-
-```
-<name>,<option_id>
-```
-
-- Names must be NFC-normalized Unicode.
-- No header row.
-- LF line endings, no trailing newline.
-
-## KDF Chain
-
-The correct solution CSV is transformed into an age identity via:
-
-1. `SHA3-512(csv_bytes)` -> 64 bytes
-2. `Argon2id(password=sha3_hash, salt="{salt}", m_cost={m_cost_mib}MiB, t_cost={t_cost}, p_cost={p_cost})` -> 32 bytes
-3. `age::x25519::Identity::from_secret_bytes(argon2_output)`
-
-### Parameters
-
-- **Salt**: `{salt}`
-- **Memory cost**: {m_cost_mib} MiB
-- **Time cost**: {t_cost} iterations
-- **Parallelism**: {p_cost} lanes
-
-### Expected Public Key
-
-```
-{pubkey}
-```
-
-If your derived public key matches the above, you can decrypt `encrypted_secret.rage`.
-
-## Bounty
-
-- **Total**: {total_usdc} USDC
-- **Instant reward**: {instant_usdc} USDC (first correct submission)
-- **Report reward**: {report_usdc} USDC (write-up describing the attack)
-- **Challenge period**: {challenge_days} days
-
-## Verification
-
-```bash
-mandate-bounty verify-solution \
-    --csv <your-solution.csv> \
-    --voters voters.xlsx \
-    --encrypted encrypted_secret.rage \
-    --config <bounty.toml>
-```
-"#,
-        salt = config.kdf.salt,
-        m_cost_mib = config.kdf.m_cost_mib,
-        t_cost = config.kdf.t_cost,
-        p_cost = config.kdf.p_cost,
-        pubkey = pubkey,
-        total_usdc = config.bounty.total_usdc,
-        instant_usdc = config.bounty.instant_usdc,
-        report_usdc = config.bounty.report_usdc,
-        challenge_days = config.bounty.challenge_days,
-    );
-
-    std::fs::write(output, rules.as_bytes())?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,12 +133,12 @@ mod tests {
                 SolutionEntry {
                     pubkey_bs58: "BBB".into(),
                     name: "Bob".into(),
-                    option: "opt-a".into(),
+                    option: "Option A".into(),
                 },
                 SolutionEntry {
                     pubkey_bs58: "AAA".into(),
                     name: "Alice".into(),
-                    option: "opt-b".into(),
+                    option: "Option B".into(),
                 },
             ],
             voter_private_keys: vec![
@@ -278,5 +181,19 @@ mod tests {
         assert_eq!(doc["poll_id"], config.poll.poll_ulid);
         assert!(doc["total_votes"].as_u64().is_some());
         assert!(doc["results"].is_object());
+    }
+
+    #[test]
+    fn test_derive_solution_identity_is_deterministic() {
+        let mut config = test_config();
+        config.kdf.m_cost_mib = 1;
+        config.kdf.t_cost = 1;
+        config.kdf.p_cost = 1;
+        let bundle = test_bundle();
+
+        let id1 = derive_solution_identity(&config, &bundle).expect("derive 1");
+        let id2 = derive_solution_identity(&config, &bundle).expect("derive 2");
+
+        assert_eq!(id1.to_public().to_string(), id2.to_public().to_string());
     }
 }

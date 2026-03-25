@@ -5,6 +5,7 @@
 
 use unicode_normalization::UnicodeNormalization;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// A single entry in the canonical CSV.
 pub struct CsvEntry {
     /// Voter display name (will be NFC-normalized on output).
@@ -19,7 +20,7 @@ pub struct CsvEntry {
 ///
 /// Entries are sorted by `pubkey_bs58` in lexicographic (string) order.
 /// Each line is `"{name},{option}"` with LF line endings, no trailing newline.
-/// Names are NFC-normalized before output.
+/// Names and option text are NFC-normalized before output.
 pub fn serialize_canonical_csv(entries: &[CsvEntry]) -> String {
     let mut sorted: Vec<&CsvEntry> = entries.iter().collect();
     sorted.sort_by(|a, b| a.pubkey_bs58.cmp(&b.pubkey_bs58));
@@ -28,7 +29,8 @@ pub fn serialize_canonical_csv(entries: &[CsvEntry]) -> String {
         .iter()
         .map(|e| {
             let nfc_name: String = e.name.nfc().collect();
-            format!("{},{}", nfc_name, e.option)
+            let nfc_option: String = e.option.nfc().collect();
+            format!("{},{}", nfc_name, nfc_option)
         })
         .collect();
 
@@ -44,17 +46,17 @@ mod tests {
         let entries_a = vec![
             CsvEntry {
                 name: "Zara".into(),
-                option: "opt-a".into(),
+                option: "Option A".into(),
                 pubkey_bs58: "BBB".into(),
             },
             CsvEntry {
                 name: "Alice".into(),
-                option: "opt-b".into(),
+                option: "Option B".into(),
                 pubkey_bs58: "AAA".into(),
             },
             CsvEntry {
                 name: "Mika".into(),
-                option: "opt-c".into(),
+                option: "Option C".into(),
                 pubkey_bs58: "CCC".into(),
             },
         ];
@@ -63,17 +65,17 @@ mod tests {
         let entries_b = vec![
             CsvEntry {
                 name: "Mika".into(),
-                option: "opt-c".into(),
+                option: "Option C".into(),
                 pubkey_bs58: "CCC".into(),
             },
             CsvEntry {
                 name: "Alice".into(),
-                option: "opt-b".into(),
+                option: "Option B".into(),
                 pubkey_bs58: "AAA".into(),
             },
             CsvEntry {
                 name: "Zara".into(),
-                option: "opt-a".into(),
+                option: "Option A".into(),
                 pubkey_bs58: "BBB".into(),
             },
         ];
@@ -85,7 +87,7 @@ mod tests {
             csv_a, csv_b,
             "different input order must produce identical output"
         );
-        assert_eq!(csv_a, "Alice,opt-b\nZara,opt-a\nMika,opt-c");
+        assert_eq!(csv_a, "Alice,Option B\nZara,Option A\nMika,Option C");
     }
 
     #[test]
@@ -94,12 +96,12 @@ mod tests {
         // NFC: U+00E9 = 'é'
         let entries = vec![CsvEntry {
             name: "caf\u{0065}\u{0301}".into(), // NFD form
-            option: "opt-x".into(),
+            option: "Option X".into(),
             pubkey_bs58: "AAA".into(),
         }];
 
         let csv = serialize_canonical_csv(&entries);
-        assert_eq!(csv, "caf\u{00e9},opt-x", "name should be NFC-normalized");
+        assert_eq!(csv, "caf\u{00e9},Option X", "name should be NFC-normalized");
     }
 
     #[test]
