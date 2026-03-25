@@ -75,17 +75,17 @@ enum Command {
         #[arg(long)]
         csv: PathBuf,
 
-        /// Path to the voter names file.
+        /// Path to the public voter registry workbook.
         #[arg(long)]
         voters: PathBuf,
 
-        /// Path to the encrypted poll bundle.
+        /// Path to the age-encrypted bounty secret.
         #[arg(long)]
         encrypted: PathBuf,
 
-        /// Path to the bounty challenge TOML config.
+        /// Path to manifest.json from the public challenge artifacts.
         #[arg(long)]
-        config: PathBuf,
+        manifest: PathBuf,
     },
 
     /// Audit the generated artifacts for correctness.
@@ -102,9 +102,13 @@ enum Command {
     /// Runs only the KDF chain (CSV → SHA3-512 → Argon2id → age Identity)
     /// and outputs the derived `age1...` public key to stdout.
     DeriveIdentity {
-        /// Path to the bounty challenge TOML config.
+        /// Path to the public voter registry workbook.
         #[arg(long)]
-        config: PathBuf,
+        voters: PathBuf,
+
+        /// Path to manifest.json from the public challenge artifacts.
+        #[arg(long)]
+        manifest: PathBuf,
     },
 }
 
@@ -128,12 +132,12 @@ fn main() -> Result<()> {
         } => cmd_generate(&config, &output_dir, secret_file.as_deref()),
         Command::VerifySolution {
             csv,
-            voters: _,
+            voters,
             encrypted,
-            config,
-        } => cmd_verify_solution(&csv, &encrypted, &config),
+            manifest,
+        } => cmd_verify_solution(&csv, &voters, &encrypted, &manifest),
         Command::AuditArtifacts { dir } => cmd_audit_artifacts(&dir),
-        Command::DeriveIdentity { config } => cmd_derive_identity(&config),
+        Command::DeriveIdentity { voters, manifest } => cmd_derive_identity(&voters, &manifest),
     }
 }
 
@@ -246,24 +250,31 @@ fn cmd_generate(
 
 fn cmd_verify_solution(
     csv_path: &std::path::Path,
+    voters_path: &std::path::Path,
     encrypted_path: &std::path::Path,
-    config_path: &std::path::Path,
+    manifest_path: &std::path::Path,
 ) -> Result<()> {
-    use mandate_bounty::config::BountyConfig;
+    use mandate_bounty::manifest::load_manifest;
     use mandate_bounty::verify::verify_solution;
 
-    let config = BountyConfig::load(config_path)?;
+    let manifest = load_manifest(manifest_path)?;
 
     eprintln!("Verifying solution...");
     eprintln!("  CSV:       {}", csv_path.display());
+    eprintln!("  Voters:    {}", voters_path.display());
     eprintln!("  Encrypted: {}", encrypted_path.display());
-    eprintln!("  KDF salt:  {}", config.kdf.salt);
+    eprintln!("  Manifest:  {}", manifest_path.display());
+    eprintln!("  KDF salt:  {}", manifest.kdf.salt);
 
-    match verify_solution(csv_path, encrypted_path, &config.kdf) {
-        Ok(plaintext) => {
+    match verify_solution(csv_path, voters_path, encrypted_path, &manifest) {
+        Ok(outcome) => {
             eprintln!("Verification PASSED — decryption succeeded.");
+            if outcome.was_reordered {
+                eprintln!("  Input CSV was reordered into canonical pubkey order via voters.xlsx.");
+            }
+            eprintln!("  Derived key matches manifest: {}", outcome.derived_pubkey);
             // Write decrypted content to stdout.
-            let text = String::from_utf8_lossy(&plaintext);
+            let text = String::from_utf8_lossy(&outcome.plaintext);
             println!("{text}");
             Ok(())
         }
@@ -313,13 +324,17 @@ fn cmd_audit_artifacts(dir: &std::path::Path) -> Result<()> {
 // derive-identity
 // ---------------------------------------------------------------------------
 
-fn cmd_derive_identity(config_path: &std::path::Path) -> Result<()> {
+fn cmd_derive_identity(
+    voters_path: &std::path::Path,
+    manifest_path: &std::path::Path,
+) -> Result<()> {
     use std::io::Read as _;
 
-    use mandate_bounty::config::BountyConfig;
     use mandate_bounty::derive_identity::derive_identity;
+    use mandate_bounty::manifest::load_manifest;
+    use mandate_bounty::verify::canonicalize_solution_csv_bytes;
 
-    let config = BountyConfig::load(config_path)?;
+    let manifest = load_manifest(manifest_path)?;
 
     // Read CSV from stdin.
     eprintln!("Reading CSV from stdin...");
@@ -328,9 +343,23 @@ fn cmd_derive_identity(config_path: &std::path::Path) -> Result<()> {
 
     anyhow::ensure!(!csv_buf.is_empty(), "stdin is empty — provide CSV content");
 
+    let canonicalized = canonicalize_solution_csv_bytes(&csv_buf, voters_path)?;
+    if canonicalized.was_reordered {
+        eprintln!("Reordered input into canonical pubkey order via voters.xlsx.");
+    }
+
     eprintln!("Running KDF chain (this may take a while)...");
-    let identity = derive_identity(&csv_buf, &config.kdf)?;
+    let identity = derive_identity(&canonicalized.bytes, &manifest.kdf.to_config()?)?;
     let pubkey = identity.to_public().to_string();
+
+    if pubkey == manifest.expected_age_pubkey {
+        eprintln!("Derived public key matches manifest expected_age_pubkey.");
+    } else {
+        eprintln!(
+            "Derived public key does not match manifest expected_age_pubkey (expected {}).",
+            manifest.expected_age_pubkey
+        );
+    }
 
     println!("{pubkey}");
 

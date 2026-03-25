@@ -29,7 +29,7 @@ pub struct SolutionEntry {
     pub pubkey_bs58: String,
     /// Voter display name (NFC-normalized).
     pub name: String,
-    /// The poll option id this voter selected.
+    /// The poll option English text this voter selected.
     pub option: String,
 }
 
@@ -69,12 +69,12 @@ mod tests {
                 SolutionEntry {
                     pubkey_bs58: "BBB".into(),
                     name: "Bob".into(),
-                    option: "opt-a".into(),
+                    option: "Option A".into(),
                 },
                 SolutionEntry {
                     pubkey_bs58: "AAA".into(),
                     name: "Alice".into(),
-                    option: "opt-b".into(),
+                    option: "Option B".into(),
                 },
             ],
             voter_private_keys: vec![],
@@ -83,7 +83,7 @@ mod tests {
         let entries = bundle.to_csv_entries();
         let csv = serialize_canonical_csv(&entries);
         // Sorted by pubkey_bs58: AAA first, then BBB
-        assert_eq!(csv, "Alice,opt-b\nBob,opt-a");
+        assert_eq!(csv, "Alice,Option B\nBob,Option A");
     }
 
     #[test]
@@ -93,7 +93,7 @@ mod tests {
             solution: vec![SolutionEntry {
                 pubkey_bs58: "ABC123".into(),
                 name: "Test".into(),
-                option: "opt-x".into(),
+                option: "Option X".into(),
             }],
             voter_private_keys: vec![VoterPrivateKey {
                 pubkey_bs58: "ABC123".into(),

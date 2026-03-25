@@ -25,6 +25,18 @@ pub enum ValidationError {
     #[error("duplicate option id: {id}")]
     DuplicateOptionId { id: String },
 
+    #[error("duplicate option text_en: {text}")]
+    DuplicateOptionTextEn { text: String },
+
+    #[error("option {id} has empty text_en")]
+    EmptyOptionTextEn { id: String },
+
+    #[error("option {id} text_en contains forbidden character: {description}")]
+    InvalidOptionTextEn {
+        id: String,
+        description: &'static str,
+    },
+
     #[error("unsupported normalization: {value} (only \"NFC\" is supported)")]
     UnsupportedNormalization { value: String },
 
@@ -160,9 +172,37 @@ impl BountyConfig {
 
         // 2. All option IDs unique
         let mut seen_ids = HashSet::with_capacity(self.poll.options.len());
+        let mut seen_text_en = HashSet::with_capacity(self.poll.options.len());
         for opt in &self.poll.options {
             if !seen_ids.insert(&opt.id) {
                 return Err(ValidationError::DuplicateOptionId { id: opt.id.clone() });
+            }
+
+            if opt.text_en.is_empty() {
+                return Err(ValidationError::EmptyOptionTextEn { id: opt.id.clone() });
+            }
+            if opt.text_en.contains(',') {
+                return Err(ValidationError::InvalidOptionTextEn {
+                    id: opt.id.clone(),
+                    description: "comma",
+                });
+            }
+            if opt.text_en.contains('\n') || opt.text_en.contains('\r') {
+                return Err(ValidationError::InvalidOptionTextEn {
+                    id: opt.id.clone(),
+                    description: "newline",
+                });
+            }
+            if opt.text_en.chars().any(|c| c.is_control()) {
+                return Err(ValidationError::InvalidOptionTextEn {
+                    id: opt.id.clone(),
+                    description: "control character",
+                });
+            }
+            if !seen_text_en.insert(&opt.text_en) {
+                return Err(ValidationError::DuplicateOptionTextEn {
+                    text: opt.text_en.clone(),
+                });
             }
         }
 
@@ -417,6 +457,104 @@ mod tests {
         assert!(
             matches!(err, ValidationError::NotNfcNormalized { index: 1 }),
             "expected NotNfcNormalized at index 1, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_duplicate_option_text_en() {
+        let toml = r#"
+[challenge]
+version = 1
+
+[poll]
+org_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+poll_ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAA"
+title_zh = "t"
+title_en = "t"
+
+[[poll.options]]
+id = "opt-a"
+text_zh = "A-zh"
+text_en = "Same"
+count = 1
+
+[[poll.options]]
+id = "opt-b"
+text_zh = "B-zh"
+text_en = "Same"
+count = 1
+
+[voters]
+total = 2
+names_file = "names.txt"
+normalization = "NFC"
+
+[kdf]
+salt = "salt"
+m_cost_mib = 1
+t_cost = 1
+p_cost = 1
+
+[bounty]
+total_usdc = 1
+instant_usdc = 1
+report_usdc = 0
+challenge_days = 1
+"#;
+        let cfg: BountyConfig = toml::from_str(toml).expect("parse");
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            matches!(err, ValidationError::DuplicateOptionTextEn { .. }),
+            "expected DuplicateOptionTextEn, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_option_text_en_rejects_commas() {
+        let toml = r#"
+[challenge]
+version = 1
+
+[poll]
+org_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+poll_ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAA"
+title_zh = "t"
+title_en = "t"
+
+[[poll.options]]
+id = "opt-a"
+text_zh = "A-zh"
+text_en = "With,Comma"
+count = 1
+
+[[poll.options]]
+id = "opt-b"
+text_zh = "B-zh"
+text_en = "Clean"
+count = 1
+
+[voters]
+total = 2
+names_file = "names.txt"
+normalization = "NFC"
+
+[kdf]
+salt = "salt"
+m_cost_mib = 1
+t_cost = 1
+p_cost = 1
+
+[bounty]
+total_usdc = 1
+instant_usdc = 1
+report_usdc = 0
+challenge_days = 1
+"#;
+        let cfg: BountyConfig = toml::from_str(toml).expect("parse");
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            matches!(err, ValidationError::InvalidOptionTextEn { .. }),
+            "expected InvalidOptionTextEn, got: {err:?}"
         );
     }
 }

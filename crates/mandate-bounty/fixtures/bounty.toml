@@ -10,13 +10,13 @@ title_en = "Does Xi Jinping Look Like Winnie the Pooh?"
 [[poll.options]]
 id = "opt-like"
 text_zh = "placeholder-like"
-text_en = "Yes, looks alike"
+text_en = "Looks alike"
 count = 600
 
 [[poll.options]]
 id = "opt-unlike"
 text_zh = "placeholder-unlike"
-text_en = "No, doesn't look alike"
+text_en = "Does not look alike"
 count = 200
 
 [[poll.options]]
