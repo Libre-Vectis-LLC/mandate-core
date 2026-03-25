@@ -33,7 +33,7 @@ normalization = "NFC"
 [kdf]
 salt = "mandate-bounty-v1"
 m_cost_mib = 4096
-t_cost = 24
+t_cost = 120
 p_cost = 1
 
 [bounty]
