@@ -28,7 +28,7 @@ impl PendingMemberStatus {
 pub struct MemberInfo {
     pub nazgul_pub: MasterPublicKey,
     pub identity: crate::event::MemberIdentity,
-    pub status: String, // "pending", "approved", "banned"
+    pub status: String, // "pending", "approved", "removed"
     pub joined_at_ms: i64,
 }
 
@@ -235,7 +235,7 @@ pub trait PendingMemberStore {
     ///
     /// # Errors
     /// * `StorageError::NotFound` - When invite code doesn't exist
-    /// * `StorageError::FailedPrecondition` - When invite code is expired, exhausted, or revoked
+    /// * `StorageError::PreconditionFailed` - When invite code is expired, exhausted, or revoked
     /// * `StorageError::Backend` - When the underlying storage layer fails
     ///
     /// # Invariants
