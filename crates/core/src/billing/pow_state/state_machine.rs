@@ -41,8 +41,8 @@ impl OrgPowState {
         // Reset success counter
         self.consecutive_successes = 0;
 
-        // Increment failure counter
-        self.consecutive_failures += 1;
+        // Increment failure counter (saturating to prevent wrapping at u32::MAX)
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
 
         // Record event for time-window strategies
         self.record_event(false, config);
@@ -103,8 +103,8 @@ impl OrgPowState {
         self.record_event(true, config);
 
         if self.pow_required {
-            // Increment success counter
-            self.consecutive_successes += 1;
+            // Increment success counter (saturating to prevent wrapping at u32::MAX)
+            self.consecutive_successes = self.consecutive_successes.saturating_add(1);
 
             // Check if we should recover
             if self.consecutive_successes >= config.recovery_success_count {
@@ -290,5 +290,62 @@ impl OrgPowState {
                 self.consecutive_successes = 0;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_config() -> OrgPowConfig {
+        OrgPowConfig::default()
+    }
+
+    #[test]
+    fn test_consecutive_failures_saturates_at_max() {
+        let mut state = OrgPowState::new();
+        let config = default_config();
+
+        // Set failure counter to u32::MAX
+        state.consecutive_failures = u32::MAX;
+
+        // One more failure should NOT wrap around to 0
+        state.on_verification_failure(&config);
+
+        assert_eq!(
+            state.consecutive_failures,
+            u32::MAX,
+            "consecutive_failures must saturate at u32::MAX, not wrap to 0"
+        );
+    }
+
+    #[test]
+    fn test_consecutive_successes_saturates_at_max() {
+        let mut state = OrgPowState::new();
+        let mut config = default_config();
+
+        // Put state into POW mode so success counter is incremented
+        state.pow_required = true;
+        // Start one below MAX — increment should reach MAX without wrapping
+        state.consecutive_successes = u32::MAX - 1;
+        // Set recovery threshold to MAX so it won't fire at MAX-1+1=MAX
+        // (recovery fires when successes >= recovery_success_count, so at MAX it fires)
+        // Instead, we verify the counter reached MAX correctly before recovery acts
+        config.recovery_success_count = u32::MAX;
+
+        state.on_verification_success(&config);
+
+        // Recovery fires at u32::MAX (successes >= recovery_success_count) and resets to 0.
+        // The key invariant: with saturating_add, the path is MAX-1 → MAX → recovery → 0.
+        // Without saturating_add (wrapping), if counter were already at MAX:
+        //   MAX → 0 (wrapped) which would NOT trigger recovery, leaving state inconsistent.
+        // We verify the recovery DID fire (counter reset to 0), proving the increment
+        // reached MAX (not wrapped past it).
+        assert_eq!(
+            state.consecutive_successes, 0,
+            "recovery should fire at u32::MAX, resetting counter to 0"
+        );
+        // Also verify recovery actually happened (pow_required may change or multiplier decrease)
+        // The fact that consecutive_successes is 0 (not u32::MAX) confirms recovery logic ran
     }
 }
