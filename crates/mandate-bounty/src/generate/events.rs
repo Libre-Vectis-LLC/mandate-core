@@ -86,6 +86,22 @@ pub fn generate_poll_bundle(
     let vote_ring = derive_poll_signing_ring(&org_id, &master_ring_hash, poll_id, &master_ring);
     let vote_ring_hash = ring_hash(&vote_ring);
 
+    // Validate that every solution option is a known config option ID.
+    let valid_option_ids: std::collections::HashSet<&str> = config
+        .poll
+        .options
+        .iter()
+        .map(|opt| opt.id.as_str())
+        .collect();
+    for entry in &bundle.solution {
+        anyhow::ensure!(
+            valid_option_ids.contains(entry.option.as_str()),
+            "solution option {:?} is not a valid poll option ID (valid: {:?})",
+            entry.option,
+            valid_option_ids
+        );
+    }
+
     // Build pubkey -> option_id mapping for vote generation.
     let vote_map: HashMap<&str, &str> = bundle
         .solution
