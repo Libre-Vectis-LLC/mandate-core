@@ -4,15 +4,20 @@ mod admin;
 mod auth;
 mod billing;
 mod event;
+pub mod invite;
 mod member;
 mod organization;
 mod ring;
 mod storage;
 
+#[cfg(test)]
+mod tests_invite;
+
 pub use admin::AdminServiceImpl;
 pub use auth::AuthServiceImpl;
 pub use billing::BillingServiceImpl;
 pub use event::EventServiceImpl;
+pub use invite::InviteServiceImpl;
 pub use member::MemberServiceImpl;
 pub use organization::OrganizationServiceImpl;
 pub use ring::RingServiceImpl;
