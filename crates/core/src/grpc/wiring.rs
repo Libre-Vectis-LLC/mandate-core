@@ -1,19 +1,20 @@
 use crate::grpc::inmemory::{
     InMemoryBanIndex, InMemoryBilling, InMemoryBundlePublished, InMemoryEvents, InMemoryGiftCards,
-    InMemoryKeyBlobs, InMemoryOrgs, InMemoryPendingMembers, InMemoryPollRingHashes, InMemoryRings,
-    InMemoryTenantTokens, InMemoryVoteKeyImages, InMemoryVoteRevocations,
+    InMemoryInviteCodeStore, InMemoryKeyBlobs, InMemoryOrgs, InMemoryPendingMembers,
+    InMemoryPollRingHashes, InMemoryRings, InMemoryTenantTokens, InMemoryVoteKeyImages,
+    InMemoryVoteRevocations,
 };
 use crate::grpc::interceptor::{make_bot_secret_interceptor, require_api_token};
 use crate::grpc::services::{
-    AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, MemberServiceImpl,
-    OrganizationServiceImpl, RingServiceImpl, StorageServiceImpl,
+    AdminServiceImpl, AuthServiceImpl, BillingServiceImpl, EventServiceImpl, InviteServiceImpl,
+    MemberServiceImpl, OrganizationServiceImpl, RingServiceImpl, StorageServiceImpl,
 };
 use crate::ids::{BotSecret, TenantId, TenantToken};
 use crate::storage::facade::{StorageFacade, StorageFacadeBuilderError};
 use mandate_proto::mandate::v1::{
     admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
     billing_service_server::BillingServiceServer, event_service_server::EventServiceServer,
-    member_service_server::MemberServiceServer,
+    invite_service_server::InviteServiceServer, member_service_server::MemberServiceServer,
     organization_service_server::OrganizationServiceServer, ring_service_server::RingServiceServer,
     storage_service_server::StorageServiceServer,
 };
@@ -42,6 +43,7 @@ pub struct CoreServices {
     pub billing: BillingServiceImpl,
     pub organization: OrganizationServiceImpl,
     pub member: MemberServiceImpl,
+    pub invite: InviteServiceImpl,
 }
 
 impl CoreServices {
@@ -79,6 +81,8 @@ impl CoreServices {
         let billing = Arc::new(InMemoryBilling::new(orgs.shared()));
         let verifier = Arc::new(crate::crypto::verifier::LocalSignatureVerifier);
 
+        let invite_codes = Arc::new(InMemoryInviteCodeStore::new());
+
         let facade = StorageFacade::builder()
             .tenant_tokens(tenant_tokens)
             .event_storage(events.clone(), events)
@@ -93,6 +97,7 @@ impl CoreServices {
             .gift_cards(gift_cards)
             .orgs(orgs)
             .pending_members(pending_members)
+            .invite_codes(invite_codes)
             .build()?;
 
         Ok(Self {
@@ -104,6 +109,7 @@ impl CoreServices {
             billing: BillingServiceImpl::new(facade.clone()),
             organization: OrganizationServiceImpl::new(facade.clone()),
             member: MemberServiceImpl::new(facade.clone()),
+            invite: InviteServiceImpl::new(facade.clone()),
         })
     }
 }
@@ -113,6 +119,7 @@ pub fn run_public_server(
     ring: RingServiceImpl,
     storage: StorageServiceImpl,
     member: MemberServiceImpl, // ListPendingMembers is public
+    invite: InviteServiceImpl,
     addr: SocketAddr,
 ) -> impl std::future::Future<Output = Result<(), tonic::transport::Error>> {
     let max_bytes = grpc_max_message_bytes();
@@ -136,6 +143,11 @@ pub fn run_public_server(
         ))
         .add_service(tonic_web::enable(
             MemberServiceServer::new(member)
+                .max_decoding_message_size(max_bytes)
+                .max_encoding_message_size(max_bytes),
+        ))
+        .add_service(tonic_web::enable(
+            InviteServiceServer::new(invite)
                 .max_decoding_message_size(max_bytes)
                 .max_encoding_message_size(max_bytes),
         ))

@@ -13,6 +13,7 @@ pub use facade::{StorageFacade, StorageFacadeBuilder, StorageFacadeBuilderError}
 pub mod billing;
 pub mod event;
 pub mod index;
+pub mod invite_code;
 pub mod keys;
 pub mod organization;
 pub mod ring;
@@ -44,3 +45,5 @@ pub use index::{
     BanIndex, BannedOperation, BundlePublishedIndex, PollRingHashIndex, VoteKeyImageIndex,
     VoteRevocationIndex, MAX_BANS_PER_RING_HASH,
 };
+
+pub use invite_code::{CreateInviteCodeParams, InviteCodeEntry, InviteCodeStore};
