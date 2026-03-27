@@ -25,6 +25,15 @@ pub enum ValidationError {
     #[error("duplicate option id: {id}")]
     DuplicateOptionId { id: String },
 
+    #[error("option id is empty")]
+    EmptyOptionId,
+
+    #[error("option id {id:?} contains forbidden character: {description}")]
+    InvalidOptionId {
+        id: String,
+        description: &'static str,
+    },
+
     #[error("duplicate option text_en: {text}")]
     DuplicateOptionTextEn { text: String },
 
@@ -170,10 +179,25 @@ impl BountyConfig {
             });
         }
 
-        // 2. All option IDs unique
+        // 2. All option IDs unique and CSV-safe (ids are used in canonical CSV)
         let mut seen_ids = HashSet::with_capacity(self.poll.options.len());
         let mut seen_text_en = HashSet::with_capacity(self.poll.options.len());
         for opt in &self.poll.options {
+            if opt.id.is_empty() {
+                return Err(ValidationError::EmptyOptionId);
+            }
+            if opt.id.contains(',') {
+                return Err(ValidationError::InvalidOptionId {
+                    id: opt.id.clone(),
+                    description: "comma",
+                });
+            }
+            if opt.id.contains('\n') || opt.id.contains('\r') {
+                return Err(ValidationError::InvalidOptionId {
+                    id: opt.id.clone(),
+                    description: "newline",
+                });
+            }
             if !seen_ids.insert(&opt.id) {
                 return Err(ValidationError::DuplicateOptionId { id: opt.id.clone() });
             }

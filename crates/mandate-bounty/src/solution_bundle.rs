@@ -29,7 +29,7 @@ pub struct SolutionEntry {
     pub pubkey_bs58: String,
     /// Voter display name (NFC-normalized).
     pub name: String,
-    /// The poll option English text this voter selected.
+    /// The poll option ID this voter selected (e.g., "opt-like").
     pub option: String,
 }
 

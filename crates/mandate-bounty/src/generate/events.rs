@@ -86,17 +86,11 @@ pub fn generate_poll_bundle(
     let vote_ring = derive_poll_signing_ring(&org_id, &master_ring_hash, poll_id, &master_ring);
     let vote_ring_hash = ring_hash(&vote_ring);
 
-    // Build pubkey -> option mapping for vote generation.
+    // Build pubkey -> option_id mapping for vote generation.
     let vote_map: HashMap<&str, &str> = bundle
         .solution
         .iter()
         .map(|e| (e.pubkey_bs58.as_str(), e.option.as_str()))
-        .collect();
-    let option_text_to_id: HashMap<&str, &str> = config
-        .poll
-        .options
-        .iter()
-        .map(|opt| (opt.text_en.as_str(), opt.id.as_str()))
         .collect();
 
     // Sign all VoteCast events in randomized order.
@@ -116,15 +110,9 @@ pub fn generate_poll_bundle(
     for (progress, &voter_idx) in gen_order.iter().enumerate() {
         let kp = &keypairs[voter_idx];
         let pubkey_bs58 = LocalByteConvertible::to_base58(kp.public());
-        let option_text = vote_map
+        let option_id = vote_map
             .get(pubkey_bs58.as_str())
             .ok_or_else(|| anyhow::anyhow!("voter {voter_idx} pubkey not found in solution"))?;
-        let option_id = option_text_to_id.get(option_text).ok_or_else(|| {
-            anyhow::anyhow!(
-                "solution option text {:?} does not match any poll option text_en",
-                option_text
-            )
-        })?;
 
         let vote_signer = kp.derive_poll_signing(&org_id, &master_ring_hash, poll_id);
         let event_bytes = sign_vote_cast(
