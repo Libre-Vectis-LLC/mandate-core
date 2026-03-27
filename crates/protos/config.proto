@@ -1,6 +1,9 @@
 syntax = "proto3";
 package mandate.v1;
 
+// Internal service: Used by mandate-teloxide-audit-helper for runtime hot-reload
+// configuration management. Not registered in mandate-server or mandate-enterprise.
+//
 // ConfigService provides hot-reloadable configuration management.
 //
 // ## Purpose
