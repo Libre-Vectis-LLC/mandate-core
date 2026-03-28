@@ -46,17 +46,17 @@ mod tests {
         let entries_a = vec![
             CsvEntry {
                 name: "Zara".into(),
-                option: "Option A".into(),
+                option: "opt-a".into(),
                 pubkey_bs58: "BBB".into(),
             },
             CsvEntry {
                 name: "Alice".into(),
-                option: "Option B".into(),
+                option: "opt-b".into(),
                 pubkey_bs58: "AAA".into(),
             },
             CsvEntry {
                 name: "Mika".into(),
-                option: "Option C".into(),
+                option: "opt-c".into(),
                 pubkey_bs58: "CCC".into(),
             },
         ];
@@ -65,17 +65,17 @@ mod tests {
         let entries_b = vec![
             CsvEntry {
                 name: "Mika".into(),
-                option: "Option C".into(),
+                option: "opt-c".into(),
                 pubkey_bs58: "CCC".into(),
             },
             CsvEntry {
                 name: "Alice".into(),
-                option: "Option B".into(),
+                option: "opt-b".into(),
                 pubkey_bs58: "AAA".into(),
             },
             CsvEntry {
                 name: "Zara".into(),
-                option: "Option A".into(),
+                option: "opt-a".into(),
                 pubkey_bs58: "BBB".into(),
             },
         ];
@@ -87,7 +87,7 @@ mod tests {
             csv_a, csv_b,
             "different input order must produce identical output"
         );
-        assert_eq!(csv_a, "Alice,Option B\nZara,Option A\nMika,Option C");
+        assert_eq!(csv_a, "Alice,opt-b\nZara,opt-a\nMika,opt-c");
     }
 
     #[test]
